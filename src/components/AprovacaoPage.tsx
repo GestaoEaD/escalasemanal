@@ -17,8 +17,16 @@ import {
   normalizeEscalaStatus,
   requestRevisionScale,
 } from "../utils/approvalService";
+import {
+  evaluateSolicitacaoAccess,
+  getSolicitacaoByToken,
+  solicitacaoErrorMessage,
+  tipoEscalaFromDocumento,
+} from "../utils/solicitacaoAprovacaoService";
+import { auditAbrirLinkAprovacao } from "../utils/auditService";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
+import { SolicitacaoAprovacao } from "../types";
 import StatusBadge from "./StatusBadge";
 import {
   CheckCircle,
@@ -30,8 +38,11 @@ import {
 } from "lucide-react";
 
 interface AprovacaoPageProps {
-  escalaId: string;
-  tipo: TipoEscalaDocumento;
+  /** Token do link /aprovacao/{token} (preferencial). */
+  token?: string | null;
+  /** Legado: escalaId quando a URL antiga ainda é usada. */
+  escalaId?: string | null;
+  tipo?: TipoEscalaDocumento;
   usuario: Usuario;
   onBack: () => void;
   onLogout: () => void;
@@ -96,14 +107,20 @@ function ReadOnlyScheduleTable({
 }
 
 export default function AprovacaoPage({
-  escalaId,
-  tipo,
+  token,
+  escalaId: legacyEscalaId,
+  tipo: legacyTipo = "semanal",
   usuario,
   onBack,
   onLogout,
 }: AprovacaoPageProps) {
   const [loading, setLoading] = useState(true);
   const [escala, setEscala] = useState<EscalaDocument | null>(null);
+  const [escalaId, setEscalaId] = useState<string>(legacyEscalaId || "");
+  const [tipo, setTipo] = useState<TipoEscalaDocumento>(legacyTipo);
+  const [solicitacao, setSolicitacao] = useState<SolicitacaoAprovacao | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [consultaOnly, setConsultaOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -124,17 +141,94 @@ export default function AprovacaoPage({
   const reload = async () => {
     setLoading(true);
     setError(null);
+    setGateError(null);
+    setConsultaOnly(false);
     try {
-      const docData = await loadEscalaDocumento(escalaId, tipo);
+      let resolvedId = legacyEscalaId || "";
+      let resolvedTipo: TipoEscalaDocumento = legacyTipo;
+      let sol: SolicitacaoAprovacao | null = null;
+
+      if (token) {
+        sol = await getSolicitacaoByToken(token);
+        const access = evaluateSolicitacaoAccess(sol);
+
+        if (access.ok === false) {
+          if (access.code === "INEXISTENTE") {
+            setSolicitacao(null);
+            setEscala(null);
+            setGateError(solicitacaoErrorMessage("INEXISTENTE"));
+            return;
+          }
+          if (!allowed) {
+            setSolicitacao(access.sol || sol);
+            setEscala(null);
+            setGateError("Você não possui permissão para aprovar escalas.");
+            return;
+          }
+          if (access.code === "EXPIRADA") {
+            setSolicitacao(access.sol || sol);
+            setEscala(null);
+            setGateError(solicitacaoErrorMessage("EXPIRADA"));
+            return;
+          }
+          // FINALIZADA → consulta
+          sol = access.sol || sol;
+          setConsultaOnly(true);
+        }
+
+        if (!sol) {
+          setGateError(solicitacaoErrorMessage("INEXISTENTE"));
+          return;
+        }
+
+        if (!allowed) {
+          setSolicitacao(sol);
+          setEscala(null);
+          setGateError("Você não possui permissão para aprovar escalas.");
+          return;
+        }
+
+        resolvedId = sol.escalaId;
+        resolvedTipo = tipoEscalaFromDocumento(sol.tipoDocumento);
+        setSolicitacao(sol);
+        setEscalaId(resolvedId);
+        setTipo(resolvedTipo);
+
+        void auditAbrirLinkAprovacao({
+          usuario,
+          tipoDoc: resolvedTipo,
+          anoSemana: resolvedId,
+          versao: sol.versao,
+          solicitacaoId: token,
+          detalhes: access.ok
+            ? "Abertura do link (solicitação ativa)"
+            : `Abertura em consulta · ${sol.resultado || "FINALIZADA"}`,
+        }).catch((err) => console.warn("Falha ao auditar abertura do link:", err));
+      } else if (resolvedId) {
+        if (!allowed) {
+          setGateError("Você não possui permissão para aprovar escalas.");
+          return;
+        }
+        setEscalaId(resolvedId);
+        setTipo(resolvedTipo);
+      } else {
+        setGateError("Solicitação inexistente.");
+        return;
+      }
+
+      const docData = await loadEscalaDocumento(resolvedId, resolvedTipo);
       if (!docData) {
         setEscala(null);
-        setError(`${docLabel} não encontrada.`);
+        setError(`${getEscalaDocumentoLabel(resolvedTipo)} não encontrada.`);
       } else {
         setEscala(docData);
+        if (!isApprovalRequestOpen(docData)) {
+          setConsultaOnly(true);
+        }
       }
     } catch (e) {
       console.error(e);
-      setError(`Erro ao carregar a ${docLabel}.`);
+      setError("Erro ao carregar a solicitação de aprovação.");
     } finally {
       setLoading(false);
     }
@@ -142,15 +236,25 @@ export default function AprovacaoPage({
 
   useEffect(() => {
     reload();
-  }, [escalaId, tipo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, legacyEscalaId, legacyTipo, usuario.re]);
 
   const status = normalizeEscalaStatus(escala?.status);
-  const requestOpen = isApprovalRequestOpen(escala);
+  const requestOpen = isApprovalRequestOpen(escala) && !consultaOnly;
   const canAct = allowed && requestOpen && !busy;
   const semanaLabel = escala
     ? `Semana ${String(escala.semana).padStart(2, "0")}/${escala.ano}`
     : escalaId;
   const revisaoInfo = getRevisaoInfo(escala?.aprovacao);
+
+  const resultadoLabel =
+    solicitacao?.resultado === "APROVADA"
+      ? "APROVADA"
+      : solicitacao?.resultado === "REVISAO_SOLICITADA"
+        ? "REVISÃO SOLICITADA"
+        : solicitacao?.resultado === "CANCELADA"
+          ? "CANCELADA"
+          : ESCALA_STATUS_LABELS[status]?.toUpperCase() || status;
 
   const openConfirm = (mode: "approve" | "revisao") => {
     if (!requestOpen) {
@@ -173,7 +277,7 @@ export default function AprovacaoPage({
   };
 
   const handleConfirm = async () => {
-    if (!confirmMode) return;
+    if (!confirmMode || !escalaId) return;
     setConfirmError(null);
 
     if (!confirmGestorRe(usuario, confirmRe)) {
@@ -213,14 +317,43 @@ export default function AprovacaoPage({
     }
   };
 
-  if (!allowed) {
+  if (gateError && !loading) {
+    const isPerm = gateError.includes("permissão");
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <div className="bg-white border border-red-200 rounded-xl shadow-sm max-w-md w-full p-8 text-center">
+          <ShieldAlert className="mx-auto text-red-500 mb-4" size={40} />
+          <h1 className="text-lg font-bold text-gray-900 mb-2">
+            {isPerm ? "Acesso negado" : "Solicitação"}
+          </h1>
+          <p className="text-sm text-gray-600 mb-6 whitespace-pre-line">{gateError}</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={onBack}
+              className="px-4 py-2 text-xs font-bold bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+            >
+              Voltar
+            </button>
+            <button
+              onClick={onLogout}
+              className="px-4 py-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg cursor-pointer"
+            >
+              Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!allowed && !loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
         <div className="bg-white border border-red-200 rounded-xl shadow-sm max-w-md w-full p-8 text-center">
           <ShieldAlert className="mx-auto text-red-500 mb-4" size={40} />
           <h1 className="text-lg font-bold text-gray-900 mb-2">Acesso negado</h1>
           <p className="text-sm text-gray-600 mb-6">
-            Você não possui permissão para aprovar esta escala.
+            Você não possui permissão para aprovar escalas.
           </p>
           <div className="flex gap-3 justify-center">
             <button
@@ -303,7 +436,24 @@ export default function AprovacaoPage({
           </div>
         )}
 
-        {escala && !loading && !requestOpen && (
+        {escala && !loading && consultaOnly && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 flex items-start gap-2 text-sm font-semibold">
+            <Lock className="shrink-0 mt-0.5 text-amber-600" size={18} />
+            <div>
+              <div>Esta solicitação já foi finalizada.</div>
+              <p className="text-xs font-medium text-amber-800 mt-1">
+                Status: <b>{resultadoLabel}</b>. O link permanece disponível apenas para consulta.
+              </p>
+              {status === "revisao_solicitada" && revisaoInfo.motivo && (
+                <p className="text-xs font-medium text-orange-800 mt-2 whitespace-pre-wrap">
+                  Motivo: {revisaoInfo.motivo}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {escala && !loading && !requestOpen && !consultaOnly && (
           <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 flex items-start gap-2 text-sm font-semibold">
             <Lock className="shrink-0 mt-0.5 text-amber-600" size={18} />
             <div>
@@ -336,14 +486,6 @@ export default function AprovacaoPage({
                   <div>
                     Versão <b className="text-gray-800">v{escala.versao || 1}</b>
                   </div>
-                  {escala.aprovacao?.solicitacaoId && (
-                    <div
-                      className="font-mono text-[10px] mt-0.5 max-w-[220px] truncate"
-                      title={escala.aprovacao.solicitacaoId}
-                    >
-                      ID: {escala.aprovacao.solicitacaoId}
-                    </div>
-                  )}
                 </div>
               </div>
 

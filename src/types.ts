@@ -154,6 +154,45 @@ export const TIPO_ESCALA_LABELS: Record<TipoEscalaDocumento, string> = {
   alteracao: "Escala Alteração",
 };
 
+/** Tipo do documento na coleção solicitacoes_aprovacao. */
+export type SolicitacaoTipoDocumento = "ESCALA_SEMANAL" | "ESCALA_ALTERACAO";
+
+export type SolicitacaoAprovacaoStatus = "AGUARDANDO" | "FINALIZADA";
+
+export type SolicitacaoAprovacaoResultado =
+  | "APROVADA"
+  | "REVISAO_SOLICITADA"
+  | "CANCELADA"
+  | null;
+
+/** Documento em solicitacoes_aprovacao — link exclusivo por token. */
+export interface SolicitacaoAprovacao {
+  token: string;
+  tipoDocumento: SolicitacaoTipoDocumento;
+  semana: number;
+  ano: number;
+  escalaId: string;
+  versao: number;
+  status: SolicitacaoAprovacaoStatus;
+  criadoPor: {
+    nome: string;
+    re: string;
+    postoGrad?: string;
+  };
+  criadoEm: any;
+  expiraEm: any;
+  utilizado: boolean;
+  resultado?: SolicitacaoAprovacaoResultado;
+  finalizadoPor?: {
+    nome: string;
+    re: string;
+    postoGrad?: string;
+  } | null;
+  finalizadoEm?: any;
+  dataFinalizacao?: string;
+  horaFinalizacao?: string;
+}
+
 /** Item interno de alteração dentro de uma operação de auditoria. */
 export interface AuditAlteracao {
   campo: string;
@@ -184,6 +223,7 @@ export type AuditOperacaoTipo =
   | "CRIAR_USUARIO"
   | "EDITAR_USUARIO"
   | "EXCLUIR_USUARIO"
+  | "ABRIR_LINK_APROVACAO"
   | "OPERACAO_LEGADA";
 
 export type AuditDocumentoTipo = "SEMANAL" | "ALTERACAO" | "CONFIGURACAO" | "SISTEMA" | "AUTENTICACAO";
@@ -269,6 +309,7 @@ export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
   CRIAR_USUARIO: "Criar Usuário",
   EDITAR_USUARIO: "Editar Usuário",
   EXCLUIR_USUARIO: "Excluir Usuário",
+  ABRIR_LINK_APROVACAO: "Abriu Link Aprovação",
   OPERACAO_LEGADA: "Operação",
 };
 

@@ -4,7 +4,11 @@ import { TipoEscalaDocumento, Usuario } from "./types";
 import { WeekInfo } from "./utils/dateUtils";
 import { canAccessConfig } from "./utils/permissions";
 import { auditAuth } from "./utils/auditService";
-import { parseApprovalPath } from "./utils/approvalService";
+import {
+  parseApprovalPath,
+  resolveActiveApprovalToken,
+} from "./utils/approvalService";
+import { buildTokenApprovalPath } from "./utils/solicitacaoAprovacaoService";
 import Login from "./components/Login";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
@@ -29,11 +33,14 @@ export default function App() {
   const [currentView, setCurrentView] = useState<"selector" | "editor" | "config" | "aprovacao">(
     () => (initialApproval ? "aprovacao" : "selector")
   );
-  const [approvalEscalaId, setApprovalEscalaId] = useState<string | null>(
-    () => initialApproval?.escalaId ?? null
+  const [approvalToken, setApprovalToken] = useState<string | null>(() =>
+    initialApproval?.mode === "token" ? initialApproval.token : null
   );
-  const [approvalTipo, setApprovalTipo] = useState<TipoEscalaDocumento>(
-    () => initialApproval?.tipo ?? "semanal"
+  const [approvalEscalaId, setApprovalEscalaId] = useState<string | null>(() =>
+    initialApproval?.mode === "legacy" ? initialApproval.escalaId : null
+  );
+  const [approvalTipo, setApprovalTipo] = useState<TipoEscalaDocumento>(() =>
+    initialApproval?.mode === "legacy" ? initialApproval.tipo : "semanal"
   );
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedWeek, setSelectedWeek] = useState<WeekInfo | null>(null);
@@ -45,11 +52,17 @@ export default function App() {
   useEffect(() => {
     const onPopState = () => {
       const parsed = parseApprovalPath(window.location.pathname);
-      if (parsed) {
+      if (parsed?.mode === "token") {
+        setApprovalToken(parsed.token);
+        setApprovalEscalaId(null);
+        setCurrentView("aprovacao");
+      } else if (parsed?.mode === "legacy") {
+        setApprovalToken(null);
         setApprovalEscalaId(parsed.escalaId);
         setApprovalTipo(parsed.tipo);
         setCurrentView("aprovacao");
       } else if (currentView === "aprovacao") {
+        setApprovalToken(null);
         setApprovalEscalaId(null);
         setCurrentView("selector");
       }
@@ -62,14 +75,30 @@ export default function App() {
     if (window.location.pathname !== "/") {
       window.history.pushState({}, "", "/");
     }
+    setApprovalToken(null);
     setApprovalEscalaId(null);
     setCurrentView("selector");
   };
 
-  const openApproval = (escalaId: string, tipo: TipoEscalaDocumento = "semanal") => {
-    const path = `/aprovacao/${tipo}/${encodeURIComponent(escalaId)}`;
+  /** Abre aprovação pelo token do link (ou resolve a partir da escala). */
+  const openApproval = async (
+    escalaIdOrToken: string,
+    tipo: TipoEscalaDocumento = "semanal"
+  ) => {
+    let token = escalaIdOrToken.trim();
+    // Se parecer ID de escala (ano_semana), resolver token ativo
+    if (/^\d{4}_\d{1,2}$/.test(token)) {
+      const resolved = await resolveActiveApprovalToken(token, tipo);
+      if (!resolved) {
+        alert("Não há solicitação ativa com link para este documento.");
+        return;
+      }
+      token = resolved;
+    }
+    const path = buildTokenApprovalPath(token);
     window.history.pushState({}, "", path);
-    setApprovalEscalaId(escalaId);
+    setApprovalToken(token);
+    setApprovalEscalaId(null);
     setApprovalTipo(tipo);
     setCurrentView("aprovacao");
   };
@@ -91,7 +120,12 @@ export default function App() {
       console.warn("Falha ao registrar login na auditoria:", err)
     );
     const pending = parseApprovalPath(window.location.pathname);
-    if (pending) {
+    if (pending?.mode === "token") {
+      setApprovalToken(pending.token);
+      setApprovalEscalaId(null);
+      setCurrentView("aprovacao");
+    } else if (pending?.mode === "legacy") {
+      setApprovalToken(null);
       setApprovalEscalaId(pending.escalaId);
       setApprovalTipo(pending.tipo);
       setCurrentView("aprovacao");
@@ -119,13 +153,15 @@ export default function App() {
     setCurrentView("editor");
   };
 
+  // Sem usuário: login (URL de aprovação permanece no browser)
   if (!usuario) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
-  if (currentView === "aprovacao" && approvalEscalaId) {
+  if (currentView === "aprovacao" && (approvalToken || approvalEscalaId)) {
     return (
       <AprovacaoPage
+        token={approvalToken}
         escalaId={approvalEscalaId}
         tipo={approvalTipo}
         usuario={usuario}

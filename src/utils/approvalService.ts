@@ -22,6 +22,12 @@ import { normalizeRe } from "./reUtils";
 import { prepareFirestoreWrite } from "./firestoreSanitize";
 import { cleanAprovacao, cleanHistorico } from "./escalaPayload";
 import { auditWorkflowEscala, statusLabel } from "./auditService";
+import {
+  createApprovalToken,
+  createSolicitacaoAprovacao,
+  finalizeSolicitacaoAprovacao,
+  getTokenApprovalUrl,
+} from "./solicitacaoAprovacaoService";
 
 export type EscalaCollectionName = "escalas_semanais" | "escalas_alteracao";
 
@@ -39,37 +45,48 @@ export function normalizeTipoEscalaDocumento(
   return value === "alteracao" ? "alteracao" : "semanal";
 }
 
-/** URL canônica: /aprovacao/{tipo}/{escalaId}. Aceita legado /aprovacao/{escalaId} → semanal. */
-export function parseApprovalPath(
-  pathname: string
-): { escalaId: string; tipo: TipoEscalaDocumento } | null {
+/** URL canônica: /aprovacao/{token}. Aceita legado /aprovacao/{tipo}/{escalaId}. */
+export type ApprovalPathParsed =
+  | { mode: "token"; token: string }
+  | { mode: "legacy"; escalaId: string; tipo: TipoEscalaDocumento };
+
+export function parseApprovalPath(pathname: string): ApprovalPathParsed | null {
   const typed = pathname.match(/^\/aprovacao\/(semanal|alteracao)\/([^/]+)\/?$/i);
   if (typed) {
     try {
       return {
+        mode: "legacy",
         tipo: normalizeTipoEscalaDocumento(typed[1]),
         escalaId: decodeURIComponent(typed[2]),
       };
     } catch {
       return {
+        mode: "legacy",
         tipo: normalizeTipoEscalaDocumento(typed[1]),
         escalaId: typed[2],
       };
     }
   }
-  const legacy = pathname.match(/^\/aprovacao\/([^/]+)\/?$/i);
-  if (legacy) {
-    const seg = legacy[1];
+  const single = pathname.match(/^\/aprovacao\/([^/]+)\/?$/i);
+  if (single) {
+    const seg = single[1];
     if (/^(semanal|alteracao)$/i.test(seg)) return null;
+    let decoded = seg;
     try {
-      return { tipo: "semanal", escalaId: decodeURIComponent(seg) };
+      decoded = decodeURIComponent(seg);
     } catch {
-      return { tipo: "semanal", escalaId: seg };
+      /* keep */
     }
+    // Links antigos: /aprovacao/2026_29
+    if (/^\d{4}_\d{1,2}$/.test(decoded)) {
+      return { mode: "legacy", tipo: "semanal", escalaId: decoded };
+    }
+    return { mode: "token", token: decoded };
   }
   return null;
 }
 
+/** @deprecated Preferir buildTokenApprovalPath — mantido para compatibilidade. */
 export function buildApprovalPath(
   escalaId: string,
   tipo: TipoEscalaDocumento = "semanal"
@@ -77,6 +94,7 @@ export function buildApprovalPath(
   return `/aprovacao/${tipo}/${encodeURIComponent(escalaId)}`;
 }
 
+/** @deprecated Preferir getTokenApprovalUrl. */
 export function getApprovalUrl(
   escalaId: string,
   tipo: TipoEscalaDocumento = "semanal"
@@ -85,11 +103,25 @@ export function getApprovalUrl(
   return `${window.location.origin}${buildApprovalPath(escalaId, tipo)}`;
 }
 
+/** Gera token aleatório (também usado como solicitacaoId no documento da escala). */
 export function createSolicitacaoId(
+  _escalaId?: string,
+  _tipo?: TipoEscalaDocumento
+): string {
+  return createApprovalToken(11);
+}
+
+/** Resolve token ativo a partir do documento da escala (para Abrir Aprovação / Link). */
+export async function resolveActiveApprovalToken(
   escalaId: string,
   tipo: TipoEscalaDocumento = "semanal"
-): string {
-  return `sol_${tipo}_${escalaId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+): Promise<string | null> {
+  const snap = await getDoc(doc(db, getEscalaCollection(tipo), escalaId));
+  if (!snap.exists()) return null;
+  const data = snap.data() as EscalaDocument;
+  if (normalizeEscalaStatus(data.status) !== "aguardando_aprovacao") return null;
+  const token = String(data.aprovacao?.solicitacaoId || "").trim();
+  return token || null;
 }
 
 export function formatNowParts(date: Date = new Date()): {
@@ -296,6 +328,7 @@ export async function submitScaleForApproval(
   aprovacao: EscalaAprovacao;
   historico: HistoricoEscalaEvento[];
   url: string;
+  token: string;
 }> {
   const label = getEscalaDocumentoLabel(tipo);
   const collectionName = getEscalaCollection(tipo);
@@ -316,7 +349,7 @@ export async function submitScaleForApproval(
   }
 
   const versao = data.versao && data.versao > 0 ? data.versao : 1;
-  const solicitacaoId = createSolicitacaoId(escalaId, tipo);
+  const solicitacaoId = createApprovalToken(11);
   const enviadoPor = toAprovacaoAtor(usuario);
   const aprovacao: EscalaAprovacao = {
     solicitacaoId,
@@ -351,6 +384,14 @@ export async function submitScaleForApproval(
   const historico = cleanHistorico(appendHistorico(data.historico, evento));
   const aprovacaoLimpa = cleanAprovacao(aprovacao);
 
+  await createSolicitacaoAprovacao({
+    token: solicitacaoId,
+    tipo,
+    escalaId,
+    versao,
+    usuario,
+  });
+
   await setDoc(
     ref,
     prepareFirestoreWrite(`${collectionName}/submit`, {
@@ -373,8 +414,8 @@ export async function submitScaleForApproval(
     solicitacaoId,
     detalhes:
       isReenvio || fromRevisao
-        ? "Nova submissão após revisão"
-        : "Envio para Aprovação",
+        ? `Nova submissão após revisão · token interno gerado`
+        : `Envio para Aprovação · token interno gerado`,
   });
 
   return {
@@ -382,7 +423,8 @@ export async function submitScaleForApproval(
     versao,
     aprovacao: aprovacaoLimpa || aprovacao,
     historico,
-    url: getApprovalUrl(escalaId, tipo),
+    url: getTokenApprovalUrl(solicitacaoId),
+    token: solicitacaoId,
   };
 }
 
@@ -453,6 +495,14 @@ export async function approveScale(
     solicitacaoId,
     detalhes: observacao || undefined,
   });
+
+  if (solicitacaoId) {
+    await finalizeSolicitacaoAprovacao({
+      token: solicitacaoId,
+      resultado: "APROVADA",
+      usuario: gestor,
+    });
+  }
 }
 
 /**
@@ -531,6 +581,14 @@ export async function requestRevisionScale(
     solicitacaoId,
     motivo: motivoTrim,
   });
+
+  if (solicitacaoId) {
+    await finalizeSolicitacaoAprovacao({
+      token: solicitacaoId,
+      resultado: "REVISAO_SOLICITADA",
+      usuario: gestor,
+    });
+  }
 }
 
 /** @deprecated Use requestRevisionScale. */
@@ -592,6 +650,14 @@ export async function cancelApprovalRequest(
     statusAtual: statusLabel("em_edicao"),
     solicitacaoId: solicitacaoId || undefined,
   });
+
+  if (solicitacaoId) {
+    await finalizeSolicitacaoAprovacao({
+      token: solicitacaoId,
+      resultado: "CANCELADA",
+      usuario,
+    });
+  }
 
   return { status: "em_edicao", versao, aprovacao: null, historico };
 }

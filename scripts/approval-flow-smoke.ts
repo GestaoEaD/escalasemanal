@@ -129,7 +129,17 @@ assert(
 
 assert(normalizeTipoEscalaDocumento("alteracao") === "alteracao", "Tipo alteração");
 const typed = parseApprovalPath("/aprovacao/alteracao/2026_32");
-assert(typed?.tipo === "alteracao" && typed.escalaId === "2026_32", "Path tipado");
+assert(
+  typed?.mode === "legacy" && typed.tipo === "alteracao" && typed.escalaId === "2026_32",
+  "Path tipado legado"
+);
+const byToken = parseApprovalPath("/aprovacao/8F3A9D2KX71");
+assert(byToken?.mode === "token" && byToken.token === "8F3A9D2KX71", "Path por token");
+const bareLegacy = parseApprovalPath("/aprovacao/2026_29");
+assert(
+  bareLegacy?.mode === "legacy" && bareLegacy.escalaId === "2026_29",
+  "Path legado bare"
+);
 assert(isWeekCurrentOrFuture(futureWeek) === true, "Semana futura");
 assert(canSubmitForApproval(operador) === false, "Operador não envia");
 

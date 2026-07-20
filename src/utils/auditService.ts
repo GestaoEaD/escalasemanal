@@ -212,6 +212,25 @@ export async function auditWorkflowEscala(options: {
   });
 }
 
+export async function auditAbrirLinkAprovacao(options: {
+  usuario: Usuario;
+  tipoDoc: "semanal" | "alteracao";
+  anoSemana: string;
+  versao?: number;
+  solicitacaoId: string;
+  detalhes?: string;
+}): Promise<AuditOperation> {
+  return registerAuditOperation({
+    tipo: "ABRIR_LINK_APROVACAO",
+    escala: options.tipoDoc === "alteracao" ? "ALTERACAO" : "SEMANAL",
+    usuario: options.usuario,
+    anoSemana: options.anoSemana,
+    versao: options.versao,
+    solicitacaoId: options.solicitacaoId,
+    detalhes: options.detalhes || "Abertura do link de aprovação",
+  });
+}
+
 export async function auditExportacao(options: {
   usuario: Usuario;
   anoSemana?: string;

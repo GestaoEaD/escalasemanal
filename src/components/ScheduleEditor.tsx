@@ -19,13 +19,14 @@ import {
   buildHistoricoEvento,
   cancelApprovalRequest,
   formatHomologacaoResumo,
-  getApprovalUrl,
   getEscalaDocumentoLabel,
   getRevisaoInfo,
   normalizeEscalaStatus,
   reopenApprovedScale,
+  resolveActiveApprovalToken,
   submitScaleForApproval,
 } from "../utils/approvalService";
+import { getTokenApprovalUrl } from "../utils/solicitacaoAprovacaoService";
 import { auditExportacao, auditSalvarEscala, statusLabel } from "../utils/auditService";
 import {
   canAccessConfig,
@@ -61,6 +62,7 @@ import {
   HelpCircle,
   Settings,
   Copy,
+  Check,
   Send,
   Link2,
   History,
@@ -128,6 +130,8 @@ export default function ScheduleEditor({
   const [submittingApproval, setSubmittingApproval] = useState(false);
   const [approvalLinkWeekly, setApprovalLinkWeekly] = useState<string | null>(null);
   const [approvalLinkAlt, setApprovalLinkAlt] = useState<string | null>(null);
+  const [linkModalUrl, setLinkModalUrl] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [showWeeklyHistorico, setShowWeeklyHistorico] = useState(false);
   const [showAltHistorico, setShowAltHistorico] = useState(false);
   const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
@@ -1307,6 +1311,8 @@ export default function ScheduleEditor({
         setApprovalLinkAlt(result.url);
       }
       setSubmitConfirmTipo(null);
+      setLinkCopied(false);
+      setLinkModalUrl(result.url);
     } catch (err: any) {
       setSaveError(err?.message || "Falha ao enviar para aprovação.");
     } finally {
@@ -1402,14 +1408,47 @@ export default function ScheduleEditor({
     }
   };
 
-  const copyApprovalLink = (tipo: TipoEscalaDocumento) => {
-    const url =
-      (tipo === "semanal" ? approvalLinkWeekly : approvalLinkAlt) ||
-      getApprovalUrl(docId, tipo);
-    navigator.clipboard?.writeText(url);
-    if (tipo === "semanal") setApprovalLinkWeekly(url);
-    else setApprovalLinkAlt(url);
-    alert(`Link de aprovação (válido apenas enquanto aguarda decisão):\n${url}`);
+  const openLinkModal = async (tipo: TipoEscalaDocumento) => {
+    setLinkCopied(false);
+    const cached = tipo === "semanal" ? approvalLinkWeekly : approvalLinkAlt;
+    if (cached) {
+      setLinkModalUrl(cached);
+      return;
+    }
+    const aprovacao = tipo === "semanal" ? weeklyAprovacao : altAprovacao;
+    const token = String(aprovacao?.solicitacaoId || "").trim();
+    if (token) {
+      const url = getTokenApprovalUrl(token);
+      if (tipo === "semanal") setApprovalLinkWeekly(url);
+      else setApprovalLinkAlt(url);
+      setLinkModalUrl(url);
+      return;
+    }
+    try {
+      const resolved = await resolveActiveApprovalToken(docId, tipo);
+      if (!resolved) {
+        alert("Não há link ativo para esta solicitação.");
+        return;
+      }
+      const url = getTokenApprovalUrl(resolved);
+      if (tipo === "semanal") setApprovalLinkWeekly(url);
+      else setApprovalLinkAlt(url);
+      setLinkModalUrl(url);
+    } catch (err) {
+      console.error(err);
+      alert("Não foi possível obter o link de aprovação.");
+    }
+  };
+
+  const handleCopyLinkModal = async () => {
+    if (!linkModalUrl) return;
+    try {
+      await navigator.clipboard.writeText(linkModalUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      alert("Não foi possível copiar. Selecione o link manualmente.");
+    }
   };
 
   const renderHistoricoAccordion = (
@@ -1649,7 +1688,7 @@ export default function ScheduleEditor({
         {showCancel && (
           <button
             type="button"
-            onClick={() => copyApprovalLink(tipo)}
+            onClick={() => openLinkModal(tipo)}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50/70 hover:bg-amber-100 rounded-md border border-amber-200 cursor-pointer"
             title="Copiar link de aprovação"
           >
@@ -1660,7 +1699,11 @@ export default function ScheduleEditor({
         {isGestor(usuario) && status === "aguardando_aprovacao" && onOpenApproval && (
           <button
             type="button"
-            onClick={() => onOpenApproval(docId, tipo)}
+            onClick={() => {
+              const token = (tipo === "semanal" ? weeklyAprovacao : altAprovacao)?.solicitacaoId;
+              if (token) onOpenApproval(token, tipo);
+              else onOpenApproval(docId, tipo);
+            }}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md cursor-pointer"
           >
             <CheckCircle size={14} />
@@ -2155,6 +2198,68 @@ export default function ScheduleEditor({
                 >
                   <Send size={14} />
                   {submittingApproval ? "Enviando..." : "Enviar para Aprovação"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LINK DE APROVAÇÃO — após envio ou botão Link */}
+      {linkModalUrl && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Link2 size={18} className="text-amber-400" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Solicitação criada com sucesso
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkModalUrl(null);
+                  setLinkCopied(false);
+                }}
+                className="text-gray-400 hover:text-white transition-colors cursor-pointer text-lg"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Encaminhe este link ao Gestor responsável.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
+                <p className="text-[11px] font-mono text-gray-800 break-all select-all">
+                  {linkModalUrl}
+                </p>
+              </div>
+              {linkCopied && (
+                <p className="text-xs font-bold text-emerald-700 flex items-center gap-1.5">
+                  <Check size={14} />
+                  Link copiado com sucesso.
+                </p>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkModalUrl(null);
+                    setLinkCopied(false);
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md cursor-pointer"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyLinkModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer"
+                >
+                  <Copy size={14} />
+                  Copiar Link
                 </button>
               </div>
             </div>
