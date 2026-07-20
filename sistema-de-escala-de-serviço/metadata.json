@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Escala de Serviço",
+  "description": "Sistema moderno e responsivo para criação, alteração e consulta de escalas semanais de serviço policial com controle de logs e auditoria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

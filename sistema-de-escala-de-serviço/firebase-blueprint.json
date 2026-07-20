@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "Usuario": {
+      "title": "Usuario",
+      "description": "System user representation",
+      "type": "object",
+      "properties": {
+        "re": { "type": "string" },
+        "nome": { "type": "string" },
+        "postoGrad": { "type": "string" },
+        "secao": { "type": "string" }
+      },
+      "required": ["re", "nome", "postoGrad", "secao"]
+    },
+    "Colaborador": {
+      "title": "Colaborador",
+      "description": "Collaborator representation",
+      "type": "object",
+      "properties": {
+        "re": { "type": "string" },
+        "postoGrad": { "type": "string" },
+        "nome": { "type": "string" },
+        "secao": { "type": "string" },
+        "observacao": { "type": "string" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["re", "postoGrad", "nome", "secao"]
+    },
+    "EscalaDocument": {
+      "title": "EscalaDocument",
+      "description": "Representation of weekly or alteration scale",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ano": { "type": "integer" },
+        "semana": { "type": "integer" },
+        "periodo": { "type": "string" },
+        "rows": { "type": "array" },
+        "lastSaved": { "type": "object" }
+      }
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Audit log representation",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "object" },
+        "data": { "type": "string" },
+        "hora": { "type": "string" },
+        "usuario": { "type": "string" },
+        "re": { "type": "string" },
+        "painel": { "type": "string" },
+        "colaborador": { "type": "string" },
+        "campoAlterado": { "type": "string" },
+        "valorAnterior": { "type": "string" },
+        "novoValor": { "type": "string" },
+        "anoSemana": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/usuarios/{re}": {
+      "schema": "Usuario",
+      "description": "System users collection"
+    },
+    "/colaboradores/{re}": {
+      "schema": "Colaborador",
+      "description": "Collaborators collection"
+    },
+    "/escalas_semanais/{docId}": {
+      "schema": "EscalaDocument",
+      "description": "Weekly scales collection"
+    },
+    "/escalas_alteracao/{docId}": {
+      "schema": "EscalaDocument",
+      "description": "Alteration scales collection"
+    },
+    "/logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Audit logs collection"
+    }
+  }
+}
