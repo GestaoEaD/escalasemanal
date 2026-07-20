@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
-import { EscalaStatus, Usuario } from "../types";
+import { EscalaStatus, TipoEscalaDocumento, Usuario } from "../types";
 import { db, collection, getDocs, query, where } from "../firebase";
 import { canAccessConfig, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
@@ -13,7 +13,7 @@ interface WeekSelectorProps {
   onSelectWeek: (year: number, week: WeekInfo) => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
-  onOpenApproval?: (escalaId: string) => void;
+  onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
 }
 
 export default function WeekSelector({
@@ -24,7 +24,8 @@ export default function WeekSelector({
   onOpenApproval,
 }: WeekSelectorProps) {
   const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [statusByWeek, setStatusByWeek] = useState<Record<string, EscalaStatus>>({});
+  const [weeklyStatusByWeek, setWeeklyStatusByWeek] = useState<Record<string, EscalaStatus>>({});
+  const [altStatusByWeek, setAltStatusByWeek] = useState<Record<string, EscalaStatus>>({});
 
   const today = useMemo(() => new Date(), []);
 
@@ -36,15 +37,26 @@ export default function WeekSelector({
     let cancelled = false;
     const loadStatuses = async () => {
       try {
-        const q = query(collection(db, "escalas_semanais"), where("ano", "==", selectedYear));
-        const snap = await getDocs(q);
-        const map: Record<string, EscalaStatus> = {};
-        snap.forEach((d) => {
+        const [weeklySnap, altSnap] = await Promise.all([
+          getDocs(query(collection(db, "escalas_semanais"), where("ano", "==", selectedYear))),
+          getDocs(query(collection(db, "escalas_alteracao"), where("ano", "==", selectedYear))),
+        ]);
+        const weeklyMap: Record<string, EscalaStatus> = {};
+        weeklySnap.forEach((d) => {
           const data = d.data();
           const id = (data.id as string) || d.id;
-          map[id] = normalizeEscalaStatus(data.status);
+          weeklyMap[id] = normalizeEscalaStatus(data.status);
         });
-        if (!cancelled) setStatusByWeek(map);
+        const altMap: Record<string, EscalaStatus> = {};
+        altSnap.forEach((d) => {
+          const data = d.data();
+          const id = (data.id as string) || d.id;
+          altMap[id] = normalizeEscalaStatus(data.status);
+        });
+        if (!cancelled) {
+          setWeeklyStatusByWeek(weeklyMap);
+          setAltStatusByWeek(altMap);
+        }
       } catch (err) {
         console.error("Falha ao carregar status das escalas:", err);
       }
@@ -174,7 +186,10 @@ export default function WeekSelector({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {weeks.map((week) => {
             const state = getWeekState(week);
-            const approvalStatus = statusByWeek[week.id] || "em_edicao";
+            const weeklyStatus = weeklyStatusByWeek[week.id] || "em_edicao";
+            const altStatus = altStatusByWeek[week.id] || "em_edicao";
+            const hasPending =
+              weeklyStatus === "aguardando_aprovacao" || altStatus === "aguardando_aprovacao";
 
             let btnClass = "";
             let titleClass = "";
@@ -229,8 +244,15 @@ export default function WeekSelector({
                       {badge}
                     </div>
                     <h3 className={`text-base mt-1 ${titleClass}`}>{week.label}</h3>
-                    <div className="mt-1.5">
-                      <StatusBadge status={approvalStatus} />
+                    <div className="mt-1.5 space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase">Sem</span>
+                        <StatusBadge status={weeklyStatus} />
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase">Alt</span>
+                        <StatusBadge status={altStatus} />
+                      </div>
                     </div>
                   </div>
 
@@ -240,21 +262,36 @@ export default function WeekSelector({
                   </div>
                 </button>
 
-                {isGestor(usuario) &&
-                  approvalStatus === "aguardando_aprovacao" &&
-                  onOpenApproval && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenApproval(week.id);
-                      }}
-                      className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md cursor-pointer"
-                    >
-                      <Link2 size={12} />
-                      Abrir aprovação
-                    </button>
-                  )}
+                {isGestor(usuario) && hasPending && onOpenApproval && (
+                  <div className="mt-2 space-y-1.5">
+                    {weeklyStatus === "aguardando_aprovacao" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenApproval(week.id, "semanal");
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md cursor-pointer"
+                      >
+                        <Link2 size={12} />
+                        Aprovar Semanal
+                      </button>
+                    )}
+                    {altStatus === "aguardando_aprovacao" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenApproval(week.id, "alteracao");
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md cursor-pointer"
+                      >
+                        <Link2 size={12} />
+                        Aprovar Alteração
+                      </button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             );
           })}

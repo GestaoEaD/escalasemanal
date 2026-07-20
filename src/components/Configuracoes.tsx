@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp } from "../firebase";
-import { Usuario, Colaborador } from "../types";
+import { Usuario, Colaborador, AuditAlteracao, AuditOperation } from "../types";
 import {
   Users,
   Shield,
@@ -21,15 +21,12 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  FileSpreadsheet,
   FileText,
-  RefreshCw,
-  Calendar,
-  ArrowUpDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
-import { exportLogsToExcel, exportLogsToPDF } from "../utils/exportUtils";
+import { auditConfiguracao, loadAuditOperations } from "../utils/auditService";
+import LogsAuditPanel from "./LogsAuditPanel";
 
 interface ConfiguracoesProps {
   usuario: Usuario;
@@ -74,19 +71,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   const [activeTab, setActiveTab] = useState<MenuTab>("colaboradores");
 
   // Audit Logs Tab States
-  const [logsList, setLogsList] = useState<any[]>([]);
+  const [logsList, setLogsList] = useState<AuditOperation[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [logSearchKeyword, setLogSearchKeyword] = useState("");
-  const [logDateStart, setLogDateStart] = useState("");
-  const [logDateEnd, setLogDateEnd] = useState("");
-  const [logFilterUser, setLogFilterUser] = useState("");
-  const [logFilterAffected, setLogFilterAffected] = useState("");
-  const [logFilterOp, setLogFilterOp] = useState<string>("todos");
-  const [logFilterModule, setLogFilterModule] = useState<string>("todos");
-  const [logPage, setLogPage] = useState(1);
-  const logPerPage = 20;
-  const [logSortField, setLogSortField] = useState<string>("timestamp");
-  const [logSortDirection, setLogSortDirection] = useState<"asc" | "desc">("desc");
 
   // Loading states
   const [loading, setLoading] = useState(true);
@@ -260,12 +246,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   const loadLogs = async () => {
     setLogsLoading(true);
     try {
-      const logsSnap = await getDocs(collection(db, "logs"));
-      const list: any[] = [];
-      logsSnap.forEach((doc) => {
-        const d = doc.data();
-        list.push({ id: doc.id, ...d });
-      });
+      const list = await loadAuditOperations();
       setLogsList(list);
     } catch (err) {
       console.error("Erro ao carregar logs:", err);
@@ -421,32 +402,24 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
     try {
       const batch = writeBatch(db);
-      const auditLogs: any[] = [];
+      const alteracoes: AuditAlteracao[] = [];
       const now = new Date();
       const timestamp = Timestamp.now();
-      const dataStr = now.toLocaleDateString("pt-BR");
-      const horaStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-      const auditUserLabel = `${usuario.postoGrad} ${usuario.nome}`;
-      const auditUserRe = usuario.re;
-
-      // Helper to generate audit log entry
-      const createAuditLog = (modulo: string, operacao: string, registro: string, campo: string, ant: string, nvo: string) => {
-        return {
-          timestamp,
-          data: dataStr,
-          hora: horaStr,
-          usuario: auditUserLabel,
-          re: auditUserRe,
-          painel: "Configurações",
-          modulo,
-          operacao,
-          registroAlterado: registro,
-          campoAlterado: campo,
-          valorAnterior: ant,
-          novoValor: nvo,
-          anoSemana: "Configurações"
-        };
+      const createAuditLog = (
+        modulo: string,
+        operacao: string,
+        registro: string,
+        campo: string,
+        ant: string,
+        nvo: string
+      ) => {
+        alteracoes.push({
+          campo: `${operacao} — ${campo}`,
+          antes: ant,
+          depois: nvo,
+          colaborador: `${modulo}: ${registro}`,
+        });
       };
 
       // --- 1. AUDIT & SAVE: COLABORADORES ---
@@ -455,7 +428,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origColaboradores.find((c) => c.re === reDel);
         const colLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
         batch.delete(doc(db, "colaboradores", reDel));
-        auditLogs.push(createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, ""));
+        createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, "");
       }
       // B. Handle creations and edits
       for (const col of colaboradores) {
@@ -471,36 +444,36 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
         if (!original) {
           // Inclusion
-          auditLogs.push(createAuditLog(
+          createAuditLog(
             "Colaboradores", 
             "Inclusão", 
             colLabel, 
             "Todos", 
             "", 
             `RE: ${col.re}, Posto: ${col.postoGrad}, Nome Completo: ${col.nomeCompleto || ""}, Guerra: ${col.nome}, Seção: ${col.secao}, Ordem: ${col.ordem}, Ativo: ${col.ativo ? "Sim" : "Não"}`
-          ));
+          );
         } else {
           // Edits
           if (col.postoGrad !== original.postoGrad) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, col.postoGrad));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, col.postoGrad);
           }
           if (col.nome !== original.nome) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, col.nome));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, col.nome);
           }
           if (col.nomeCompleto !== original.nomeCompleto) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", col.nomeCompleto || ""));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", col.nomeCompleto || "");
           }
           if (col.secao !== original.secao) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, col.secao));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, col.secao);
           }
           if (col.ativo !== original.ativo) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", col.ativo ? "Ativo" : "Inativo"));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", col.ativo ? "Ativo" : "Inativo");
           }
           if (col.ordem !== original.ordem) {
-            auditLogs.push(createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(col.ordem || 0)));
+            createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(col.ordem || 0));
           }
           if (col.observacao !== original.observacao) {
-            auditLogs.push(createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", col.observacao || ""));
+            createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", col.observacao || "");
           }
         }
       }
@@ -511,7 +484,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origUsuarios.find((u) => u.re === reDel);
         const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
         batch.delete(doc(db, "usuarios", reDel));
-        auditLogs.push(createAuditLog("Usuários", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, ""));
+        createAuditLog("Usuários", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
       }
       // B. Creations and edits
       for (const usr of usuarios) {
@@ -522,32 +495,32 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const userLabel = `${usr.postoGrad} ${usr.nome}`;
 
         if (!original) {
-          auditLogs.push(createAuditLog(
+          createAuditLog(
             "Usuários",
             "Inclusão",
             userLabel,
             "Todos",
             "",
             `RE: ${usr.re}, Posto: ${usr.postoGrad}, Nome Completo: ${usr.nomeCompleto || ""}, Guerra: ${usr.nome}, Seção: ${usr.secao}, Perfil: ${usr.perfil || "Operador"}, Ativo: ${usr.ativo ? "Sim" : "Não"}`
-          ));
+          );
         } else {
           if (usr.postoGrad !== original.postoGrad) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Posto/Graduação", original.postoGrad, usr.postoGrad));
+            createAuditLog("Usuários", "Edição", userLabel, "Posto/Graduação", original.postoGrad, usr.postoGrad);
           }
           if (usr.nome !== original.nome) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Nome de Guerra", original.nome, usr.nome));
+            createAuditLog("Usuários", "Edição", userLabel, "Nome de Guerra", original.nome, usr.nome);
           }
           if (usr.nomeCompleto !== original.nomeCompleto) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", usr.nomeCompleto || ""));
+            createAuditLog("Usuários", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", usr.nomeCompleto || "");
           }
           if (usr.secao !== original.secao) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Seção", original.secao, usr.secao));
+            createAuditLog("Usuários", "Edição", userLabel, "Seção", original.secao, usr.secao);
           }
           if (usr.perfil !== original.perfil) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Perfil", original.perfil || "Operador", usr.perfil || "Operador"));
+            createAuditLog("Usuários", "Edição", userLabel, "Perfil", original.perfil || "Operador", usr.perfil || "Operador");
           }
           if (usr.ativo !== original.ativo) {
-            auditLogs.push(createAuditLog("Usuários", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", usr.ativo ? "Ativo" : "Inativo"));
+            createAuditLog("Usuários", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", usr.ativo ? "Ativo" : "Inativo");
           }
         }
       }
@@ -557,7 +530,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const siglaDel of removedPostos) {
         const docId = siglaDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         batch.delete(doc(db, "postos", docId));
-        auditLogs.push(createAuditLog("Postos e Graduações", "Exclusão", siglaDel, "Todos", siglaDel, ""));
+        createAuditLog("Postos e Graduações", "Exclusão", siglaDel, "Todos", siglaDel, "");
       }
       // B. Creations and edits
       for (const p of postos) {
@@ -567,13 +540,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         batch.set(docRef, prepareFirestoreWrite(`postos/${docId}`, p as unknown as Record<string, unknown>));
 
         if (!original) {
-          auditLogs.push(createAuditLog("Postos e Graduações", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`));
+          createAuditLog("Postos e Graduações", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`);
         } else {
           if (p.descricao !== original.descricao) {
-            auditLogs.push(createAuditLog("Postos e Graduações", "Edição", p.sigla, "Descrição", original.descricao, p.descricao));
+            createAuditLog("Postos e Graduações", "Edição", p.sigla, "Descrição", original.descricao, p.descricao);
           }
           if (p.ordem !== original.ordem) {
-            auditLogs.push(createAuditLog("Postos e Graduações", "Ordenação", p.sigla, "Ordem", String(original.ordem || 0), String(p.ordem || 0)));
+            createAuditLog("Postos e Graduações", "Ordenação", p.sigla, "Ordem", String(original.ordem || 0), String(p.ordem || 0));
           }
         }
       }
@@ -583,7 +556,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const nomeDel of removedSecoes) {
         const docId = nomeDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         batch.delete(doc(db, "secoes", docId));
-        auditLogs.push(createAuditLog("Seções", "Exclusão", nomeDel, "Todos", nomeDel, ""));
+        createAuditLog("Seções", "Exclusão", nomeDel, "Todos", nomeDel, "");
       }
       // B. Creations and edits
       for (const s of secoes) {
@@ -593,13 +566,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, s as unknown as Record<string, unknown>));
 
         if (!original) {
-          auditLogs.push(createAuditLog("Seções", "Inclusão", s.nome, "Todos", "", `Nome: ${s.nome}, Ordem: ${s.ordem}, Ativo: ${s.ativo ? "Sim" : "Não"}`));
+          createAuditLog("Seções", "Inclusão", s.nome, "Todos", "", `Nome: ${s.nome}, Ordem: ${s.ordem}, Ativo: ${s.ativo ? "Sim" : "Não"}`);
         } else {
           if (s.ordem !== original.ordem) {
-            auditLogs.push(createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0)));
+            createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
           }
           if (s.ativo !== original.ativo) {
-            auditLogs.push(createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não"));
+            createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não");
           }
         }
       }
@@ -609,7 +582,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const siglaDel of removedLegendas) {
         const docId = siglaDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         batch.delete(doc(db, "legendas", docId));
-        auditLogs.push(createAuditLog("Legendas da Escala", "Exclusão", siglaDel, "Todos", siglaDel, ""));
+        createAuditLog("Legendas da Escala", "Exclusão", siglaDel, "Todos", siglaDel, "");
       }
       // B. Creations and edits
       for (const l of legendas) {
@@ -619,19 +592,19 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         batch.set(docRef, prepareFirestoreWrite(`legendas/${docId}`, l as unknown as Record<string, unknown>));
 
         if (!original) {
-          auditLogs.push(createAuditLog("Legendas da Escala", "Inclusão", l.sigla, "Todos", "", `Sigla: ${l.sigla}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`));
+          createAuditLog("Legendas da Escala", "Inclusão", l.sigla, "Todos", "", `Sigla: ${l.sigla}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`);
         } else {
           if (l.descricao !== original.descricao) {
-            auditLogs.push(createAuditLog("Legendas da Escala", "Edição", l.sigla, "Descrição", original.descricao, l.descricao));
+            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Descrição", original.descricao, l.descricao);
           }
           if (l.cor !== original.cor) {
-            auditLogs.push(createAuditLog("Legendas da Escala", "Edição", l.sigla, "Cor", original.cor, l.cor));
+            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Cor", original.cor, l.cor);
           }
           if (l.ordem !== original.ordem) {
-            auditLogs.push(createAuditLog("Legendas da Escala", "Ordenação", l.sigla, "Ordem", String(original.ordem || 0), String(l.ordem || 0)));
+            createAuditLog("Legendas da Escala", "Ordenação", l.sigla, "Ordem", String(original.ordem || 0), String(l.ordem || 0));
           }
           if (l.ativo !== original.ativo) {
-            auditLogs.push(createAuditLog("Legendas da Escala", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não"));
+            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não");
           }
         }
       }
@@ -647,36 +620,34 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         );
 
         if (gerais.nomeOrganizacao !== origGerais.nomeOrganizacao) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Nome da Organização", origGerais.nomeOrganizacao, gerais.nomeOrganizacao));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Nome da Organização", origGerais.nomeOrganizacao, gerais.nomeOrganizacao);
         }
         if (gerais.unidade !== origGerais.unidade) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Unidade", origGerais.unidade, gerais.unidade));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Unidade", origGerais.unidade, gerais.unidade);
         }
         if (gerais.pdfExportHeader !== origGerais.pdfExportHeader) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho PDF", origGerais.pdfExportHeader, gerais.pdfExportHeader));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho PDF", origGerais.pdfExportHeader, gerais.pdfExportHeader);
         }
         if (gerais.excelExportHeader !== origGerais.excelExportHeader) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho Excel", origGerais.excelExportHeader, gerais.excelExportHeader));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho Excel", origGerais.excelExportHeader, gerais.excelExportHeader);
         }
         if (gerais.tema !== origGerais.tema) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Tema", origGerais.tema, gerais.tema));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Tema", origGerais.tema, gerais.tema);
         }
         if (gerais.idioma !== origGerais.idioma) {
-          auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Idioma", origGerais.idioma, gerais.idioma));
+          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Idioma", origGerais.idioma, gerais.idioma);
         }
       }
 
-      // --- 7. WRITE ALL AUDIT LOGS ---
-      auditLogs.forEach((log) => {
-        const logId = `log_adm_${now.getTime()}_${Math.floor(Math.random() * 10000)}`;
-        batch.set(
-          doc(db, "logs", logId),
-          prepareFirestoreWrite(`logs/${logId}`, log as unknown as Record<string, unknown>)
-        );
-      });
-
       // Commit the database batch
       await batch.commit();
+
+      // Uma operação de auditoria com todas as alterações internas
+      await auditConfiguracao({
+        usuario,
+        alteracoes,
+        detalhes: "Salvamento de configurações administrativas",
+      });
 
       // Set original states to the newly saved ones
       setOrigColaboradores(JSON.parse(JSON.stringify(colaboradores)));
@@ -902,117 +873,6 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   }, [filteredUsuarios, userPage]);
 
   const totalUserPages = Math.ceil(filteredUsuarios.length / userPerPage) || 1;
-
-  const getUserProfile = (re: string) => {
-    const usr = usuarios.find((u) => u.re === re);
-    return usr?.perfil || "Operador";
-  };
-
-  // Compute filtered logs list
-  const filteredLogs = useMemo(() => {
-    let list = [...logsList];
-
-    // 1. Keyword search (Global)
-    if (logSearchKeyword.trim()) {
-      const q = logSearchKeyword.toLowerCase();
-      list = list.filter((log) => {
-        return (
-          (log.usuario && log.usuario.toLowerCase().includes(q)) ||
-          (log.re && log.re.toLowerCase().includes(q)) ||
-          (log.colaborador && log.colaborador.toLowerCase().includes(q)) ||
-          (log.campoAlterado && log.campoAlterado.toLowerCase().includes(q)) ||
-          (log.valorAnterior && log.valorAnterior.toLowerCase().includes(q)) ||
-          (log.novoValor && log.novoValor.toLowerCase().includes(q)) ||
-          (log.modulo && log.modulo.toLowerCase().includes(q)) ||
-          (log.operacao && log.operacao.toLowerCase().includes(q)) ||
-          (log.painel && log.painel.toLowerCase().includes(q))
-        );
-      });
-    }
-
-    // 2. Filter by Date Range
-    if (logDateStart) {
-      const startDate = new Date(logDateStart);
-      startDate.setHours(0, 0, 0, 0);
-      list = list.filter((log) => {
-        const logDate = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.timestamp || 0);
-        return logDate >= startDate;
-      });
-    }
-    if (logDateEnd) {
-      const endDate = new Date(logDateEnd);
-      endDate.setHours(23, 59, 59, 999);
-      list = list.filter((log) => {
-        const logDate = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.timestamp || 0);
-        return logDate <= endDate;
-      });
-    }
-
-    // 3. Filter by User
-    if (logFilterUser.trim()) {
-      const q = logFilterUser.toLowerCase();
-      list = list.filter((log) => {
-        return (
-          (log.usuario && log.usuario.toLowerCase().includes(q)) ||
-          (log.re && log.re.toLowerCase().includes(q))
-        );
-      });
-    }
-
-    // 4. Filter by affected military (colaborador)
-    if (logFilterAffected.trim()) {
-      const q = logFilterAffected.toLowerCase();
-      list = list.filter((log) => {
-        return log.colaborador && log.colaborador.toLowerCase().includes(q);
-      });
-    }
-
-    // 5. Filter by Operation Type
-    if (logFilterOp !== "todos") {
-      list = list.filter((log) => {
-        return log.operacao === logFilterOp || log.campoAlterado === logFilterOp;
-      });
-    }
-
-    // 6. Filter by Module
-    if (logFilterModule !== "todos") {
-      list = list.filter((log) => {
-        if (logFilterModule === "Configurações") {
-          return log.painel === "Configurações" || log.modulo;
-        }
-        return log.painel === logFilterModule;
-      });
-    }
-
-    // Sort the list
-    list.sort((a, b) => {
-      let valA: any = a[logSortField];
-      let valB: any = b[logSortField];
-
-      // Special handling for timestamp
-      if (logSortField === "timestamp") {
-        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : new Date(a.timestamp || 0).getTime();
-        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : new Date(b.timestamp || 0).getTime();
-        return logSortDirection === "desc" ? timeB - timeA : timeA - timeB;
-      }
-
-      if (typeof valA === "string") valA = valA.toLowerCase();
-      if (typeof valB === "string") valB = valB.toLowerCase();
-
-      if (valA < valB) return logSortDirection === "asc" ? -1 : 1;
-      if (valA > valB) return logSortDirection === "asc" ? 1 : -1;
-      return 0;
-    });
-
-    return list;
-  }, [logsList, logSearchKeyword, logDateStart, logDateEnd, logFilterUser, logFilterAffected, logFilterOp, logFilterModule, logSortField, logSortDirection]);
-
-  const pagedLogs = useMemo(() => {
-    const startIndex = (logPage - 1) * logPerPage;
-    return filteredLogs.slice(startIndex, startIndex + logPerPage);
-  }, [filteredLogs, logPage]);
-
-  const totalLogPages = Math.ceil(filteredLogs.length / logPerPage) || 1;
 
   // Render Page Content
   if (loading) {
@@ -1945,301 +1805,12 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
             {/* 7. MODULE: REGISTROS DE AUDITORIA (LOGS) */}
             {activeTab === "registros" && usuario.perfil === "Administrador" && (
-              <div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 pb-4 border-b border-gray-150">
-                  <div>
-                    <h2 className="text-base font-bold text-gray-900">Registros de Auditoria (Logs)</h2>
-                    <p className="text-xs text-gray-500">Histórico detalhado de todas as alterações realizadas no sistema de escalas.</p>
-                  </div>
-                  <div className="mt-3 md:mt-0 flex items-center space-x-2">
-                    <button
-                      onClick={loadLogs}
-                      disabled={logsLoading}
-                      className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-gray-150 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
-                      title="Atualizar Logs"
-                    >
-                      <RefreshCw size={13} className={logsLoading ? "animate-spin" : ""} />
-                      <span>Atualizar</span>
-                    </button>
-                    <button
-                      onClick={() => exportLogsToExcel(filteredLogs)}
-                      disabled={filteredLogs.length === 0}
-                      className="inline-flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                      <FileSpreadsheet size={13} />
-                      <span>Exportar Excel</span>
-                    </button>
-                    <button
-                      onClick={() => exportLogsToPDF(filteredLogs, { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad })}
-                      disabled={filteredLogs.length === 0}
-                      className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                      <FileText size={13} />
-                      <span>Exportar PDF</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Filter Controls Accordion/Card */}
-                <div className="bg-gray-50 border border-gray-250 rounded-xl p-4 mb-6">
-                  <h3 className="text-xs font-bold text-gray-700 mb-3 flex items-center uppercase tracking-wider">
-                    Filtros de Pesquisa
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                    {/* Keyword search */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Palavra-chave</label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400">
-                          <Search size={12} />
-                        </span>
-                        <input
-                          type="text"
-                          value={logSearchKeyword}
-                          onChange={(e) => { setLogSearchKeyword(e.target.value); setLogPage(1); }}
-                          placeholder="Pesquisar..."
-                          className="block w-full border border-gray-300 rounded-lg py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Date Start */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Período (Início)</label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400">
-                          <Calendar size={12} />
-                        </span>
-                        <input
-                          type="date"
-                          value={logDateStart}
-                          onChange={(e) => { setLogDateStart(e.target.value); setLogPage(1); }}
-                          className="block w-full border border-gray-300 rounded-lg py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Date End */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Período (Fim)</label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400">
-                          <Calendar size={12} />
-                        </span>
-                        <input
-                          type="date"
-                          value={logDateEnd}
-                          onChange={(e) => { setLogDateEnd(e.target.value); setLogPage(1); }}
-                          className="block w-full border border-gray-300 rounded-lg py-1.5 pl-8 pr-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    {/* User who changed */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuário Operador</label>
-                      <input
-                        type="text"
-                        value={logFilterUser}
-                        onChange={(e) => { setLogFilterUser(e.target.value); setLogPage(1); }}
-                        placeholder="Nome ou RE do operador"
-                        className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-medium"
-                      />
-                    </div>
-
-                    {/* Affected military */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Militar Afetado</label>
-                      <input
-                        type="text"
-                        value={logFilterAffected}
-                        onChange={(e) => { setLogFilterAffected(e.target.value); setLogPage(1); }}
-                        placeholder="Nome do militar na escala"
-                        className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-medium"
-                      />
-                    </div>
-
-                    {/* Operation select */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Operação</label>
-                      <select
-                        value={logFilterOp}
-                        onChange={(e) => { setLogFilterOp(e.target.value); setLogPage(1); }}
-                        className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-semibold bg-white"
-                      >
-                        <option value="todos">Todas</option>
-                        <option value="Inclusão">Inclusão</option>
-                        <option value="Edição">Edição</option>
-                        <option value="Exclusão">Exclusão</option>
-                        <option value="Ordenação">Ordenação</option>
-                      </select>
-                    </div>
-
-                    {/* Module select */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Painel / Módulo</label>
-                      <select
-                        value={logFilterModule}
-                        onChange={(e) => { setLogFilterModule(e.target.value); setLogPage(1); }}
-                        className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-semibold bg-white"
-                      >
-                        <option value="todos">Todos</option>
-                        <option value="Escala Semanal">Escala Semanal</option>
-                        <option value="Escala Alteração">Escala Alteração</option>
-                        <option value="Configurações">Configurações</option>
-                      </select>
-                    </div>
-
-                    {/* Reset Filters button */}
-                    <div className="flex items-end">
-                      <button
-                        onClick={() => {
-                          setLogSearchKeyword("");
-                          setLogDateStart("");
-                          setLogDateEnd("");
-                          setLogFilterUser("");
-                          setLogFilterAffected("");
-                          setLogFilterOp("todos");
-                          setLogFilterModule("todos");
-                          setLogPage(1);
-                        }}
-                        className="w-full text-center px-4 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                      >
-                        Limpar Filtros
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Table Content */}
-                {logsLoading ? (
-                  <div className="py-12 text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                    <p className="mt-3 text-xs text-gray-500 font-semibold">Buscando registros no banco de dados...</p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="table-scroll border border-gray-200 rounded-lg shadow-2xs">
-                      <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
-                        <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                          <tr>
-                            {/* Columns sorting handlers */}
-                            {[
-                              { label: "Data", field: "timestamp" },
-                              { label: "Hora", field: "hora" },
-                              { label: "Usuário", field: "usuario" },
-                              { label: "RE", field: "re" },
-                              { label: "Perfil", field: "perfil" },
-                              { label: "Operação", field: "operacao" },
-                              { label: "Módulo", field: "modulo" },
-                              { label: "Reg. Alterado", field: "registroAlterado" },
-                              { label: "Campo", field: "campoAlterado" },
-                              { label: "Vl. Anterior", field: "valorAnterior" },
-                              { label: "Novo Valor", field: "novoValor" }
-                            ].map((col) => (
-                              <th
-                                key={col.field}
-                                className="px-3 py-3 font-bold cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap"
-                                onClick={() => {
-                                  if (logSortField === col.field) {
-                                    setLogSortDirection(prev => prev === "asc" ? "desc" : "asc");
-                                  } else {
-                                    setLogSortField(col.field);
-                                    setLogSortDirection("desc");
-                                  }
-                                }}
-                              >
-                                <div className="flex items-center space-x-1">
-                                  <span>{col.label}</span>
-                                  <ArrowUpDown size={10} className="text-gray-400" />
-                                </div>
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
-                          {pagedLogs.length === 0 ? (
-                            <tr>
-                              <td colSpan={11} className="px-4 py-8 text-center text-gray-400 font-semibold italic">
-                                Nenhum log de auditoria encontrado com os parâmetros selecionados.
-                              </td>
-                            </tr>
-                          ) : (
-                            pagedLogs.map((log) => {
-                              const profile = log.perfil || getUserProfile(log.re);
-                              return (
-                                <tr key={log.id} className="hover:bg-gray-50">
-                                  <td className="px-3 py-2.5 font-bold whitespace-nowrap text-gray-600">{log.data}</td>
-                                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{log.hora}</td>
-                                  <td className="px-3 py-2.5 font-bold text-gray-800 whitespace-nowrap">{log.usuario}</td>
-                                  <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-gray-600">{log.re}</td>
-                                  <td className="px-3 py-2.5 whitespace-nowrap">
-                                    <span className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-full ${
-                                      profile === "Administrador"
-                                        ? "bg-purple-100 text-purple-800"
-                                        : profile === "Gestor"
-                                          ? "bg-emerald-100 text-emerald-800"
-                                          : "bg-blue-100 text-blue-800"
-                                    }`}>
-                                      {profile}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2.5 font-bold whitespace-nowrap">
-                                    <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded-md ${
-                                      log.operacao === "Inclusão" ? "bg-green-100 text-green-800" :
-                                      log.operacao === "Exclusão" ? "bg-red-100 text-red-800" :
-                                      log.operacao === "Ordenação" ? "bg-amber-100 text-amber-800" :
-                                      "bg-sky-100 text-sky-800"
-                                    }`}>
-                                      {log.operacao || log.campoAlterado || "Edição"}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-semibold">{log.modulo || log.painel || "Escala"}</td>
-                                  <td className="px-3 py-2.5 font-bold text-gray-700 whitespace-nowrap max-w-[120px] truncate" title={log.registroAlterado}>
-                                    {log.registroAlterado || log.colaborador || "-"}
-                                  </td>
-                                  <td className="px-3 py-2.5 font-bold text-blue-900 whitespace-nowrap">{log.campoAlterado || "-"}</td>
-                                  <td className="px-3 py-2.5 text-gray-500 truncate max-w-[100px]" title={log.valorAnterior}>{log.valorAnterior || "-"}</td>
-                                  <td className="px-3 py-2.5 font-bold text-emerald-800 truncate max-w-[100px]" title={log.novoValor}>{log.novoValor || "-"}</td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Pagination Bar */}
-                    <div className="flex flex-col sm:flex-row items-center justify-between mt-4 bg-white py-3 border border-gray-200 px-4 rounded-lg shadow-2xs gap-3">
-                      <div className="text-xs text-gray-600 font-semibold">
-                        Mostrando <span className="font-bold text-gray-800">{filteredLogs.length > 0 ? (logPage - 1) * logPerPage + 1 : 0}</span> até{" "}
-                        <span className="font-bold text-gray-800">{Math.min(logPage * logPerPage, filteredLogs.length)}</span> de{" "}
-                        <span className="font-bold text-gray-800">{filteredLogs.length}</span> registros de logs
-                      </div>
-
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => setLogPage(prev => Math.max(prev - 1, 1))}
-                          disabled={logPage === 1}
-                          className="p-1.5 rounded-md border border-gray-350 hover:bg-gray-100 text-gray-600 disabled:opacity-40 cursor-pointer"
-                        >
-                          <ChevronLeft size={14} />
-                        </button>
-                        <span className="text-xs font-bold text-gray-700">
-                          Página {logPage} de {totalLogPages}
-                        </span>
-                        <button
-                          onClick={() => setLogPage(prev => Math.min(prev + 1, totalLogPages))}
-                          disabled={logPage === totalLogPages}
-                          className="p-1.5 rounded-md border border-gray-350 hover:bg-gray-100 text-gray-600 disabled:opacity-40 cursor-pointer"
-                        >
-                          <ChevronRight size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <LogsAuditPanel
+                logs={logsList}
+                loading={logsLoading}
+                onReload={loadLogs}
+                usuario={usuario}
+              />
             )}
           </main>
         </div>

@@ -1,5 +1,6 @@
-import { ScheduleRow, LastSaved } from "../types";
+import { ScheduleRow, LastSaved, AuditOperation } from "../types";
 import { formatTimestamp } from "./dateUtils";
+import { flattenAuditForExport } from "./auditService";
 
 /** Usuário autenticado que realizou a exportação (identificação digital). */
 export interface ExportUser {
@@ -476,10 +477,14 @@ function buildScheduleSectionHtml(
   rows: ScheduleRow[],
   renderRows: (rows: ScheduleRow[]) => string,
   observacoes?: string,
-  savedInfo?: string
+  savedInfo?: string,
+  homologacaoInfo?: string
 ): string {
   const obsBlock = observacoes
     ? `<div class="obs-block"><b>Observações da Semana:</b><br/>${escapeHtml(observacoes)}</div>`
+    : "";
+  const homologLine = homologacaoInfo
+    ? `<div class="footer-info" style="margin-top:4px;"><span><b>Homologação:</b> ${escapeHtml(homologacaoInfo)}</span></div>`
     : "";
   const savedLine = savedInfo
     ? `<div class="footer-info"><span>${escapeHtml(savedInfo)}</span></div>`
@@ -493,6 +498,7 @@ function buildScheduleSectionHtml(
         <tbody>${renderRows(rows)}</tbody>
       </table>
       ${obsBlock}
+      ${homologLine}
       ${savedLine}
     </div>
   `;
@@ -650,13 +656,18 @@ export function exportToExcelCustom(
   includeWeekly: boolean,
   includeAlteration: boolean,
   weeklyObservacoes?: string,
-  alterationObservacoes?: string
+  alterationObservacoes?: string,
+  weeklyHomologacao?: string,
+  alterationHomologacao?: string
 ) {
   let csvContent = "\uFEFF"; // UTF-8 BOM
   csvContent += `ESCALA DE SERVIÇO;ANO: ${year};${weekLabel};PERÍODO: ${weekPeriod}\n\n`;
 
   if (includeWeekly) {
     csvContent += "1. ESCALA SEMANAL\n";
+    if (weeklyHomologacao) {
+      csvContent += `Homologação: "${weeklyHomologacao.replace(/"/g, '""')}"\n`;
+    }
     if (weeklyObservacoes) {
       csvContent += `Observações da Semana: "${weeklyObservacoes.replace(/"/g, '""')}"\n\n`;
     }
@@ -684,6 +695,9 @@ export function exportToExcelCustom(
 
   if (includeAlteration) {
     csvContent += "2. ESCALA ALTERAÇÃO\n";
+    if (alterationHomologacao) {
+      csvContent += `Homologação: "${alterationHomologacao.replace(/"/g, '""')}"\n`;
+    }
     if (alterationObservacoes) {
       csvContent += `Observações da Semana: "${alterationObservacoes.replace(/"/g, '""')}"\n\n`;
     }
@@ -734,7 +748,9 @@ export function exportToPDFCustom(
   weeklyObservacoes?: string,
   alterationObservacoes?: string,
   legendasList: { sigla: string; cor: string }[] = [],
-  exportedBy?: ExportUser | null
+  exportedBy?: ExportUser | null,
+  weeklyHomologacao?: string,
+  alterationHomologacao?: string
 ) {
   const getCellStyle = createLegendCellStyleGetter(legendasList);
   const renderRows = (rows: ScheduleRow[]) => renderColoredTableRows(rows, getCellStyle);
@@ -755,7 +771,8 @@ export function exportToPDFCustom(
       weeklyRows,
       renderRows,
       weeklyObservacoes,
-      weeklySavedInfo
+      weeklySavedInfo,
+      weeklyHomologacao
     );
   }
 
@@ -765,7 +782,8 @@ export function exportToPDFCustom(
       alterationRows,
       renderRows,
       alterationObservacoes,
-      alterationSavedInfo
+      alterationSavedInfo,
+      alterationHomologacao
     );
   }
 
@@ -870,6 +888,114 @@ export function exportLogsToPDF(logs: any[], exportedBy?: ExportUser | null) {
     </thead>
     <tbody>
       ${rowsHtml || '<tr><td colspan="11" style="text-align:center;">Nenhum log encontrado.</td></tr>'}
+    </tbody>
+  </table>
+  ${buildDigitalExportFooterHtml(exportedBy)}
+</body>
+</html>`;
+
+  openPrintDocument("Logs de Auditoria", html);
+}
+
+/** Exporta operações desnormalizadas (1 linha por alteração) com coluna Operação. */
+export function exportAuditOperationsToExcel(ops: AuditOperation[]) {
+  const rows = flattenAuditForExport(ops);
+  let csvContent = "\uFEFF";
+  csvContent += "REGISTROS DE AUDITORIA\n\n";
+  csvContent +=
+    "Operação;Data;Hora;Usuário;RE;Perfil;Tipo;Documento;Semana;Ano;Campo;Antes;Depois;Colaborador;Versão;Detalhes\n";
+
+  rows.forEach((r) => {
+    const line = [
+      r.operacaoId,
+      r.data,
+      r.hora,
+      r.usuario,
+      r.re,
+      r.perfil,
+      r.operacao,
+      r.documento,
+      r.semana,
+      r.ano,
+      r.campo,
+      r.antes,
+      r.depois,
+      r.colaborador,
+      r.versao,
+      r.detalhes,
+    ]
+      .map((v) => `"${String(v || "").replace(/"/g, '""')}"`)
+      .join(";");
+    csvContent += line + "\n";
+  });
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute(
+    "download",
+    `Logs_Auditoria_${new Date().toISOString().slice(0, 10)}.csv`
+  );
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+export function exportAuditOperationsToPDF(
+  ops: AuditOperation[],
+  exportedBy?: ExportUser | null
+) {
+  const rows = flattenAuditForExport(ops);
+  const rowsHtml = rows
+    .map(
+      (r) => `
+    <tr>
+      <td class="bold">${escapeHtml(r.operacaoId)}</td>
+      <td>${escapeHtml(r.data)}</td>
+      <td>${escapeHtml(r.hora)}</td>
+      <td class="bold">${escapeHtml(r.usuario)}</td>
+      <td class="font-mono">${escapeHtml(r.re)}</td>
+      <td>${escapeHtml(r.operacao)}</td>
+      <td>${escapeHtml(r.documento)}</td>
+      <td class="bold">${escapeHtml(r.campo)}</td>
+      <td class="text-gray-500">${escapeHtml(r.antes || "-")}</td>
+      <td class="bold text-blue-800">${escapeHtml(r.depois || "-")}</td>
+    </tr>
+  `
+    )
+    .join("");
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Logs de Auditoria</title>
+  <style>${LOGS_REPORT_CSS}</style>
+</head>
+<body>
+  ${buildPrintButtonBar("Visualização de Logs. Clique em Imprimir / PDF para exportar.")}
+  <div class="header">
+    <h1>Relatório de Logs de Auditoria</h1>
+    <div class="meta">Total de linhas: ${rows.length} (desnormalizado a partir de ${ops.length} operação(ões))</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Operação</th>
+        <th>Data</th>
+        <th>Hora</th>
+        <th>Usuário</th>
+        <th>RE</th>
+        <th>Tipo</th>
+        <th>Documento</th>
+        <th>Campo</th>
+        <th>Antes</th>
+        <th>Depois</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || '<tr><td colspan="10" style="text-align:center;">Nenhum log encontrado.</td></tr>'}
     </tbody>
   </table>
   ${buildDigitalExportFooterHtml(exportedBy)}

@@ -4,22 +4,25 @@ import {
   EscalaDocument,
   ESCALA_STATUS_LABELS,
   ScheduleRow,
+  TipoEscalaDocumento,
+  TIPO_ESCALA_LABELS,
 } from "../types";
 import {
   approveScale,
   getClosedApprovalMessage,
+  getEscalaDocumentoLabel,
+  getRevisaoInfo,
   isApprovalRequestOpen,
-  loadAlterationEscala,
-  loadWeeklyEscala,
+  loadEscalaDocumento,
   normalizeEscalaStatus,
-  rejectScale,
+  requestRevisionScale,
 } from "../utils/approvalService";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
 import StatusBadge from "./StatusBadge";
 import {
   CheckCircle,
-  XCircle,
+  RotateCcw,
   ShieldAlert,
   ArrowLeft,
   AlertCircle,
@@ -28,6 +31,7 @@ import {
 
 interface AprovacaoPageProps {
   escalaId: string;
+  tipo: TipoEscalaDocumento;
   usuario: Usuario;
   onBack: () => void;
   onLogout: () => void;
@@ -93,43 +97,44 @@ function ReadOnlyScheduleTable({
 
 export default function AprovacaoPage({
   escalaId,
+  tipo,
   usuario,
   onBack,
   onLogout,
 }: AprovacaoPageProps) {
   const [loading, setLoading] = useState(true);
   const [escala, setEscala] = useState<EscalaDocument | null>(null);
-  const [alteracao, setAlteracao] = useState<EscalaDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [confirmMode, setConfirmMode] = useState<"approve" | "reject" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"approve" | "revisao" | null>(null);
   const [confirmRe, setConfirmRe] = useState("");
   const [observacao, setObservacao] = useState("");
+  const [motivoRevisao, setMotivoRevisao] = useState("");
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
   const allowed = canApproveScales(usuario);
+  const docLabel = getEscalaDocumentoLabel(tipo);
+  const titleUpper =
+    tipo === "alteracao"
+      ? "APROVAÇÃO DA ESCALA ALTERAÇÃO"
+      : "APROVAÇÃO DA ESCALA SEMANAL";
 
   const reload = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [weekly, alt] = await Promise.all([
-        loadWeeklyEscala(escalaId),
-        loadAlterationEscala(escalaId),
-      ]);
-      if (!weekly) {
+      const docData = await loadEscalaDocumento(escalaId, tipo);
+      if (!docData) {
         setEscala(null);
-        setAlteracao(null);
-        setError("Escala não encontrada.");
+        setError(`${docLabel} não encontrada.`);
       } else {
-        setEscala(weekly);
-        setAlteracao(alt);
+        setEscala(docData);
       }
     } catch (e) {
       console.error(e);
-      setError("Erro ao carregar a escala.");
+      setError(`Erro ao carregar a ${docLabel}.`);
     } finally {
       setLoading(false);
     }
@@ -137,20 +142,25 @@ export default function AprovacaoPage({
 
   useEffect(() => {
     reload();
-  }, [escalaId]);
+  }, [escalaId, tipo]);
 
   const status = normalizeEscalaStatus(escala?.status);
   const requestOpen = isApprovalRequestOpen(escala);
   const canAct = allowed && requestOpen && !busy;
+  const semanaLabel = escala
+    ? `Semana ${String(escala.semana).padStart(2, "0")}/${escala.ano}`
+    : escalaId;
+  const revisaoInfo = getRevisaoInfo(escala?.aprovacao);
 
-  const openConfirm = (mode: "approve" | "reject") => {
+  const openConfirm = (mode: "approve" | "revisao") => {
     if (!requestOpen) {
-      setError(getClosedApprovalMessage(status));
+      setError(getClosedApprovalMessage(status, tipo));
       return;
     }
     setConfirmMode(mode);
     setConfirmRe("");
     setObservacao("");
+    setMotivoRevisao("");
     setConfirmError(null);
   };
 
@@ -158,6 +168,7 @@ export default function AprovacaoPage({
     setConfirmMode(null);
     setConfirmRe("");
     setObservacao("");
+    setMotivoRevisao("");
     setConfirmError(null);
   };
 
@@ -172,20 +183,26 @@ export default function AprovacaoPage({
       return;
     }
 
+    if (confirmMode === "revisao" && !motivoRevisao.trim()) {
+      setConfirmError("Informe o motivo da revisão.");
+      return;
+    }
+
     setBusy(true);
     try {
-      // Revalida no servidor (status pode ter mudado)
-      const fresh = await loadWeeklyEscala(escalaId);
+      const fresh = await loadEscalaDocumento(escalaId, tipo);
       if (!isApprovalRequestOpen(fresh)) {
-        throw new Error(getClosedApprovalMessage(normalizeEscalaStatus(fresh?.status)));
+        throw new Error(
+          getClosedApprovalMessage(normalizeEscalaStatus(fresh?.status), tipo)
+        );
       }
 
       if (confirmMode === "approve") {
-        await approveScale(escalaId, usuario, observacao.trim());
-        setSuccess("Escala aprovada com sucesso.");
+        await approveScale(escalaId, usuario, observacao.trim(), tipo);
+        setSuccess(`${docLabel} aprovada com sucesso.`);
       } else {
-        await rejectScale(escalaId, usuario, observacao.trim());
-        setSuccess("Escala rejeitada.");
+        await requestRevisionScale(escalaId, usuario, motivoRevisao.trim(), tipo);
+        setSuccess(`Revisão solicitada. A ${docLabel} foi devolvida para correção.`);
       }
       closeConfirm();
       await reload();
@@ -237,13 +254,12 @@ export default function AprovacaoPage({
             </button>
             <div className="min-w-0">
               <h1 className="text-sm font-bold uppercase tracking-wider truncate">
-                {escala
-                  ? `Semana ${String(escala.semana).padStart(2, "0")} · ${escala.ano}`
-                  : "Aprovação de Escala"}
+                {titleUpper}
               </h1>
               <p className="text-[11px] text-gray-400 truncate">
-                {escala?.periodo || escalaId} · Gestor {usuario.postoGrad} {usuario.nome} · RE{" "}
-                {normalizeRe(usuario.re)}
+                {semanaLabel}
+                {escala?.periodo ? ` · ${escala.periodo}` : ""} · Gestor {usuario.postoGrad}{" "}
+                {usuario.nome} · RE {normalizeRe(usuario.re)}
               </p>
             </div>
           </div>
@@ -254,7 +270,7 @@ export default function AprovacaoPage({
       <main className="max-w-5xl mx-auto px-4 mt-6 space-y-4">
         {loading && (
           <div className="bg-white border border-gray-200 rounded-xl p-6 text-sm text-gray-500">
-            Carregando escala...
+            Carregando {docLabel.toLowerCase()}...
           </div>
         )}
 
@@ -272,14 +288,35 @@ export default function AprovacaoPage({
           </div>
         )}
 
+        {escala && !loading && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-950 rounded-lg p-4 text-sm font-semibold">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-700 mb-1">
+              Documento em análise
+            </div>
+            <div className="text-base font-extrabold uppercase tracking-wide">
+              {TIPO_ESCALA_LABELS[tipo]}
+            </div>
+            <p className="text-xs font-medium text-blue-800 mt-1">
+              {semanaLabel} — somente este documento será aprovado ou devolvido para revisão
+              nesta tela.
+            </p>
+          </div>
+        )}
+
         {escala && !loading && !requestOpen && (
           <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 flex items-start gap-2 text-sm font-semibold">
             <Lock className="shrink-0 mt-0.5 text-amber-600" size={18} />
             <div>
-              <div>{getClosedApprovalMessage(status)}</div>
+              <div>{getClosedApprovalMessage(status, tipo)}</div>
               <p className="text-xs font-medium text-amber-800 mt-1">
-                Status atual: {ESCALA_STATUS_LABELS[status]}. Nenhuma nova ação pode ser realizada por este link.
+                Status atual: {ESCALA_STATUS_LABELS[status]}. Nenhuma nova ação pode ser realizada
+                por este link.
               </p>
+              {status === "revisao_solicitada" && revisaoInfo.motivo && (
+                <p className="text-xs font-medium text-orange-800 mt-2 whitespace-pre-wrap">
+                  Motivo: {revisaoInfo.motivo}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -289,17 +326,21 @@ export default function AprovacaoPage({
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">
-                    Semana {String(escala.semana).padStart(2, "0")} · Ano {escala.ano}
-                  </h2>
-                  <p className="text-sm text-gray-500 mt-0.5">Período: {escala.periodo}</p>
+                  <h2 className="text-base font-bold text-gray-900">{docLabel}</h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {semanaLabel}
+                    {escala.periodo ? ` · ${escala.periodo}` : ""}
+                  </p>
                 </div>
                 <div className="text-right text-xs text-gray-500">
                   <div>
                     Versão <b className="text-gray-800">v{escala.versao || 1}</b>
                   </div>
                   {escala.aprovacao?.solicitacaoId && (
-                    <div className="font-mono text-[10px] mt-0.5 max-w-[220px] truncate" title={escala.aprovacao.solicitacaoId}>
+                    <div
+                      className="font-mono text-[10px] mt-0.5 max-w-[220px] truncate"
+                      title={escala.aprovacao.solicitacaoId}
+                    >
                       ID: {escala.aprovacao.solicitacaoId}
                     </div>
                   )}
@@ -335,26 +376,23 @@ export default function AprovacaoPage({
                       (RE {normalizeRe(escala.aprovacao.aprovadoPor.re)}) ·{" "}
                       {escala.aprovacao.aprovadoPor.data} às {escala.aprovacao.aprovadoPor.hora}
                     </div>
-                    {escala.aprovacao.observacaoAprovacao && (
-                      <p className="mt-1 text-emerald-800">
-                        Observação: {escala.aprovacao.observacaoAprovacao}
-                      </p>
-                    )}
                   </div>
                 )}
 
-                {escala.aprovacao?.rejeitadoPor && (
-                  <div className="bg-red-50 rounded-lg p-3 border border-red-100 sm:col-span-2">
-                    <div className="text-[10px] font-bold text-red-700 uppercase mb-1">
-                      Rejeitado por
+                {revisaoInfo.por && (
+                  <div className="bg-orange-50 rounded-lg p-3 border border-orange-200 sm:col-span-2">
+                    <div className="text-[10px] font-bold text-orange-800 uppercase mb-1">
+                      Revisão solicitada por
                     </div>
-                    <div className="font-semibold text-red-900">
-                      {escala.aprovacao.rejeitadoPor.postoGrad} {escala.aprovacao.rejeitadoPor.nome}{" "}
-                      (RE {normalizeRe(escala.aprovacao.rejeitadoPor.re)}) ·{" "}
-                      {escala.aprovacao.rejeitadoPor.data} às {escala.aprovacao.rejeitadoPor.hora}
+                    <div className="font-semibold text-orange-950">
+                      {revisaoInfo.por.postoGrad} {revisaoInfo.por.nome} (RE{" "}
+                      {normalizeRe(revisaoInfo.por.re)}) · {revisaoInfo.por.data} às{" "}
+                      {revisaoInfo.por.hora}
                     </div>
-                    {escala.aprovacao.motivoRejeicao && (
-                      <p className="mt-1 text-red-700">Motivo: {escala.aprovacao.motivoRejeicao}</p>
+                    {revisaoInfo.motivo && (
+                      <p className="mt-1 text-orange-900 whitespace-pre-wrap">
+                        Motivo: {revisaoInfo.motivo}
+                      </p>
                     )}
                   </div>
                 )}
@@ -364,27 +402,15 @@ export default function AprovacaoPage({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-wider">
                 <Lock size={12} />
-                Visualização somente leitura
+                Visualização somente leitura — {docLabel}
               </div>
-              <ReadOnlyScheduleTable title="1. Escala Semanal" rows={escala.rows || []} />
+              <ReadOnlyScheduleTable title={docLabel} rows={escala.rows || []} />
               {escala.observacoes && (
                 <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs text-gray-700">
                   <div className="font-bold text-gray-500 uppercase text-[10px] mb-1">
-                    Observações da Escala Semanal
+                    Observações — {docLabel}
                   </div>
                   <div className="whitespace-pre-wrap">{escala.observacoes}</div>
-                </div>
-              )}
-              <ReadOnlyScheduleTable
-                title="2. Escala Alteração"
-                rows={alteracao?.rows || []}
-              />
-              {alteracao?.observacoes && (
-                <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs text-gray-700">
-                  <div className="font-bold text-gray-500 uppercase text-[10px] mb-1">
-                    Observações da Escala Alteração
-                  </div>
-                  <div className="whitespace-pre-wrap">{alteracao.observacoes}</div>
                 </div>
               )}
             </div>
@@ -393,11 +419,11 @@ export default function AprovacaoPage({
               <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 flex flex-wrap gap-3 justify-end">
                 <button
                   disabled={!canAct}
-                  onClick={() => openConfirm("reject")}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-red-700 bg-white border border-red-200 hover:bg-red-50 rounded-lg cursor-pointer disabled:opacity-50"
+                  onClick={() => openConfirm("revisao")}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-orange-900 bg-orange-50 border border-orange-300 hover:bg-orange-100 rounded-lg cursor-pointer disabled:opacity-50"
                 >
-                  <XCircle size={14} />
-                  Rejeitar
+                  <RotateCcw size={14} />
+                  Solicitar Revisão
                 </button>
                 <button
                   disabled={!canAct}
@@ -413,17 +439,18 @@ export default function AprovacaoPage({
         )}
       </main>
 
-      {confirmMode && (
+      {confirmMode === "approve" && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full overflow-hidden border border-gray-200">
             <div className="bg-gray-900 text-white px-5 py-3">
               <h3 className="text-sm font-bold uppercase tracking-wider">
-                {confirmMode === "approve" ? "Confirmar Aprovação" : "Confirmar Rejeição"}
+                Confirmar Aprovação — {docLabel}
               </h3>
             </div>
             <div className="p-5 space-y-4">
               <p className="text-xs text-gray-600">
-                Digite novamente seu R.E. (sem o dígito) para confirmar a ação.
+                Você está homologando exclusivamente a <b>{docLabel}</b> ({semanaLabel}). Digite
+                novamente seu R.E. (sem o dígito) para confirmar.
               </p>
               <div>
                 <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">
@@ -440,7 +467,7 @@ export default function AprovacaoPage({
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">
-                  Observações da {confirmMode === "approve" ? "aprovação" : "rejeição"} (opcional)
+                  Observações da aprovação (opcional)
                 </label>
                 <textarea
                   value={observacao}
@@ -450,32 +477,99 @@ export default function AprovacaoPage({
                 />
               </div>
               {confirmError && (
-                <p className="text-xs text-red-600 font-semibold">{confirmError}</p>
+                <p className="text-xs font-semibold text-red-600">{confirmError}</p>
               )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeConfirm}
+                  disabled={busy}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  disabled={busy}
+                  className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  {busy ? "Processando..." : "Confirmar aprovação"}
+                </button>
+              </div>
             </div>
-            <div className="bg-gray-50 px-5 py-3 flex justify-end gap-2 border-t border-gray-100">
-              <button
-                onClick={closeConfirm}
-                disabled={busy}
-                className="px-4 py-2 text-xs font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={busy || !confirmRe.trim()}
-                className={`px-4 py-2 text-xs font-bold text-white rounded-lg cursor-pointer disabled:opacity-50 ${
-                  confirmMode === "approve"
-                    ? "bg-emerald-600 hover:bg-emerald-500"
-                    : "bg-red-600 hover:bg-red-500"
-                }`}
-              >
-                {busy
-                  ? "Processando..."
-                  : confirmMode === "approve"
-                    ? "Aprovar"
-                    : "Rejeitar"}
-              </button>
+          </div>
+        </div>
+      )}
+
+      {confirmMode === "revisao" && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-5 py-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider">Solicitar Revisão</h3>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Você está devolvendo este documento (<b>{docLabel}</b> — {semanaLabel}) para
+                correção.
+              </p>
+              <p className="text-xs text-gray-600">
+                Informe o motivo da revisão. Esse motivo ficará registrado no histórico da escala.
+              </p>
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">
+                  Digite novamente seu RE
+                </label>
+                <input
+                  type="text"
+                  value={confirmRe}
+                  onChange={(e) => setConfirmRe(e.target.value)}
+                  placeholder="Ex: 104585"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="motivo-revisao"
+                  className="block text-[10px] font-bold text-orange-700 uppercase mb-1"
+                >
+                  Motivo da revisão *
+                </label>
+                <textarea
+                  id="motivo-revisao"
+                  value={motivoRevisao}
+                  onChange={(e) => {
+                    setMotivoRevisao(e.target.value);
+                    if (confirmError) setConfirmError(null);
+                  }}
+                  rows={4}
+                  placeholder="Descreva o que precisa ser corrigido..."
+                  className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                />
+              </div>
+              {confirmError && (
+                <p className="text-xs font-semibold text-red-600">{confirmError}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeConfirm}
+                  disabled={busy}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirm}
+                  disabled={busy || !motivoRevisao.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCcw size={14} />
+                  {busy ? "Enviando..." : "Solicitar Revisão"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

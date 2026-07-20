@@ -5,28 +5,34 @@ import {
   ScheduleRow, 
   EscalaDocument, 
   Colaborador, 
-  AuditLog, 
+  AuditAlteracao,
   OPCOES_ESCALA,
   POSTOS_GRADUACOES,
   EscalaStatus,
   EscalaAprovacao,
   HistoricoEscalaEvento,
+  TipoEscalaDocumento,
 } from "../types";
 import { WeekInfo, formatTimestamp } from "../utils/dateUtils";
 import { exportToExcelCustom, exportToPDFCustom } from "../utils/exportUtils";
 import {
   buildHistoricoEvento,
-  buildReopenAfterEdit,
-  formatNowParts,
+  cancelApprovalRequest,
+  formatHomologacaoResumo,
   getApprovalUrl,
+  getEscalaDocumentoLabel,
+  getRevisaoInfo,
   normalizeEscalaStatus,
+  reopenApprovedScale,
   submitScaleForApproval,
 } from "../utils/approvalService";
+import { auditExportacao, auditSalvarEscala, statusLabel } from "../utils/auditService";
 import {
   canAccessConfig,
+  canCancelApprovalRequest,
   canEditScale,
+  canReopenApprovedScale,
   canSubmitForApproval,
-  isAdministrador,
   isGestor,
 } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
@@ -59,6 +65,8 @@ import {
   Link2,
   History,
   Clock,
+  RotateCcw,
+  XCircle,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -76,7 +84,7 @@ interface ScheduleEditorProps {
   onBack: () => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
-  onOpenApproval?: (escalaId: string) => void;
+  onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
 }
 
 export default function ScheduleEditor({
@@ -105,14 +113,32 @@ export default function ScheduleEditor({
   const [loadedWeeklyTimestamp, setLoadedWeeklyTimestamp] = useState<any | null>(null);
   const [loadedAlterationTimestamp, setLoadedAlterationTimestamp] = useState<any | null>(null);
 
-  // Approval workflow state (from escalas_semanais)
-  const [escalaStatus, setEscalaStatus] = useState<EscalaStatus>("em_edicao");
-  const [escalaVersao, setEscalaVersao] = useState(1);
-  const [escalaAprovacao, setEscalaAprovacao] = useState<EscalaAprovacao | null>(null);
-  const [escalaHistorico, setEscalaHistorico] = useState<HistoricoEscalaEvento[]>([]);
+  // Independent approval workflow — Escala Semanal
+  const [weeklyStatus, setWeeklyStatus] = useState<EscalaStatus>("em_edicao");
+  const [weeklyVersao, setWeeklyVersao] = useState(1);
+  const [weeklyAprovacao, setWeeklyAprovacao] = useState<EscalaAprovacao | null>(null);
+  const [weeklyHistorico, setWeeklyHistorico] = useState<HistoricoEscalaEvento[]>([]);
+
+  // Independent approval workflow — Escala Alteração
+  const [altStatus, setAltStatus] = useState<EscalaStatus>("em_edicao");
+  const [altVersao, setAltVersao] = useState(1);
+  const [altAprovacao, setAltAprovacao] = useState<EscalaAprovacao | null>(null);
+  const [altHistorico, setAltHistorico] = useState<HistoricoEscalaEvento[]>([]);
+
   const [submittingApproval, setSubmittingApproval] = useState(false);
-  const [approvalLink, setApprovalLink] = useState<string | null>(null);
-  const [showHistorico, setShowHistorico] = useState(false);
+  const [approvalLinkWeekly, setApprovalLinkWeekly] = useState<string | null>(null);
+  const [approvalLinkAlt, setApprovalLinkAlt] = useState<string | null>(null);
+  const [showWeeklyHistorico, setShowWeeklyHistorico] = useState(false);
+  const [showAltHistorico, setShowAltHistorico] = useState(false);
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  const [reopenTipo, setReopenTipo] = useState<TipoEscalaDocumento>("semanal");
+  const [reopenMotivo, setReopenMotivo] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
+  const [reopenError, setReopenError] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [submitConfirmTipo, setSubmitConfirmTipo] = useState<TipoEscalaDocumento | null>(null);
+  const [pendingSavePanel, setPendingSavePanel] = useState<TipoEscalaDocumento | null>(null);
+  const [savingPanel, setSavingPanel] = useState<TipoEscalaDocumento | null>(null);
 
   // Master collaborators pool (for modal dropdown selection)
   const [collaboratorsPool, setCollaboratorsPool] = useState<Colaborador[]>([]);
@@ -149,26 +175,50 @@ export default function ScheduleEditor({
   const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf");
   const [exportSelectedRes, setExportSelectedRes] = useState<string[]>([]);
 
-  // Track if local state has unsaved changes
-  const isDirty = React.useMemo(() => {
-    return (
+  // Independent dirty / editability per panel
+  const isWeeklyDirty = React.useMemo(
+    () =>
       JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows) ||
-      JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows) ||
-      weeklyObservacoes !== dbWeeklyObservacoes ||
-      alterationObservacoes !== dbAlterationObservacoes
-    );
-  }, [localWeeklyRows, dbWeeklyRows, localAlterationRows, dbAlterationRows, weeklyObservacoes, dbWeeklyObservacoes, alterationObservacoes, dbAlterationObservacoes]);
-
-  const isEditable = React.useMemo(
-    () => canEditScale(usuario, week, escalaStatus),
-    [usuario, week, escalaStatus]
+      weeklyObservacoes !== dbWeeklyObservacoes,
+    [localWeeklyRows, dbWeeklyRows, weeklyObservacoes, dbWeeklyObservacoes]
   );
 
-  const showSubmitApproval =
+  const isAltDirty = React.useMemo(
+    () =>
+      JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows) ||
+      alterationObservacoes !== dbAlterationObservacoes,
+    [localAlterationRows, dbAlterationRows, alterationObservacoes, dbAlterationObservacoes]
+  );
+
+  const isDirty = isWeeklyDirty || isAltDirty;
+
+  const isWeeklyEditable = React.useMemo(
+    () => canEditScale(usuario, week, weeklyStatus),
+    [usuario, week, weeklyStatus]
+  );
+
+  const isAltEditable = React.useMemo(
+    () => canEditScale(usuario, week, altStatus),
+    [usuario, week, altStatus]
+  );
+
+  const showSubmitWeekly =
     canSubmitForApproval(usuario) &&
-    (escalaStatus === "em_edicao" || escalaStatus === "rejeitada") &&
-    !isDirty &&
+    (weeklyStatus === "em_edicao" || weeklyStatus === "revisao_solicitada") &&
+    !isWeeklyDirty &&
     dbWeeklySaved !== null;
+
+  const showSubmitAlt =
+    canSubmitForApproval(usuario) &&
+    (altStatus === "em_edicao" || altStatus === "revisao_solicitada") &&
+    !isAltDirty &&
+    dbWeeklySaved !== null &&
+    (dbAlterationSaved !== null || localAlterationRows.length > 0);
+
+  const showCancelWeekly = canCancelApprovalRequest(usuario, weeklyStatus);
+  const showCancelAlt = canCancelApprovalRequest(usuario, altStatus);
+  const showReopenWeekly = canReopenApprovedScale(usuario, weeklyStatus);
+  const showReopenAlt = canReopenApprovedScale(usuario, altStatus);
 
   // Dynamically resolve and sort rows based on the up-to-date collaborators pool!
   const resolvedWeeklyRows = React.useMemo(() => {
@@ -324,10 +374,10 @@ export default function ScheduleEditor({
         setWeeklyObservacoes(obs);
         setDbWeeklyObservacoes(obs);
 
-        setEscalaStatus(normalizeEscalaStatus(data.status));
-        setEscalaVersao(data.versao && data.versao > 0 ? data.versao : 1);
-        setEscalaAprovacao(data.aprovacao || null);
-        setEscalaHistorico(Array.isArray(data.historico) ? data.historico : []);
+        setWeeklyStatus(normalizeEscalaStatus(data.status));
+        setWeeklyVersao(data.versao && data.versao > 0 ? data.versao : 1);
+        setWeeklyAprovacao(data.aprovacao || null);
+        setWeeklyHistorico(Array.isArray(data.historico) ? data.historico : []);
 
         if (data.lastSaved) {
           hasWeeklySaved = true;
@@ -351,7 +401,7 @@ export default function ScheduleEditor({
 
         const criacao = buildHistoricoEvento({
           tipo: "criacao",
-          descricao: "Escala criada",
+          descricao: "Escala Semanal criada",
           usuario,
           versao: 1,
         });
@@ -380,10 +430,10 @@ export default function ScheduleEditor({
         setLoadedWeeklyTimestamp(null);
         setWeeklyObservacoes("");
         setDbWeeklyObservacoes("");
-        setEscalaStatus("em_edicao");
-        setEscalaVersao(1);
-        setEscalaAprovacao(null);
-        setEscalaHistorico([criacao]);
+        setWeeklyStatus("em_edicao");
+        setWeeklyVersao(1);
+        setWeeklyAprovacao(null);
+        setWeeklyHistorico([criacao]);
       }
 
       // Process Alterations Scale
@@ -398,9 +448,27 @@ export default function ScheduleEditor({
           const obs = data.observacoes || "";
           setAlterationObservacoes(obs);
           setDbAlterationObservacoes(obs);
+
+          const hasStatusField = data.status !== undefined && data.status !== null;
+          setAltStatus(hasStatusField ? normalizeEscalaStatus(data.status) : "em_edicao");
+          setAltVersao(data.versao && data.versao > 0 ? data.versao : 1);
+          setAltAprovacao(data.aprovacao || null);
+          setAltHistorico(
+            Array.isArray(data.historico)
+              ? data.historico
+              : hasStatusField
+                ? []
+                : []
+          );
         } else {
-          // Create automatically as an empty list (NEW BEHAVIOR)
+          // Create automatically as an empty list with independent approval cycle
           const rows: ScheduleRow[] = [];
+          const criacaoAlt = buildHistoricoEvento({
+            tipo: "criacao",
+            descricao: "Escala Alteração criada",
+            usuario,
+            versao: 1,
+          });
           
           const docData = {
             id: docId,
@@ -409,7 +477,11 @@ export default function ScheduleEditor({
             periodo: week.periodo,
             rows: rows,
             lastSaved: null,
-            observacoes: ""
+            observacoes: "",
+            status: "em_edicao" as EscalaStatus,
+            versao: 1,
+            aprovacao: null,
+            historico: [criacaoAlt],
           };
           await setDoc(
             alterationDocRef,
@@ -422,6 +494,10 @@ export default function ScheduleEditor({
           setLoadedAlterationTimestamp(null);
           setAlterationObservacoes("");
           setDbAlterationObservacoes("");
+          setAltStatus("em_edicao");
+          setAltVersao(1);
+          setAltAprovacao(null);
+          setAltHistorico([criacaoAlt]);
         }
       } else {
         // Escala Alteração is empty / not saved yet
@@ -431,6 +507,10 @@ export default function ScheduleEditor({
         setLoadedAlterationTimestamp(null);
         setAlterationObservacoes("");
         setDbAlterationObservacoes("");
+        setAltStatus("em_edicao");
+        setAltVersao(1);
+        setAltAprovacao(null);
+        setAltHistorico([]);
       }
 
     } catch (err: any) {
@@ -467,7 +547,8 @@ export default function ScheduleEditor({
 
   // Add collaborator confirmed in modal
   const handleAddColConfirm = async (col: Colaborador) => {
-    if (!isEditable) return;
+    const panelEditable = activePanelForModal === "semanal" ? isWeeklyEditable : isAltEditable;
+    if (!panelEditable) return;
     // 1. Instantly register in pool if it doesn't exist
     const existsInPool = collaboratorsPool.some((p) => p.re === col.re);
     if (!existsInPool) {
@@ -576,17 +657,18 @@ export default function ScheduleEditor({
 
   // Delete collaborator row
   const handleDeleteCol = (panel: "semanal" | "alteracao", reToDelete: string) => {
-    if (!isEditable) return;
     if (panel === "semanal") {
+      if (!isWeeklyEditable) return;
       setLocalWeeklyRows((prev) => prev.filter((r) => r.re !== reToDelete));
     } else {
+      if (!isAltEditable) return;
       setLocalAlterationRows((prev) => prev.filter((r) => r.re !== reToDelete));
     }
   };
 
   // Copy a specific row from Escala Semanal to Escala de Alteração
   const handleCopyToAlteration = (row: ScheduleRow) => {
-    if (!isEditable) return;
+    if (!isAltEditable) return;
     // Check if already exists in alteration rows
     const exists = localAlterationRows.some((r) => r.re === row.re);
     if (exists) {
@@ -641,7 +723,8 @@ export default function ScheduleEditor({
     field: "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom" | "observacao",
     value: string
   ) => {
-    if (!isEditable) return;
+    if (panel === "semanal" && !isWeeklyEditable) return;
+    if (panel === "alteracao" && !isAltEditable) return;
     const updateRows = (prev: ScheduleRow[]) =>
       prev.map((r) => {
         if (r.re === reRow) {
@@ -657,388 +740,370 @@ export default function ScheduleEditor({
     }
   };
 
-  // Verification and Concurrency-aware Save Trigger
-  const handleSaveTrigger = async () => {
-    if (!isEditable) {
-      setSaveError("Você não possui permissão para editar esta escala.");
+  // Verification and Concurrency-aware Save Trigger (per panel)
+  const handleSaveTrigger = async (panel: TipoEscalaDocumento) => {
+    const editable = panel === "semanal" ? isWeeklyEditable : isAltEditable;
+    const label = getEscalaDocumentoLabel(panel);
+    if (!editable) {
+      setSaveError(`Você não possui permissão para editar a ${label}.`);
       return;
     }
     setSaving(true);
+    setSavingPanel(panel);
     setSaveError(null);
     setSaveSuccess(false);
+    setPendingSavePanel(panel);
 
     try {
-      // 1. Query Firestore for the current database state of both documents
-      const weeklyDocRef = doc(db, "escalas_semanais", docId);
-      const alterationDocRef = doc(db, "escalas_alteracao", docId);
-
-      const [weeklySnap, alterationSnap] = await Promise.all([
-        getDoc(weeklyDocRef),
-        getDoc(alterationDocRef),
-      ]);
-
-      let conflictFound = false;
-      let conflictSavedInfo: any = null;
-
-      // Check Weekly Scale conflict
-      if (weeklySnap.exists()) {
-        const serverData = weeklySnap.data() as EscalaDocument;
-        const serverTimestamp = serverData.lastSaved?.timestamp;
-        
-        // If server timestamp exists and is newer than what we loaded
-        if (serverTimestamp && loadedWeeklyTimestamp) {
-          const serverTimeMs = serverTimestamp.toMillis ? serverTimestamp.toMillis() : new Date(serverTimestamp).getTime();
-          const loadedTimeMs = loadedWeeklyTimestamp.toMillis ? loadedWeeklyTimestamp.toMillis() : new Date(loadedWeeklyTimestamp).getTime();
-          
-          if (serverTimeMs > loadedTimeMs) {
-            conflictFound = true;
-            conflictSavedInfo = serverData.lastSaved;
+      if (panel === "semanal") {
+        const weeklyDocRef = doc(db, "escalas_semanais", docId);
+        const weeklySnap = await getDoc(weeklyDocRef);
+        if (weeklySnap.exists()) {
+          const serverData = weeklySnap.data() as EscalaDocument;
+          const serverStatus = normalizeEscalaStatus(serverData.status);
+          if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
+            setWeeklyStatus(serverStatus);
+            setWeeklyVersao(serverData.versao && serverData.versao > 0 ? serverData.versao : 1);
+            setWeeklyAprovacao(serverData.aprovacao || null);
+            setWeeklyHistorico(Array.isArray(serverData.historico) ? serverData.historico : []);
+            setSaveError(
+              serverStatus === "aprovada"
+                ? "A Escala Semanal está aprovada e não pode ser editada. Solicite a um Gestor a reabertura."
+                : "A Escala Semanal está aguardando aprovação e não pode ser editada. Cancele a solicitação antes de alterar."
+            );
+            setSaving(false);
+            setSavingPanel(null);
+            return;
+          }
+          const serverTimestamp = serverData.lastSaved?.timestamp;
+          if (serverTimestamp && loadedWeeklyTimestamp) {
+            const serverTimeMs = serverTimestamp.toMillis
+              ? serverTimestamp.toMillis()
+              : new Date(serverTimestamp).getTime();
+            const loadedTimeMs = loadedWeeklyTimestamp.toMillis
+              ? loadedWeeklyTimestamp.toMillis()
+              : new Date(loadedWeeklyTimestamp).getTime();
+            if (serverTimeMs > loadedTimeMs) {
+              setConcurrencyConflictDoc(serverData.lastSaved);
+              setIsConcurrencyModalOpen(true);
+              setSaving(false);
+              setSavingPanel(null);
+              return;
+            }
+          }
+        }
+      } else {
+        const alterationDocRef = doc(db, "escalas_alteracao", docId);
+        const alterationSnap = await getDoc(alterationDocRef);
+        if (alterationSnap.exists()) {
+          const serverData = alterationSnap.data() as EscalaDocument;
+          const serverStatus = normalizeEscalaStatus(serverData.status);
+          if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
+            setAltStatus(serverStatus);
+            setAltVersao(serverData.versao && serverData.versao > 0 ? serverData.versao : 1);
+            setAltAprovacao(serverData.aprovacao || null);
+            setAltHistorico(Array.isArray(serverData.historico) ? serverData.historico : []);
+            setSaveError(
+              serverStatus === "aprovada"
+                ? "A Escala Alteração está aprovada e não pode ser editada. Solicite a um Gestor a reabertura."
+                : "A Escala Alteração está aguardando aprovação e não pode ser editada. Cancele a solicitação antes de alterar."
+            );
+            setSaving(false);
+            setSavingPanel(null);
+            return;
+          }
+          const serverTimestamp = serverData.lastSaved?.timestamp;
+          if (serverTimestamp && loadedAlterationTimestamp) {
+            const serverTimeMs = serverTimestamp.toMillis
+              ? serverTimestamp.toMillis()
+              : new Date(serverTimestamp).getTime();
+            const loadedTimeMs = loadedAlterationTimestamp.toMillis
+              ? loadedAlterationTimestamp.toMillis()
+              : new Date(loadedAlterationTimestamp).getTime();
+            if (serverTimeMs > loadedTimeMs) {
+              setConcurrencyConflictDoc(serverData.lastSaved);
+              setIsConcurrencyModalOpen(true);
+              setSaving(false);
+              setSavingPanel(null);
+              return;
+            }
           }
         }
       }
 
-      // Check Alterations Scale conflict
-      if (!conflictFound && alterationSnap.exists()) {
-        const serverData = alterationSnap.data() as EscalaDocument;
-        const serverTimestamp = serverData.lastSaved?.timestamp;
-
-        if (serverTimestamp && loadedAlterationTimestamp) {
-          const serverTimeMs = serverTimestamp.toMillis ? serverTimestamp.toMillis() : new Date(serverTimestamp).getTime();
-          const loadedTimeMs = loadedAlterationTimestamp.toMillis ? loadedAlterationTimestamp.toMillis() : new Date(loadedAlterationTimestamp).getTime();
-
-          if (serverTimeMs > loadedTimeMs) {
-            conflictFound = true;
-            conflictSavedInfo = serverData.lastSaved;
-          }
-        }
-      }
-
-      if (conflictFound) {
-        // Concurrency conflict detected! Show modal.
-        setConcurrencyConflictDoc(conflictSavedInfo);
-        setIsConcurrencyModalOpen(true);
-        setSaving(false);
-        return;
-      }
-
-      // No conflict! Perform save directly
-      await performSaveAndLog();
-
+      await performSaveAndLog(panel);
     } catch (err: any) {
       console.error("Save validation failed:", err);
       setSaveError("Erro de comunicação ao salvar. Tente novamente.");
       setSaving(false);
+      setSavingPanel(null);
     }
   };
 
-  // Perform Firestore updates and write logs
-  const performSaveAndLog = async () => {
+  const performSaveAndLog = async (panel?: TipoEscalaDocumento) => {
+    const target = panel || pendingSavePanel || "semanal";
+    const editable = target === "semanal" ? isWeeklyEditable : isAltEditable;
+    const label = getEscalaDocumentoLabel(target);
+    if (!editable) {
+      setSaveError(`A ${label} não pode ser editada no status atual.`);
+      setSaving(false);
+      setSavingPanel(null);
+      return;
+    }
     setSaving(true);
+    setSavingPanel(target);
     setSaveError(null);
 
     try {
       const now = new Date();
       const timestamp = Timestamp.fromDate(now);
-      const dataStr = String(now.getDate()).padStart(2, "0") + "/" + String(now.getMonth() + 1).padStart(2, "0") + "/" + now.getFullYear();
-      const horaStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+      const dataStr =
+        String(now.getDate()).padStart(2, "0") +
+        "/" +
+        String(now.getMonth() + 1).padStart(2, "0") +
+        "/" +
+        now.getFullYear();
+      const horaStr =
+        String(now.getHours()).padStart(2, "0") +
+        ":" +
+        String(now.getMinutes()).padStart(2, "0");
 
       const savedMetadata = cleanLastSaved({
         nome: usuario.nome || "",
         postoGrad: usuario.postoGrad || "",
         re: usuario.re || "",
-        timestamp: timestamp,
+        timestamp,
         data: dataStr,
-        hora: horaStr
+        hora: horaStr,
       });
 
-      const isWeeklyRowsDirty = JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows);
-      const isWeeklyObsDirty = weeklyObservacoes !== dbWeeklyObservacoes;
-      const isWeeklyDirty = isWeeklyRowsDirty || isWeeklyObsDirty || dbWeeklySaved === null;
+      const alteracoes: AuditAlteracao[] = [];
+      const dayLabels: Record<string, string> = {
+        seg: "Segunda",
+        ter: "Terça",
+        qua: "Quarta",
+        qui: "Quinta",
+        sex: "Sexta",
+        sab: "Sábado",
+        dom: "Domingo",
+      };
 
-      const isAlterationRowsDirty = JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows);
-      const isAlterationObsDirty = alterationObservacoes !== dbAlterationObservacoes;
-      const isAlterationDirty = isAlterationRowsDirty || isAlterationObsDirty;
-
-      // 1. Generate Audit Logs for individual changes
-      const auditLogsList: AuditLog[] = [];
-
-      let rowsToSaveWeekly = localWeeklyRows;
-      let rowsToSaveAlteration = localAlterationRows;
-
-      const generateDiffLogs = (
-        panelName: "Escala Semanal" | "Escala Alteração",
-        localRows: ScheduleRow[],
-        dbRows: ScheduleRow[]
-      ) => {
-        // Find added & updated
+      const collectDiffs = (localRows: ScheduleRow[], dbRows: ScheduleRow[]) => {
         localRows.forEach((row) => {
+          const colLabel = `${row.postoGrad} ${row.nome} (R.E. ${row.re})`;
           const oldRow = dbRows.find((r) => r.re === row.re);
-
           if (!oldRow) {
-            // Added collaborator row
-            auditLogsList.push({
-              timestamp,
-              data: dataStr,
-              hora: horaStr,
-              usuario: usuario.nome,
-              re: usuario.re,
-              painel: panelName,
-              colaborador: `${row.postoGrad} ${row.nome} (R.E. ${row.re})`,
-              campoAlterado: "Colaborador Adicionado",
-              valorAnterior: "",
-              novoValor: `Seção: ${row.secao}`,
-              anoSemana: docId,
+            alteracoes.push({
+              campo: "Colaborador",
+              antes: "",
+              depois: "Adicionado",
+              colaborador: colLabel,
             });
           } else {
-            // Compare daily cells and observacao
-            const days: ("seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom")[] = [
-              "seg", "ter", "qua", "qui", "sex", "sab", "dom"
-            ];
-            
-            days.forEach((day) => {
+            (["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).forEach((day) => {
               if (row[day] !== oldRow[day]) {
-                auditLogsList.push({
-                  timestamp,
-                  data: dataStr,
-                  hora: horaStr,
-                  usuario: usuario.nome,
-                  re: usuario.re,
-                  painel: panelName,
-                  colaborador: `${row.postoGrad} ${row.nome} (R.E. ${row.re})`,
-                  campoAlterado: day.toUpperCase(),
-                  valorAnterior: oldRow[day],
-                  novoValor: row[day],
-                  anoSemana: docId,
+                alteracoes.push({
+                  campo: dayLabels[day] || day.toUpperCase(),
+                  antes: oldRow[day],
+                  depois: row[day],
+                  colaborador: colLabel,
                 });
               }
             });
-
             if (row.observacao !== oldRow.observacao) {
-              auditLogsList.push({
-                timestamp,
-                data: dataStr,
-                hora: horaStr,
-                usuario: usuario.nome,
-                re: usuario.re,
-                painel: panelName,
-                colaborador: `${row.postoGrad} ${row.nome} (R.E. ${row.re})`,
-                campoAlterado: "Observação",
-                valorAnterior: oldRow.observacao || "Vazio",
-                novoValor: row.observacao || "Vazio",
-                anoSemana: docId,
+              alteracoes.push({
+                campo: "Observação",
+                antes: oldRow.observacao || "",
+                depois: row.observacao || "",
+                colaborador: colLabel,
               });
             }
           }
         });
-
-        // Find removed
         dbRows.forEach((oldRow) => {
-          const exists = localRows.some((r) => r.re === oldRow.re);
-          if (!exists) {
-            auditLogsList.push({
-              timestamp,
-              data: dataStr,
-              hora: horaStr,
-              usuario: usuario.nome,
-              re: usuario.re,
-              painel: panelName,
+          if (!localRows.some((r) => r.re === oldRow.re)) {
+            alteracoes.push({
+              campo: "Colaborador",
+              antes: `${oldRow.postoGrad} ${oldRow.nome}`,
+              depois: "Removido",
               colaborador: `${oldRow.postoGrad} ${oldRow.nome} (R.E. ${oldRow.re})`,
-              campoAlterado: "Colaborador Removido",
-              valorAnterior: `${oldRow.postoGrad} ${oldRow.nome} (R.E. ${oldRow.re})`,
-              novoValor: "",
-              anoSemana: docId,
             });
           }
         });
       };
 
-      if (isWeeklyDirty) {
-        generateDiffLogs("Escala Semanal", rowsToSaveWeekly, dbWeeklyRows);
-      }
-      if (isAlterationDirty) {
-        generateDiffLogs("Escala Alteração", rowsToSaveAlteration, dbAlterationRows);
-      }
+      let savedStatus = "";
+      let savedVersao = 1;
 
-      if (isWeeklyObsDirty) {
-        auditLogsList.push({
-          timestamp,
-          data: dataStr,
-          hora: horaStr,
-          usuario: usuario.nome,
-          re: usuario.re,
-          painel: "Escala Semanal",
-          colaborador: "Geral",
-          campoAlterado: "Observações do Painel",
-          valorAnterior: dbWeeklyObservacoes || "Vazio",
-          novoValor: weeklyObservacoes || "Vazio",
-          anoSemana: docId,
-        });
-      }
+      if (target === "semanal") {
+        const isWeeklyRowsDirty =
+          JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows);
+        const isWeeklyObsDirty = weeklyObservacoes !== dbWeeklyObservacoes;
+        const contentDirty = isWeeklyRowsDirty || isWeeklyObsDirty;
 
-      if (isAlterationObsDirty) {
-        auditLogsList.push({
-          timestamp,
-          data: dataStr,
-          hora: horaStr,
-          usuario: usuario.nome,
-          re: usuario.re,
-          painel: "Escala Alteração",
-          colaborador: "Geral",
-          campoAlterado: "Observações do Painel",
-          valorAnterior: dbAlterationObservacoes || "Vazio",
-          novoValor: alterationObservacoes || "Vazio",
-          anoSemana: docId,
-        });
-      }
-
-      // 2. Perform Saves
-      let nextStatus = normalizeEscalaStatus(escalaStatus);
-      let nextVersao = escalaVersao > 0 ? escalaVersao : 1;
-      let nextAprovacao: EscalaAprovacao | null = escalaAprovacao;
-      let nextHistorico = [...escalaHistorico];
-      let loggedReopen = false;
-      const contentDirty =
-        isWeeklyRowsDirty || isWeeklyObsDirty || isAlterationRowsDirty || isAlterationObsDirty;
-
-      if (
-        isAdministrador(usuario) &&
-        contentDirty &&
-        (nextStatus === "aprovada" || nextStatus === "aguardando_aprovacao")
-      ) {
-        const reopen = buildReopenAfterEdit(nextStatus, nextVersao);
-        nextStatus = reopen.status;
-        nextVersao = reopen.versao;
-        nextAprovacao = null;
-        if (reopen.shouldLog) {
-          const { timestamp: ts, data: d, hora: h } = formatNowParts(now);
-          auditLogsList.push({
-            timestamp: ts,
-            data: d,
-            hora: h,
-            usuario: `${usuario.postoGrad} ${usuario.nome}`.trim(),
-            re: usuario.re,
-            painel: "Aprovação",
-            colaborador: "Geral",
-            campoAlterado: "Escala alterada após aprovação",
-            valorAnterior: reopen.previousStatus,
-            novoValor: "em_edicao",
-            anoSemana: docId,
-            versao: nextVersao,
-            ...(escalaAprovacao?.solicitacaoId
-              ? { solicitacaoId: escalaAprovacao.solicitacaoId }
-              : {}),
+        collectDiffs(localWeeklyRows, dbWeeklyRows);
+        if (isWeeklyObsDirty) {
+          alteracoes.push({
+            campo: "Observações do Painel",
+            antes: dbWeeklyObservacoes || "",
+            depois: weeklyObservacoes || "",
           });
+        }
+
+        let nextStatus = normalizeEscalaStatus(weeklyStatus);
+        const nextVersao = weeklyVersao > 0 ? weeklyVersao : 1;
+        const nextAprovacao: EscalaAprovacao | null = weeklyAprovacao;
+        let nextHistorico = [...weeklyHistorico];
+
+        if (nextStatus === "aprovada" || nextStatus === "aguardando_aprovacao") {
+          setSaveError(
+            nextStatus === "aprovada"
+              ? "A Escala Semanal está aprovada e não pode ser editada."
+              : "A Escala Semanal está aguardando aprovação e não pode ser editada."
+          );
+          setSaving(false);
+          setSavingPanel(null);
+          return;
+        }
+        // Mantém revisao_solicitada até novo envio para aprovação
+        if (contentDirty) {
           nextHistorico = [
             ...nextHistorico,
             buildHistoricoEvento({
-              tipo: "reabertura",
-              descricao: "Escala alterada após aprovação — ciclo reaberto",
+              tipo: "alteracao",
+              descricao: "Alterações salvas na Escala Semanal",
               usuario,
               versao: nextVersao,
-              ...(escalaAprovacao?.solicitacaoId
-                ? { solicitacaoId: escalaAprovacao.solicitacaoId }
-                : {}),
-              detalhes: `Status anterior: ${reopen.previousStatus}`,
               date: now,
             }),
           ];
-          loggedReopen = true;
         }
-      } else if (nextStatus === "rejeitada" && contentDirty) {
-        nextStatus = "em_edicao";
-      }
 
-      if (contentDirty && !loggedReopen) {
-        nextHistorico = [
-          ...nextHistorico,
-          buildHistoricoEvento({
-            tipo: "alteracao",
-            descricao: "Alterações salvas na escala",
-            usuario,
+        await setDoc(
+          doc(db, "escalas_semanais", docId),
+          prepareFirestoreWrite(`escalas_semanais/${docId}`, {
+            id: docId,
+            ano: year,
+            semana: week.numero,
+            periodo: week.periodo,
+            rows: localWeeklyRows.map(cleanScheduleRow),
+            lastSaved: savedMetadata,
+            observacoes: weeklyObservacoes ?? "",
+            status: nextStatus,
             versao: nextVersao,
-            date: now,
-          }),
-        ];
+            aprovacao: cleanAprovacao(nextAprovacao),
+            historico: cleanHistorico(nextHistorico),
+          } as unknown as Record<string, unknown>)
+        );
+
+        setDbWeeklyRows(JSON.parse(JSON.stringify(localWeeklyRows)));
+        setLocalWeeklyRows(JSON.parse(JSON.stringify(localWeeklyRows)));
+        setDbWeeklySaved(savedMetadata);
+        setLoadedWeeklyTimestamp(timestamp);
+        setDbWeeklyObservacoes(weeklyObservacoes);
+        setWeeklyStatus(nextStatus);
+        setWeeklyVersao(nextVersao);
+        setWeeklyAprovacao(nextAprovacao);
+        setWeeklyHistorico(nextHistorico);
+        savedStatus = statusLabel(nextStatus);
+        savedVersao = nextVersao;
+      } else {
+        const isAltRowsDirty =
+          JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows);
+        const isAltObsDirty = alterationObservacoes !== dbAlterationObservacoes;
+        const contentDirty = isAltRowsDirty || isAltObsDirty;
+
+        collectDiffs(localAlterationRows, dbAlterationRows);
+        if (isAltObsDirty) {
+          alteracoes.push({
+            campo: "Observações do Painel",
+            antes: dbAlterationObservacoes || "",
+            depois: alterationObservacoes || "",
+          });
+        }
+
+        let nextStatus = normalizeEscalaStatus(altStatus);
+        const nextVersao = altVersao > 0 ? altVersao : 1;
+        const nextAprovacao: EscalaAprovacao | null = altAprovacao;
+        let nextHistorico = [...altHistorico];
+
+        if (nextStatus === "aprovada" || nextStatus === "aguardando_aprovacao") {
+          setSaveError(
+            nextStatus === "aprovada"
+              ? "A Escala Alteração está aprovada e não pode ser editada."
+              : "A Escala Alteração está aguardando aprovação e não pode ser editada."
+          );
+          setSaving(false);
+          setSavingPanel(null);
+          return;
+        }
+        // Mantém revisao_solicitada até novo envio para aprovação
+        if (contentDirty) {
+          nextHistorico = [
+            ...nextHistorico,
+            buildHistoricoEvento({
+              tipo: "alteracao",
+              descricao: "Alterações salvas na Escala Alteração",
+              usuario,
+              versao: nextVersao,
+              date: now,
+            }),
+          ];
+        }
+
+        await setDoc(
+          doc(db, "escalas_alteracao", docId),
+          prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
+            id: docId,
+            ano: year,
+            semana: week.numero,
+            periodo: week.periodo,
+            rows: localAlterationRows.map(cleanScheduleRow),
+            lastSaved: savedMetadata,
+            observacoes: alterationObservacoes ?? "",
+            status: nextStatus,
+            versao: nextVersao,
+            aprovacao: cleanAprovacao(nextAprovacao),
+            historico: cleanHistorico(nextHistorico),
+          } as unknown as Record<string, unknown>)
+        );
+
+        setDbAlterationRows(JSON.parse(JSON.stringify(localAlterationRows)));
+        setLocalAlterationRows(JSON.parse(JSON.stringify(localAlterationRows)));
+        setDbAlterationSaved(savedMetadata);
+        setLoadedAlterationTimestamp(timestamp);
+        setDbAlterationObservacoes(alterationObservacoes);
+        setAltStatus(nextStatus);
+        setAltVersao(nextVersao);
+        setAltAprovacao(nextAprovacao);
+        setAltHistorico(nextHistorico);
+        savedStatus = statusLabel(nextStatus);
+        savedVersao = nextVersao;
       }
 
-      const weeklyDocRef = doc(db, "escalas_semanais", docId);
-      const weeklyDocData = {
-        id: docId,
-        ano: year,
-        semana: week.numero,
-        periodo: week.periodo,
-        rows: rowsToSaveWeekly.map(cleanScheduleRow),
-        lastSaved: savedMetadata,
-        observacoes: weeklyObservacoes ?? "",
-        status: nextStatus,
-        versao: nextVersao,
-        aprovacao: cleanAprovacao(nextAprovacao),
-        historico: cleanHistorico(nextHistorico),
-      };
-      console.log("Escala antes do Firestore:", weeklyDocData);
-      await setDoc(
-        weeklyDocRef,
-        prepareFirestoreWrite(`escalas_semanais/${docId}`, weeklyDocData as unknown as Record<string, unknown>)
-      );
-
-      const alterationDocRef = doc(db, "escalas_alteracao", docId);
-      const alterationDocData = {
-        id: docId,
-        ano: year,
-        semana: week.numero,
-        periodo: week.periodo,
-        rows: rowsToSaveAlteration.map(cleanScheduleRow),
-        lastSaved: savedMetadata,
-        observacoes: alterationObservacoes ?? "",
-      };
-      await setDoc(
-        alterationDocRef,
-        prepareFirestoreWrite(`escalas_alteracao/${docId}`, alterationDocData as unknown as Record<string, unknown>)
-      );
-
-      // 3. Save generated logs to Firestore
-      const logsCollectionRef = collection(db, "logs");
-      await Promise.all(
-        auditLogsList.map((log) => {
-          const logDocRef = doc(logsCollectionRef); // Auto-generated ID
-          return setDoc(
-            logDocRef,
-            prepareFirestoreWrite("logs/escala", log as unknown as Record<string, unknown>)
-          );
-        })
-      );
-
-      // 4. Update memory tracking to match new database state
-      setDbWeeklyRows(JSON.parse(JSON.stringify(rowsToSaveWeekly)));
-      setLocalWeeklyRows(JSON.parse(JSON.stringify(rowsToSaveWeekly)));
-
-      setDbAlterationRows(JSON.parse(JSON.stringify(rowsToSaveAlteration)));
-      setLocalAlterationRows(JSON.parse(JSON.stringify(rowsToSaveAlteration)));
-
-      setDbWeeklySaved(savedMetadata);
-      setDbAlterationSaved(savedMetadata);
-      setLoadedWeeklyTimestamp(timestamp);
-      setLoadedAlterationTimestamp(timestamp);
-
-      setDbWeeklyObservacoes(weeklyObservacoes);
-      setDbAlterationObservacoes(alterationObservacoes);
-
-      setEscalaStatus(nextStatus);
-      setEscalaVersao(nextVersao);
-      setEscalaAprovacao(nextAprovacao);
-      setEscalaHistorico(nextHistorico);
+      await auditSalvarEscala({
+        usuario,
+        tipoDoc: target,
+        anoSemana: docId,
+        versao: savedVersao,
+        statusAnterior: savedStatus,
+        statusAtual: savedStatus,
+        alteracoes,
+      });
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
-
     } catch (err: any) {
       console.error("Failed perform save:", err);
       setSaveError("Erro ao gravar dados no Firestore. Tente novamente.");
     } finally {
       setSaving(false);
+      setSavingPanel(null);
       setIsConcurrencyModalOpen(false);
+      setPendingSavePanel(null);
     }
   };
+
   const translateColorToHex = (color: string): string => {
     if (!color) return "#ffffff";
     const trimmed = color.trim().toLowerCase();
@@ -1208,31 +1273,412 @@ export default function ScheduleEditor({
     }
   };
 
-  const handleSubmitForApproval = async () => {
+  const requestSubmitForApproval = (tipo: TipoEscalaDocumento) => {
     if (!canSubmitForApproval(usuario)) {
       alert("Somente Administradores podem enviar escalas para aprovação.");
       return;
     }
-    if (isDirty) {
-      alert("Salve as alterações antes de enviar para aprovação.");
+    const dirty = tipo === "semanal" ? isWeeklyDirty : isAltDirty;
+    if (dirty) {
+      alert("Salve as alterações deste painel antes de enviar para aprovação.");
       return;
     }
-    if (!confirm("Enviar esta escala para aprovação?")) return;
+    setSubmitConfirmTipo(tipo);
+  };
 
+  const handleConfirmSubmitForApproval = async () => {
+    const tipo = submitConfirmTipo;
+    if (!tipo) return;
     setSubmittingApproval(true);
     setSaveError(null);
     try {
-      const result = await submitScaleForApproval(docId, usuario);
-      setEscalaStatus(result.status);
-      setEscalaVersao(result.versao);
-      setEscalaAprovacao(result.aprovacao);
-      setEscalaHistorico(result.historico);
-      setApprovalLink(result.url);
+      const result = await submitScaleForApproval(docId, usuario, tipo);
+      if (tipo === "semanal") {
+        setWeeklyStatus(result.status);
+        setWeeklyVersao(result.versao);
+        setWeeklyAprovacao(result.aprovacao);
+        setWeeklyHistorico(result.historico);
+        setApprovalLinkWeekly(result.url);
+      } else {
+        setAltStatus(result.status);
+        setAltVersao(result.versao);
+        setAltAprovacao(result.aprovacao);
+        setAltHistorico(result.historico);
+        setApprovalLinkAlt(result.url);
+      }
+      setSubmitConfirmTipo(null);
     } catch (err: any) {
       setSaveError(err?.message || "Falha ao enviar para aprovação.");
     } finally {
       setSubmittingApproval(false);
     }
+  };
+
+  const handleCancelApprovalRequest = async (tipo: TipoEscalaDocumento) => {
+    const canCancel = tipo === "semanal" ? showCancelWeekly : showCancelAlt;
+    if (!canCancel) {
+      alert("Somente Administradores podem cancelar a solicitação de aprovação.");
+      return;
+    }
+    const label = getEscalaDocumentoLabel(tipo);
+    if (
+      !confirm(
+        `Cancelar a solicitação de aprovação da ${label}? Ela voltará para Em edição e o link de aprovação será invalidado.`
+      )
+    ) {
+      return;
+    }
+
+    setCancelBusy(true);
+    setSaveError(null);
+    try {
+      const result = await cancelApprovalRequest(docId, usuario, tipo);
+      if (tipo === "semanal") {
+        setWeeklyStatus(result.status);
+        setWeeklyVersao(result.versao);
+        setWeeklyAprovacao(result.aprovacao);
+        setWeeklyHistorico(result.historico);
+        setApprovalLinkWeekly(null);
+      } else {
+        setAltStatus(result.status);
+        setAltVersao(result.versao);
+        setAltAprovacao(result.aprovacao);
+        setAltHistorico(result.historico);
+        setApprovalLinkAlt(null);
+      }
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      setSaveError(err?.message || "Falha ao cancelar a solicitação.");
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  const openReopenModal = (tipo: TipoEscalaDocumento) => {
+    const canReopen = tipo === "semanal" ? showReopenWeekly : showReopenAlt;
+    if (!canReopen) return;
+    setReopenTipo(tipo);
+    setReopenMotivo("");
+    setReopenError(null);
+    setIsReopenModalOpen(true);
+  };
+
+  const handleConfirmReopen = async () => {
+    const motivo = reopenMotivo.trim();
+    if (!motivo) {
+      setReopenError("Informe o motivo da reabertura.");
+      return;
+    }
+    const canReopen = reopenTipo === "semanal" ? showReopenWeekly : showReopenAlt;
+    if (!canReopen) {
+      setReopenError("Somente Gestores podem reabrir uma escala aprovada.");
+      return;
+    }
+
+    setReopenBusy(true);
+    setReopenError(null);
+    try {
+      const result = await reopenApprovedScale(docId, usuario, motivo, reopenTipo);
+      if (reopenTipo === "semanal") {
+        setWeeklyStatus(result.status);
+        setWeeklyVersao(result.versao);
+        setWeeklyAprovacao(result.aprovacao);
+        setWeeklyHistorico(result.historico);
+      } else {
+        setAltStatus(result.status);
+        setAltVersao(result.versao);
+        setAltAprovacao(result.aprovacao);
+        setAltHistorico(result.historico);
+      }
+      setIsReopenModalOpen(false);
+      setReopenMotivo("");
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err: any) {
+      setReopenError(err?.message || "Falha ao reabrir a escala.");
+    } finally {
+      setReopenBusy(false);
+    }
+  };
+
+  const copyApprovalLink = (tipo: TipoEscalaDocumento) => {
+    const url =
+      (tipo === "semanal" ? approvalLinkWeekly : approvalLinkAlt) ||
+      getApprovalUrl(docId, tipo);
+    navigator.clipboard?.writeText(url);
+    if (tipo === "semanal") setApprovalLinkWeekly(url);
+    else setApprovalLinkAlt(url);
+    alert(`Link de aprovação (válido apenas enquanto aguarda decisão):\n${url}`);
+  };
+
+  const renderHistoricoAccordion = (
+    historico: HistoricoEscalaEvento[],
+    open: boolean,
+    setOpen: (v: boolean | ((prev: boolean) => boolean)) => void,
+    title: string
+  ) => (
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-gray-50 cursor-pointer"
+      >
+        <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+          <History size={12} className="text-gray-500" />
+          {title}
+          <span className="text-gray-400 font-semibold normal-case tracking-normal">
+            ({historico.length})
+          </span>
+        </span>
+        <span className="text-[10px] font-bold text-blue-600">
+          {open ? "Ocultar" : "Exibir"}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 max-h-48 overflow-y-auto divide-y divide-gray-50">
+          {historico.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400 italic">Nenhum evento registrado.</p>
+          ) : (
+            [...historico].reverse().map((ev) => (
+              <div key={ev.id} className="px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-gray-400 font-medium">
+                    <Clock size={11} />
+                    {ev.data} {ev.hora}
+                  </span>
+                  <span className="font-bold text-gray-800">{ev.descricao}</span>
+                  {typeof ev.versao === "number" && (
+                    <span className="text-[10px] font-mono text-gray-400">v{ev.versao}</span>
+                  )}
+                </div>
+                <div className="text-gray-500 mt-0.5">
+                  {ev.postoGrad ? `${ev.postoGrad} ` : ""}
+                  {ev.usuario} (RE {normalizeRe(ev.re)})
+                  {ev.detalhes ? ` · ${ev.detalhes}` : ""}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderStatusBanner = (
+    status: EscalaStatus,
+    aprovacao: EscalaAprovacao | null,
+    label: string,
+    showReopen: boolean,
+    _onReopen: () => void
+  ) => {
+    const st = normalizeEscalaStatus(status);
+    if (st === "aguardando_aprovacao") {
+      return (
+        <div className="mt-3 bg-amber-50 border border-amber-300 text-amber-950 rounded-lg p-3 text-xs font-semibold">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <StatusBadge status="aguardando_aprovacao" size="sm" />
+            <span>{label}: aguardando decisão do Gestor — edição bloqueada</span>
+          </div>
+          {aprovacao?.enviadoPor && (
+            <p className="text-[11px] font-medium text-amber-800 mt-1">
+              Enviado por {aprovacao.enviadoPor.postoGrad} {aprovacao.enviadoPor.nome} em{" "}
+              {aprovacao.enviadoPor.data} às {aprovacao.enviadoPor.hora}
+            </p>
+          )}
+        </div>
+      );
+    }
+    if (st === "aprovada") {
+      return (
+        <div className="mt-3 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-lg p-3 text-xs font-semibold">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <StatusBadge status="aprovada" size="sm" />
+            <span>{label}: documento oficial — edição direta bloqueada</span>
+          </div>
+          {aprovacao?.aprovadoPor ? (
+            <p className="text-[11px] font-medium text-emerald-800 mt-1">
+              Aprovado por{" "}
+              <b>
+                {aprovacao.aprovadoPor.postoGrad} {aprovacao.aprovadoPor.nome}
+              </b>{" "}
+              (RE {normalizeRe(aprovacao.aprovadoPor.re)}) em {aprovacao.aprovadoPor.data} às{" "}
+              {aprovacao.aprovadoPor.hora}
+              {typeof aprovacao.versaoAprovada === "number" && (
+                <span> · versão v{aprovacao.versaoAprovada}</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-[11px] font-medium text-emerald-800 mt-1">Aprovação registrada.</p>
+          )}
+          {showReopen && (
+            <p className="text-[11px] font-medium text-emerald-700 mt-2">
+              Para alterar, use Reabrir Escala (gera nova versão e exige nova aprovação).
+            </p>
+          )}
+        </div>
+      );
+    }
+    if (st === "revisao_solicitada") {
+      const { por, motivo } = getRevisaoInfo(aprovacao);
+      return (
+        <div className="mt-3 bg-orange-50 border-2 border-orange-400 text-orange-950 rounded-lg p-3 text-xs font-semibold shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <StatusBadge status="revisao_solicitada" size="sm" />
+            <span className="uppercase tracking-wide font-extrabold">Revisão solicitada</span>
+          </div>
+          {por && (
+            <div className="text-[11px] font-medium text-orange-900 space-y-0.5">
+              <p>
+                <span className="text-orange-700 font-bold">Gestor:</span> {por.postoGrad}{" "}
+                {por.nome} (RE {normalizeRe(por.re)})
+              </p>
+              <p>
+                <span className="text-orange-700 font-bold">Data:</span> {por.data} {por.hora}
+              </p>
+            </div>
+          )}
+          {motivo && (
+            <div className="mt-2 bg-white/70 border border-orange-200 rounded-md p-2">
+              <div className="text-[10px] font-bold text-orange-700 uppercase mb-1">Motivo</div>
+              <p className="text-[11px] font-medium text-orange-950 whitespace-pre-wrap">
+                {motivo}
+              </p>
+            </div>
+          )}
+          <p className="text-[11px] font-medium text-orange-800 mt-2">
+            Corrija o documento e envie novamente para aprovação. Este aviso permanece até o novo
+            envio.
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderTopRevisaoAlert = (
+    status: EscalaStatus,
+    aprovacao: EscalaAprovacao | null,
+    label: string
+  ) => {
+    if (normalizeEscalaStatus(status) !== "revisao_solicitada") return null;
+    const { por, motivo } = getRevisaoInfo(aprovacao);
+    return (
+      <div className="mb-4 bg-orange-100 border-2 border-orange-400 text-orange-950 rounded-xl p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="text-lg" aria-hidden>
+            🟠
+          </span>
+          <h3 className="text-sm font-extrabold uppercase tracking-wider">
+            Revisão solicitada — {label}
+          </h3>
+          <StatusBadge status="revisao_solicitada" size="sm" />
+        </div>
+        {por && (
+          <div className="text-xs font-semibold space-y-1">
+            <p>
+              <span className="text-orange-800">Gestor:</span> {por.postoGrad} {por.nome}
+            </p>
+            <p>
+              <span className="text-orange-800">Data:</span> {por.data} {por.hora}
+            </p>
+          </div>
+        )}
+        {motivo && (
+          <blockquote className="mt-3 text-xs font-medium bg-white/80 border border-orange-300 rounded-lg px-3 py-2 whitespace-pre-wrap italic text-orange-950">
+            “{motivo}”
+          </blockquote>
+        )}
+      </div>
+    );
+  };
+
+  const renderPanelActionButtons = (tipo: TipoEscalaDocumento) => {
+    const editable = tipo === "semanal" ? isWeeklyEditable : isAltEditable;
+    const dirty = tipo === "semanal" ? isWeeklyDirty : isAltDirty;
+    const showSubmit = tipo === "semanal" ? showSubmitWeekly : showSubmitAlt;
+    const showCancel = tipo === "semanal" ? showCancelWeekly : showCancelAlt;
+    const showReopen = tipo === "semanal" ? showReopenWeekly : showReopenAlt;
+    const status = tipo === "semanal" ? weeklyStatus : altStatus;
+    const label = getEscalaDocumentoLabel(tipo);
+    const isSavingThis = saving && savingPanel === tipo;
+
+    return (
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        {editable && (
+          <button
+            type="button"
+            onClick={() => handleSaveTrigger(tipo)}
+            disabled={isSavingThis || !dirty}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-md transition-all shadow-sm cursor-pointer ${
+              dirty
+                ? "bg-blue-600 hover:bg-blue-500 text-white"
+                : "bg-gray-200 text-gray-500 cursor-not-allowed"
+            }`}
+          >
+            <Save size={14} />
+            <span>{isSavingThis ? "Salvando..." : "Salvar"}</span>
+          </button>
+        )}
+        {showSubmit && (
+          <button
+            type="button"
+            onClick={() => requestSubmitForApproval(tipo)}
+            disabled={submittingApproval}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-50"
+          >
+            <Send size={14} />
+            <span>
+              {submittingApproval && submitConfirmTipo === tipo
+                ? "Enviando..."
+                : `Enviar ${label} para Aprovação`}
+            </span>
+          </button>
+        )}
+        {showCancel && (
+          <button
+            type="button"
+            onClick={() => handleCancelApprovalRequest(tipo)}
+            disabled={cancelBusy}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-md border border-amber-200 cursor-pointer disabled:opacity-50"
+          >
+            <XCircle size={14} />
+            <span>{cancelBusy ? "Cancelando..." : "Cancelar solicitação"}</span>
+          </button>
+        )}
+        {showCancel && (
+          <button
+            type="button"
+            onClick={() => copyApprovalLink(tipo)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50/70 hover:bg-amber-100 rounded-md border border-amber-200 cursor-pointer"
+            title="Copiar link de aprovação"
+          >
+            <Link2 size={14} />
+            <span>Link</span>
+          </button>
+        )}
+        {isGestor(usuario) && status === "aguardando_aprovacao" && onOpenApproval && (
+          <button
+            type="button"
+            onClick={() => onOpenApproval(docId, tipo)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md cursor-pointer"
+          >
+            <CheckCircle size={14} />
+            <span>Abrir Aprovação</span>
+          </button>
+        )}
+        {showReopen && (
+          <button
+            type="button"
+            onClick={() => openReopenModal(tipo)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-md cursor-pointer"
+          >
+            <RotateCcw size={14} />
+            <span>Reabrir Escala</span>
+          </button>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1260,8 +1706,16 @@ export default function ScheduleEditor({
                   <span className="text-[10px] sm:text-xs text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900 whitespace-nowrap">
                     {week.periodo}
                   </span>
-                  <StatusBadge status={escalaStatus} />
-                  <span className="text-[10px] text-gray-400 font-mono">v{escalaVersao}</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-[9px] text-gray-400 font-bold uppercase">Sem</span>
+                    <StatusBadge status={weeklyStatus} />
+                    <span className="text-[10px] text-gray-400 font-mono">v{weeklyVersao}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-[9px] text-gray-400 font-bold uppercase">Alt</span>
+                    <StatusBadge status={altStatus} />
+                    <span className="text-[10px] text-gray-400 font-mono">v{altVersao}</span>
+                  </span>
                 </div>
                 <div className="text-[10px] sm:text-xs text-gray-400 mt-1 truncate">
                   Usuário: <b className="text-gray-200">{usuario.postoGrad} {usuario.nome}</b>
@@ -1273,67 +1727,11 @@ export default function ScheduleEditor({
 
             {/* Main Editor Action Buttons */}
             <div className="flex flex-wrap items-center gap-2 justify-end">
-              {isDirty && (
+              {isDirty && (isWeeklyEditable || isAltEditable) && (
                 <span className="hidden lg:flex items-center space-x-1.5 bg-amber-950 border border-amber-900 text-amber-400 px-2 py-1 rounded text-[10px] font-bold uppercase animate-pulse">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
                   <span>Não Salvo</span>
                 </span>
-              )}
-
-              <button
-                id="save-scale-btn"
-                onClick={handleSaveTrigger}
-                disabled={saving || !isDirty || !isEditable}
-                className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-md transition-all shadow-sm cursor-pointer ${
-                  isDirty && isEditable
-                    ? "bg-blue-600 hover:bg-blue-500 text-white" 
-                    : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
-                }`}
-              >
-                <Save size={14} />
-                <span>{saving ? "Salvando..." : "Salvar"}</span>
-              </button>
-
-              {showSubmitApproval && (
-                <button
-                  id="submit-approval-btn"
-                  onClick={handleSubmitForApproval}
-                  disabled={submittingApproval}
-                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-md transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <Send size={14} />
-                  <span className="hidden sm:inline">
-                    {submittingApproval ? "Enviando..." : "Enviar para Aprovação"}
-                  </span>
-                  <span className="sm:hidden">Enviar</span>
-                </button>
-              )}
-
-              {(escalaStatus === "aguardando_aprovacao") && canSubmitForApproval(usuario) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = approvalLink || getApprovalUrl(docId);
-                    navigator.clipboard?.writeText(url);
-                    setApprovalLink(url);
-                    alert(`Link de aprovação (válido apenas enquanto aguarda decisão):\n${url}`);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/50 hover:bg-amber-950 rounded-md border border-amber-900 cursor-pointer"
-                  title="Copiar link de aprovação"
-                >
-                  <Link2 size={14} />
-                  <span className="hidden md:inline">Link</span>
-                </button>
-              )}
-
-              {isGestor(usuario) && escalaStatus === "aguardando_aprovacao" && onOpenApproval && (
-                <button
-                  onClick={() => onOpenApproval(docId)}
-                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md cursor-pointer"
-                >
-                  <CheckCircle size={14} />
-                  <span>Abrir Aprovação</span>
-                </button>
               )}
 
               <button
@@ -1394,6 +1792,11 @@ export default function ScheduleEditor({
           </div>
         )}
 
+        {!loading &&
+          renderTopRevisaoAlert(weeklyStatus, weeklyAprovacao, "Escala Semanal")}
+        {!loading &&
+          renderTopRevisaoAlert(altStatus, altAprovacao, "Escala Alteração")}
+
         {saveError && (
           <div className="mb-6 bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 flex items-center space-x-3 text-sm font-semibold">
             <AlertCircle className="text-red-600" size={20} />
@@ -1401,137 +1804,13 @@ export default function ScheduleEditor({
           </div>
         )}
 
-        {!isEditable && !loading && (
-          <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg p-3 text-xs font-semibold flex items-start gap-2">
-            <AlertCircle className="text-blue-600 shrink-0 mt-0.5" size={16} />
-            <span>
-              {isGestor(usuario)
-                ? "Perfil Gestor: visualização e aprovação apenas — edição bloqueada."
-                : escalaStatus === "aprovada"
-                  ? "Escala aprovada: somente Administradores podem editar (a edição remove a aprovação)."
-                  : escalaStatus === "aguardando_aprovacao"
-                    ? "Escala aguardando aprovação: edição bloqueada para Operadores."
-                    : "Você só pode editar a semana atual e semanas futuras."}
-            </span>
-          </div>
-        )}
-
-        {escalaStatus === "aguardando_aprovacao" && !loading && (
-          <div className="mb-6 bg-amber-50 border border-amber-300 text-amber-950 rounded-lg p-4 text-sm font-semibold">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <StatusBadge status="aguardando_aprovacao" size="md" />
-              <span>Aguardando decisão do Gestor</span>
-            </div>
-            {escalaAprovacao?.enviadoPor && (
-              <p className="text-xs font-medium text-amber-800 mt-1">
-                Enviado por {escalaAprovacao.enviadoPor.postoGrad} {escalaAprovacao.enviadoPor.nome}{" "}
-                em {escalaAprovacao.enviadoPor.data} às {escalaAprovacao.enviadoPor.hora}
-                {escalaAprovacao.solicitacaoId && (
-                  <span className="ml-2 font-mono text-[10px] text-amber-700">
-                    · {escalaAprovacao.solicitacaoId}
-                  </span>
-                )}
-              </p>
-            )}
-          </div>
-        )}
-
-        {escalaStatus === "aprovada" && !loading && (
-          <div className="mb-6 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-lg p-4 text-sm font-semibold">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <StatusBadge status="aprovada" size="md" />
-              <span>Escala oficialmente aprovada</span>
-            </div>
-            {escalaAprovacao?.aprovadoPor ? (
-              <p className="text-xs font-medium text-emerald-800 mt-1">
-                Aprovado por{" "}
-                <b>
-                  {escalaAprovacao.aprovadoPor.postoGrad} {escalaAprovacao.aprovadoPor.nome}
-                </b>{" "}
-                (RE {normalizeRe(escalaAprovacao.aprovadoPor.re)}) em{" "}
-                {escalaAprovacao.aprovadoPor.data} às {escalaAprovacao.aprovadoPor.hora}
-                {typeof escalaAprovacao.versaoAprovada === "number" && (
-                  <span> · versão v{escalaAprovacao.versaoAprovada}</span>
-                )}
-              </p>
-            ) : (
-              <p className="text-xs font-medium text-emerald-800 mt-1">Aprovação registrada.</p>
-            )}
-          </div>
-        )}
-
-        {escalaStatus === "rejeitada" && !loading && (
-          <div className="mb-6 bg-red-50 border border-red-300 text-red-950 rounded-lg p-4 text-sm font-semibold">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <StatusBadge status="rejeitada" size="md" />
-              <span>Escala rejeitada — edite e envie novamente</span>
-            </div>
-            {escalaAprovacao?.rejeitadoPor && (
-              <p className="text-xs font-medium text-red-800 mt-1">
-                Rejeitado por {escalaAprovacao.rejeitadoPor.postoGrad}{" "}
-                {escalaAprovacao.rejeitadoPor.nome} em {escalaAprovacao.rejeitadoPor.data} às{" "}
-                {escalaAprovacao.rejeitadoPor.hora}
-                {escalaAprovacao.motivoRejeicao && ` — ${escalaAprovacao.motivoRejeicao}`}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Histórico permanente */}
-        {!loading && (
-          <div className="mb-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowHistorico((v) => !v)}
-              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 cursor-pointer"
-            >
-              <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-700">
-                <History size={14} className="text-gray-500" />
-                Histórico da escala
-                <span className="text-gray-400 font-semibold normal-case tracking-normal">
-                  ({escalaHistorico.length})
-                </span>
-              </span>
-              <span className="text-[10px] font-bold text-blue-600">
-                {showHistorico ? "Ocultar" : "Exibir"}
-              </span>
-            </button>
-            {showHistorico && (
-              <div className="border-t border-gray-100 max-h-64 overflow-y-auto divide-y divide-gray-50">
-                {escalaHistorico.length === 0 ? (
-                  <p className="px-4 py-4 text-xs text-gray-400 italic">Nenhum evento registrado.</p>
-                ) : (
-                  [...escalaHistorico].reverse().map((ev) => (
-                    <div key={ev.id} className="px-4 py-2.5 text-xs">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center gap-1 text-gray-400 font-medium">
-                          <Clock size={11} />
-                          {ev.data} {ev.hora}
-                        </span>
-                        <span className="font-bold text-gray-800">{ev.descricao}</span>
-                        {typeof ev.versao === "number" && (
-                          <span className="text-[10px] font-mono text-gray-400">v{ev.versao}</span>
-                        )}
-                      </div>
-                      <div className="text-gray-500 mt-0.5">
-                        {ev.postoGrad ? `${ev.postoGrad} ` : ""}
-                        {ev.usuario} (RE {normalizeRe(ev.re)})
-                        {ev.detalhes ? ` · ${ev.detalhes}` : ""}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         {isDirty && (
           <div className="mb-6 lg:hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-xs font-semibold flex items-center space-x-2 animate-pulse">
             <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-            <span>Atenção: Você tem alterações pendentes em memória. Clique em Salvar no topo para gravar.</span>
+            <span>Atenção: Você tem alterações pendentes em memória. Use Salvar em cada painel para gravar.</span>
           </div>
         )}
+
 
         {/* LOADING INDICATOR */}
         {loading ? (
@@ -1544,13 +1823,20 @@ export default function ScheduleEditor({
             
             {/* PANEL 1: ESCALA SEMANAL */}
             <section className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden" id="semanal-panel-section">
-              <div className="bg-gray-50 border-b border-gray-200 px-4 py-4 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex-1">
-                  <h2 className="text-base font-extrabold text-gray-950 uppercase tracking-wider flex items-center space-x-2">
-                    <span className="h-2.5 w-2.5 bg-blue-600 rounded-full"></span>
-                    <span>1. Escala Semanal</span>
-                  </h2>
+              <div className="bg-gray-50 border-b border-gray-200 px-4 py-4 sm:px-6">
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-extrabold text-gray-950 uppercase tracking-wider flex items-center space-x-2">
+                      <span className="h-2.5 w-2.5 bg-blue-600 rounded-full"></span>
+                      <span>1. Escala Semanal</span>
+                    </h2>
+                    <StatusBadge status={weeklyStatus} />
+                    <span className="text-[10px] text-gray-500 font-mono">v{weeklyVersao}</span>
+                  </div>
                   {renderPanelHeaderMetadata(dbWeeklySaved, "blue")}
+                  {renderStatusBanner(weeklyStatus, weeklyAprovacao, "Escala Semanal", showReopenWeekly, () => openReopenModal("semanal"))}
+                  {renderPanelActionButtons("semanal")}
+                  {renderHistoricoAccordion(weeklyHistorico, showWeeklyHistorico, setShowWeeklyHistorico, "Histórico — Escala Semanal")}
                 </div>
               </div>
 
@@ -1595,7 +1881,7 @@ export default function ScheduleEditor({
                               <select
                                 value={row[day]}
                                 onChange={(e) => handleCellChange("semanal", row.re, day, e.target.value)}
-                                disabled={!isEditable}
+                                disabled={!isWeeklyEditable}
                                 className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
                                 style={getCellStyle(row[day])}
                                 title={getLegendDescription(row[day])}
@@ -1614,7 +1900,7 @@ export default function ScheduleEditor({
                               value={row.observacao}
                               placeholder="Observações..."
                               onChange={(e) => handleCellChange("semanal", row.re, "observacao", e.target.value)}
-                              disabled={!isEditable}
+                              disabled={!isWeeklyEditable}
                               className="w-full max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
                             />
                           </td>
@@ -1622,8 +1908,8 @@ export default function ScheduleEditor({
                           {/* Actions Column */}
                           <td className="px-3 py-2 whitespace-nowrap text-center">
                             <button
-                              onClick={() => isEditable && handleCopyToAlteration(row)}
-                              disabled={!isEditable}
+                              onClick={() => isAltEditable && handleCopyToAlteration(row)}
+                              disabled={!isAltEditable}
                               className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs disabled:opacity-40 disabled:cursor-not-allowed"
                               title="Copiar militar para a Escala de Alteração"
                             >
@@ -1645,8 +1931,8 @@ export default function ScheduleEditor({
                 </label>
                 <textarea
                   value={weeklyObservacoes}
-                  onChange={(e) => isEditable && setWeeklyObservacoes(e.target.value)}
-                  disabled={!isEditable}
+                  onChange={(e) => isWeeklyEditable && setWeeklyObservacoes(e.target.value)}
+                  disabled={!isWeeklyEditable}
                   placeholder="Digite aqui as observações gerais para a Escala Semanal desta semana..."
                   rows={4}
                   className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
@@ -1657,13 +1943,20 @@ export default function ScheduleEditor({
 
             {/* PANEL 2: ESCALA ALTERACAO */}
             <section className="bg-white rounded-lg border border-gray-200 shadow-xs overflow-hidden" id="alteracao-panel-section">
-              <div className="bg-gray-50 border-b border-gray-200 px-4 py-4 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex-1">
-                  <h2 className="text-base font-extrabold text-gray-950 uppercase tracking-wider flex items-center space-x-2">
-                    <span className="h-2.5 w-2.5 bg-purple-600 rounded-full"></span>
-                    <span>2. Escala Alteração</span>
-                  </h2>
+              <div className="bg-gray-50 border-b border-gray-200 px-4 py-4 sm:px-6">
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-extrabold text-gray-950 uppercase tracking-wider flex items-center space-x-2">
+                      <span className="h-2.5 w-2.5 bg-purple-600 rounded-full"></span>
+                      <span>2. Escala Alteração</span>
+                    </h2>
+                    <StatusBadge status={altStatus} />
+                    <span className="text-[10px] text-gray-500 font-mono">v{altVersao}</span>
+                  </div>
                   {dbWeeklySaved && renderPanelHeaderMetadata(dbAlterationSaved, "purple")}
+                  {dbWeeklySaved && renderStatusBanner(altStatus, altAprovacao, "Escala Alteração", showReopenAlt, () => openReopenModal("alteracao"))}
+                  {dbWeeklySaved && renderPanelActionButtons("alteracao")}
+                  {dbWeeklySaved && renderHistoricoAccordion(altHistorico, showAltHistorico, setShowAltHistorico, "Histórico — Escala Alteração")}
                 </div>
               </div>
 
@@ -1723,7 +2016,7 @@ export default function ScheduleEditor({
                                   <select
                                     value={row[day]}
                                     onChange={(e) => handleCellChange("alteracao", row.re, day, e.target.value)}
-                                    disabled={!isEditable}
+                                    disabled={!isAltEditable}
                                     className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
                                     style={getCellStyle(row[day])}
                                     title={getLegendDescription(row[day])}
@@ -1742,7 +2035,7 @@ export default function ScheduleEditor({
                                   value={row.observacao}
                                   placeholder="Observações..."
                                   onChange={(e) => handleCellChange("alteracao", row.re, "observacao", e.target.value)}
-                                  disabled={!isEditable}
+                                  disabled={!isAltEditable}
                                   className="w-full max-w-[10rem] sm:max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
                                 />
                               </td>
@@ -1750,8 +2043,8 @@ export default function ScheduleEditor({
                               {/* Actions Column */}
                               <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-center">
                                 <button
-                                  onClick={() => isEditable && handleDeleteCol("alteracao", row.re)}
-                                  disabled={!isEditable}
+                                  onClick={() => isAltEditable && handleDeleteCol("alteracao", row.re)}
+                                  disabled={!isAltEditable}
                                   className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-all cursor-pointer shadow-3xs disabled:opacity-40 disabled:cursor-not-allowed"
                                   title="Remover militar da Escala de Alteração"
                                 >
@@ -1773,8 +2066,8 @@ export default function ScheduleEditor({
                     </label>
                     <textarea
                       value={alterationObservacoes}
-                      onChange={(e) => isEditable && setAlterationObservacoes(e.target.value)}
-                      disabled={!isEditable}
+                      onChange={(e) => isAltEditable && setAlterationObservacoes(e.target.value)}
+                      disabled={!isAltEditable}
                       placeholder="Digite aqui as observações gerais para a Escala de Alteração desta semana..."
                       rows={4}
                       className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
@@ -1789,6 +2082,162 @@ export default function ScheduleEditor({
       </main>
 
       {/* MODALS */}
+      {/* SUBMIT FOR APPROVAL CONFIRMATION */}
+      {submitConfirmTipo && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Send size={18} className="text-amber-400" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Confirmar envio para aprovação
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !submittingApproval && setSubmitConfirmTipo(null)}
+                className="text-gray-400 hover:text-white transition-colors cursor-pointer text-lg"
+                disabled={submittingApproval}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {submitConfirmTipo === "semanal" ? (
+                <div className="text-xs text-gray-600 leading-relaxed space-y-2">
+                  <p>
+                    Você está prestes a enviar a <b>Escala Semanal</b> para aprovação do Gestor.
+                  </p>
+                  <p>
+                    Após a aprovação, esta escala será considerada o planejamento oficial da semana
+                    e <b>não poderá mais ser alterada</b>.
+                  </p>
+                  <p>
+                    Caso existam informações pendentes, cancele esta operação e conclua a revisão
+                    antes de prosseguir.
+                  </p>
+                  <p className="font-semibold text-gray-800">
+                    Deseja realmente enviar esta Escala Semanal para aprovação?
+                  </p>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-600 leading-relaxed space-y-2">
+                  <p>
+                    Você está prestes a enviar a <b>Escala Alteração</b> para aprovação do Gestor.
+                  </p>
+                  <p>
+                    Esta aprovação formaliza todas as alterações realizadas na escala durante a
+                    semana.
+                  </p>
+                  <p>
+                    Após a aprovação, a Escala Alteração <b>não poderá mais ser modificada</b>.
+                  </p>
+                  <p>Verifique cuidadosamente todas as alterações antes de prosseguir.</p>
+                  <p className="font-semibold text-gray-800">
+                    Deseja realmente enviar esta Escala Alteração para aprovação?
+                  </p>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSubmitConfirmTipo(null)}
+                  disabled={submittingApproval}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSubmitForApproval}
+                  disabled={submittingApproval}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  <Send size={14} />
+                  {submittingApproval ? "Enviando..." : "Enviar para Aprovação"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REOPEN APPROVED SCALE MODAL */}
+      {isReopenModalOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <RotateCcw size={18} className="text-orange-400" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">Reabrir Escala</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !reopenBusy && setIsReopenModalOpen(false)}
+                className="text-gray-400 hover:text-white transition-colors cursor-pointer text-lg"
+                disabled={reopenBusy}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                A escala voltará para <b>Em edição</b>, a aprovação atual será removida e a versão
+                será incrementada (v{reopenTipo === "semanal" ? weeklyVersao : altVersao} → v
+                {(reopenTipo === "semanal" ? weeklyVersao : altVersao) + 1}). Nova aprovação será
+                obrigatória para a {getEscalaDocumentoLabel(reopenTipo)}.
+              </p>
+              <div>
+                <label
+                  htmlFor="reopen-motivo"
+                  className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2"
+                >
+                  Motivo da reabertura *
+                </label>
+                <textarea
+                  id="reopen-motivo"
+                  value={reopenMotivo}
+                  onChange={(e) => {
+                    setReopenMotivo(e.target.value);
+                    if (reopenError) setReopenError(null);
+                  }}
+                  rows={3}
+                  placeholder="Ex.: Alteração de efetivo."
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none resize-none"
+                  disabled={reopenBusy}
+                />
+              </div>
+              {reopenError && (
+                <p className="text-xs font-semibold text-red-600 flex items-center gap-1.5">
+                  <AlertCircle size={14} />
+                  {reopenError}
+                </p>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsReopenModalOpen(false)}
+                  disabled={reopenBusy}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  id="confirm-reopen-btn"
+                  onClick={handleConfirmReopen}
+                  disabled={reopenBusy || !reopenMotivo.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-md cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCcw size={14} />
+                  {reopenBusy ? "Reabrindo..." : "Confirmar reabertura"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <CollaboratorModal
         isOpen={isColModalOpen}
         onClose={() => setIsColModalOpen(false)}
@@ -1804,7 +2253,7 @@ export default function ScheduleEditor({
       <ConcurrencyModal
         isOpen={isConcurrencyModalOpen}
         onClose={() => setIsConcurrencyModalOpen(false)}
-        onForceSave={performSaveAndLog}
+        onForceSave={() => performSaveAndLog(pendingSavePanel || "semanal")}
         onReload={loadData}
         serverLastSaved={concurrencyConflictDoc}
       />
@@ -1992,7 +2441,9 @@ export default function ScheduleEditor({
                       weeklyObservacoes,
                       alterationObservacoes,
                       legendasList,
-                      { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad }
+                      { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad },
+                      formatHomologacaoResumo(weeklyStatus, weeklyAprovacao, weeklyVersao),
+                      formatHomologacaoResumo(altStatus, altAprovacao, altVersao)
                     );
                   } else {
                     exportToExcelCustom(
@@ -2004,9 +2455,16 @@ export default function ScheduleEditor({
                       exportWeekly,
                       exportAlteration,
                       weeklyObservacoes,
-                      alterationObservacoes
+                      alterationObservacoes,
+                      formatHomologacaoResumo(weeklyStatus, weeklyAprovacao, weeklyVersao),
+                      formatHomologacaoResumo(altStatus, altAprovacao, altVersao)
                     );
                   }
+                  void auditExportacao({
+                    usuario,
+                    anoSemana: docId,
+                    detalhes: `Formato: ${exportFormat.toUpperCase()} · Semanal: ${exportWeekly} · Alteração: ${exportAlteration} · Colaboradores: ${exportSelectedRes.length}`,
+                  }).catch((err) => console.warn("Falha ao auditar exportação:", err));
                   setIsExportModalOpen(false);
                 }}
                 className="px-5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-sm transition-colors cursor-pointer"

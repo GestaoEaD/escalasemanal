@@ -8,7 +8,12 @@ export type EscalaStatus =
   | "em_edicao"
   | "aguardando_aprovacao"
   | "aprovada"
+  | "revisao_solicitada"
+  /** @deprecated Preferir revisao_solicitada — mantido para documentos legados. */
   | "rejeitada";
+
+/** Documento oficial com ciclo de aprovação próprio. */
+export type TipoEscalaDocumento = "semanal" | "alteracao";
 
 export interface Usuario {
   /** Identificador da sessão (ID do documento no Firestore). */
@@ -38,8 +43,10 @@ export type HistoricoEscalaTipo =
   | "alteracao"
   | "envio_aprovacao"
   | "aprovacao"
+  | "solicitacao_revisao"
   | "rejeicao"
   | "reabertura"
+  | "cancelamento_solicitacao"
   | "nova_aprovacao";
 
 /** Evento permanente do histórico da escala (ordem cronológica). */
@@ -58,13 +65,18 @@ export interface HistoricoEscalaEvento {
   detalhes?: string;
 }
 
-/** Dados do ciclo de aprovação da Escala Semanal. */
+/** Dados do ciclo de aprovação de um documento (Semanal ou Alteração). */
 export interface EscalaAprovacao {
   /** Identificador único desta solicitação de aprovação (invalida o link após encerrar). */
   solicitacaoId?: string;
   enviadoPor?: AprovacaoAtor | null;
   aprovadoPor?: AprovacaoAtor | null;
+  /** Gestor que solicitou revisão (devolução para correção). */
+  revisaoSolicitadaPor?: AprovacaoAtor | null;
+  motivoRevisao?: string;
+  /** @deprecated Preferir revisaoSolicitadaPor. */
   rejeitadoPor?: AprovacaoAtor | null;
+  /** @deprecated Preferir motivoRevisao. */
   motivoRejeicao?: string;
   observacaoAprovacao?: string;
   versaoEnviada?: number;
@@ -113,49 +125,161 @@ export interface EscalaDocument {
   rows: ScheduleRow[];
   lastSaved: LastSaved | null;
   observacoes?: string;
-  /** Status do fluxo de aprovação (armazenado na Escala Semanal). */
+  /** Status do fluxo de aprovação deste documento (independente por coleção). */
   status?: EscalaStatus;
-  /** Versão incremental do conteúdo da escala. */
+  /** Versão incremental do conteúdo deste documento. */
   versao?: number;
-  /** Metadados do ciclo de aprovação atual. */
+  /** Metadados do ciclo de aprovação atual deste documento. */
   aprovacao?: EscalaAprovacao | null;
-  /** Histórico permanente de eventos da escala (cronológico). */
+  /** Histórico permanente de eventos deste documento (cronológico). */
   historico?: HistoricoEscalaEvento[];
 }
 
+export const TIPO_ESCALA_LABELS: Record<TipoEscalaDocumento, string> = {
+  semanal: "Escala Semanal",
+  alteracao: "Escala Alteração",
+};
+
+/** Item interno de alteração dentro de uma operação de auditoria. */
+export interface AuditAlteracao {
+  campo: string;
+  antes: string;
+  depois: string;
+  /** Colaborador / registro afetado (quando aplicável). */
+  colaborador?: string;
+}
+
+/** Tipos de operação de auditoria (um documento por operação). */
+export type AuditOperacaoTipo =
+  | "SALVAR_ESCALA_SEMANAL"
+  | "SALVAR_ESCALA_ALTERACAO"
+  | "ENVIAR_ESCALA_SEMANAL"
+  | "ENVIAR_ESCALA_ALTERACAO"
+  | "APROVAR_ESCALA_SEMANAL"
+  | "APROVAR_ESCALA_ALTERACAO"
+  | "SOLICITAR_REVISAO_SEMANAL"
+  | "SOLICITAR_REVISAO_ALTERACAO"
+  | "CANCELAR_SOLICITACAO_SEMANAL"
+  | "CANCELAR_SOLICITACAO_ALTERACAO"
+  | "REABRIR_ESCALA_SEMANAL"
+  | "REABRIR_ESCALA_ALTERACAO"
+  | "EXPORTAR"
+  | "LOGIN"
+  | "LOGOUT"
+  | "ALTERAR_CONFIGURACAO"
+  | "CRIAR_USUARIO"
+  | "EDITAR_USUARIO"
+  | "EXCLUIR_USUARIO"
+  | "OPERACAO_LEGADA";
+
+export type AuditDocumentoTipo = "SEMANAL" | "ALTERACAO" | "CONFIGURACAO" | "SISTEMA" | "AUTENTICACAO";
+
+export interface AuditUsuarioSnapshot {
+  nome: string;
+  re: string;
+  posto: string;
+  perfil: string;
+}
+
+/** Documento de auditoria — uma operação com N alterações internas. */
+export interface AuditOperation {
+  id: string; // LOG-000145
+  tipo: AuditOperacaoTipo;
+  escala?: AuditDocumentoTipo;
+  semana?: number;
+  ano?: number;
+  anoSemana?: string;
+  usuario: AuditUsuarioSnapshot;
+  versao?: number;
+  statusAnterior?: string;
+  statusAtual?: string;
+  data: string;
+  hora: string;
+  dataHora?: string;
+  timestamp: any;
+  alteracoes?: AuditAlteracao[];
+  detalhes?: string;
+  solicitacaoId?: string;
+  motivo?: string;
+  /** Marcador de documento legado normalizado. */
+  legado?: boolean;
+}
+
+/** @deprecated Preferir AuditOperation — mantido para leitura de documentos antigos. */
 export interface AuditLog {
   id?: string;
   timestamp: any;
-  data: string; // DD/MM/YYYY
-  hora: string; // HH:MM
-  usuario: string; // Nome of the user who made the change
-  re: string; // RE of the user who made the change
+  data: string;
+  hora: string;
+  usuario: string;
+  re: string;
   painel: "Escala Semanal" | "Escala Alteração" | "Configurações" | "Aprovação";
-  colaborador: string; // Name and/or RE of collaborator
-  campoAlterado: string; // Field that was changed
+  colaborador: string;
+  campoAlterado: string;
   valorAnterior: string;
   novoValor: string;
-  anoSemana: string; // Format "2026_01" for query filtering
-  /** Campos extras de auditoria do fluxo de aprovação */
+  anoSemana: string;
   versao?: number;
   solicitacaoId?: string;
   enviadoPor?: string;
   aprovadoPor?: string;
   gestorRe?: string;
+  modulo?: string;
+  operacao?: string;
+  registroAlterado?: string;
+  perfil?: string;
+  tipo?: AuditOperacaoTipo;
+  escala?: AuditDocumentoTipo;
+  alteracoes?: AuditAlteracao[];
+  statusAnterior?: string;
+  statusAtual?: string;
 }
+
+export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
+  SALVAR_ESCALA_SEMANAL: "Salvar",
+  SALVAR_ESCALA_ALTERACAO: "Salvar",
+  ENVIAR_ESCALA_SEMANAL: "Enviar Aprovação",
+  ENVIAR_ESCALA_ALTERACAO: "Enviar Aprovação",
+  APROVAR_ESCALA_SEMANAL: "Aprovou",
+  APROVAR_ESCALA_ALTERACAO: "Aprovou",
+  SOLICITAR_REVISAO_SEMANAL: "Solicitou Revisão",
+  SOLICITAR_REVISAO_ALTERACAO: "Solicitou Revisão",
+  CANCELAR_SOLICITACAO_SEMANAL: "Cancelou Solicitação",
+  CANCELAR_SOLICITACAO_ALTERACAO: "Cancelou Solicitação",
+  REABRIR_ESCALA_SEMANAL: "Reabriu Escala",
+  REABRIR_ESCALA_ALTERACAO: "Reabriu Escala",
+  EXPORTAR: "Exportar",
+  LOGIN: "Login",
+  LOGOUT: "Logout",
+  ALTERAR_CONFIGURACAO: "Alterar Configuração",
+  CRIAR_USUARIO: "Criar Usuário",
+  EDITAR_USUARIO: "Editar Usuário",
+  EXCLUIR_USUARIO: "Excluir Usuário",
+  OPERACAO_LEGADA: "Operação",
+};
+
+export const AUDIT_DOCUMENTO_LABELS: Record<AuditDocumentoTipo, string> = {
+  SEMANAL: "Escala Semanal",
+  ALTERACAO: "Escala Alteração",
+  CONFIGURACAO: "Configurações",
+  SISTEMA: "Sistema",
+  AUTENTICACAO: "Autenticação",
+};
 
 export const ESCALA_STATUS_LABELS: Record<EscalaStatus, string> = {
   em_edicao: "Em edição",
   aguardando_aprovacao: "Aguardando Aprovação",
   aprovada: "Aprovada",
-  rejeitada: "Rejeitada",
+  revisao_solicitada: "Revisão Solicitada",
+  rejeitada: "Revisão Solicitada",
 };
 
 export const ESCALA_STATUS_EMOJI: Record<EscalaStatus, string> = {
   em_edicao: "🔵",
   aguardando_aprovacao: "🟡",
   aprovada: "🟢",
-  rejeitada: "🔴",
+  revisao_solicitada: "🟠",
+  rejeitada: "🟠",
 };
 
 export type DayOfWeek = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";

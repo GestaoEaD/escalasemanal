@@ -15,7 +15,8 @@ import {
   limit, 
   writeBatch,
   Timestamp,
-  serverTimestamp
+  serverTimestamp,
+  runTransaction,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
@@ -58,5 +59,6 @@ export {
   limit,
   writeBatch,
   Timestamp,
-  serverTimestamp
+  serverTimestamp,
+  runTransaction,
 };

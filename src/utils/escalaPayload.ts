@@ -52,6 +52,14 @@ export function cleanAprovacao(
   if (aprovado) cleaned.aprovadoPor = aprovado;
   else if (aprovacao.aprovadoPor === null) cleaned.aprovadoPor = null;
 
+  const revisaoPor = cleanAprovacaoAtor(aprovacao.revisaoSolicitadaPor);
+  if (revisaoPor) cleaned.revisaoSolicitadaPor = revisaoPor;
+  else if (aprovacao.revisaoSolicitadaPor === null) cleaned.revisaoSolicitadaPor = null;
+
+  if (aprovacao.motivoRevisao !== undefined && aprovacao.motivoRevisao !== null) {
+    cleaned.motivoRevisao = String(aprovacao.motivoRevisao);
+  }
+
   const rejeitado = cleanAprovacaoAtor(aprovacao.rejeitadoPor);
   if (rejeitado) cleaned.rejeitadoPor = rejeitado;
   else if (aprovacao.rejeitadoPor === null) cleaned.rejeitadoPor = null;

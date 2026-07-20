@@ -1,23 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { seedDatabaseIfEmpty } from "./utils/seedData";
-import { Usuario } from "./types";
+import { TipoEscalaDocumento, Usuario } from "./types";
 import { WeekInfo } from "./utils/dateUtils";
 import { canAccessConfig } from "./utils/permissions";
+import { auditAuth } from "./utils/auditService";
+import { parseApprovalPath } from "./utils/approvalService";
 import Login from "./components/Login";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
 import Configuracoes from "./components/Configuracoes";
 import AprovacaoPage from "./components/AprovacaoPage";
-
-function parseApprovalPath(pathname: string): string | null {
-  const match = pathname.match(/^\/aprovacao\/([^/]+)\/?$/i);
-  if (!match) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
-}
 
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(() => {
@@ -32,11 +24,16 @@ export default function App() {
     return null;
   });
 
+  const initialApproval = parseApprovalPath(window.location.pathname);
+
   const [currentView, setCurrentView] = useState<"selector" | "editor" | "config" | "aprovacao">(
-    () => (parseApprovalPath(window.location.pathname) ? "aprovacao" : "selector")
+    () => (initialApproval ? "aprovacao" : "selector")
   );
-  const [approvalEscalaId, setApprovalEscalaId] = useState<string | null>(() =>
-    parseApprovalPath(window.location.pathname)
+  const [approvalEscalaId, setApprovalEscalaId] = useState<string | null>(
+    () => initialApproval?.escalaId ?? null
+  );
+  const [approvalTipo, setApprovalTipo] = useState<TipoEscalaDocumento>(
+    () => initialApproval?.tipo ?? "semanal"
   );
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedWeek, setSelectedWeek] = useState<WeekInfo | null>(null);
@@ -47,9 +44,10 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      const id = parseApprovalPath(window.location.pathname);
-      if (id) {
-        setApprovalEscalaId(id);
+      const parsed = parseApprovalPath(window.location.pathname);
+      if (parsed) {
+        setApprovalEscalaId(parsed.escalaId);
+        setApprovalTipo(parsed.tipo);
         setCurrentView("aprovacao");
       } else if (currentView === "aprovacao") {
         setApprovalEscalaId(null);
@@ -68,10 +66,11 @@ export default function App() {
     setCurrentView("selector");
   };
 
-  const openApproval = (escalaId: string) => {
-    const path = `/aprovacao/${encodeURIComponent(escalaId)}`;
+  const openApproval = (escalaId: string, tipo: TipoEscalaDocumento = "semanal") => {
+    const path = `/aprovacao/${tipo}/${encodeURIComponent(escalaId)}`;
     window.history.pushState({}, "", path);
     setApprovalEscalaId(escalaId);
+    setApprovalTipo(tipo);
     setCurrentView("aprovacao");
   };
 
@@ -88,9 +87,13 @@ export default function App() {
     };
     setUsuario(sessionUser);
     localStorage.setItem("escala_sessao_usuario", JSON.stringify(sessionUser));
+    void auditAuth("LOGIN", sessionUser).catch((err) =>
+      console.warn("Falha ao registrar login na auditoria:", err)
+    );
     const pending = parseApprovalPath(window.location.pathname);
     if (pending) {
-      setApprovalEscalaId(pending);
+      setApprovalEscalaId(pending.escalaId);
+      setApprovalTipo(pending.tipo);
       setCurrentView("aprovacao");
     } else {
       setCurrentView("selector");
@@ -98,9 +101,13 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (usuario) {
+      void auditAuth("LOGOUT", usuario).catch((err) =>
+        console.warn("Falha ao registrar logout na auditoria:", err)
+      );
+    }
     setUsuario(null);
     localStorage.removeItem("escala_sessao_usuario");
-    // Mantém a URL de aprovação para retornar após novo login
     if (!parseApprovalPath(window.location.pathname)) {
       setCurrentView("selector");
     }
@@ -120,6 +127,7 @@ export default function App() {
     return (
       <AprovacaoPage
         escalaId={approvalEscalaId}
+        tipo={approvalTipo}
         usuario={usuario}
         onBack={navigateHome}
         onLogout={handleLogout}
