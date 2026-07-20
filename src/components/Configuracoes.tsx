@@ -1410,7 +1410,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Usuários</h2>
-                    <p className="text-xs text-gray-500">Gerencie contas de usuários com permissões de Operador ou Administrador.</p>
+                    <p className="text-xs text-gray-500">Gerencie contas de usuários com permissões de Operador, Administrador ou Gestor.</p>
                   </div>
                   <button
                     id="new-user-btn"
@@ -1483,7 +1483,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
                                   usr.perfil === "Administrador" 
                                     ? "bg-purple-50 text-purple-700 border-purple-200" 
-                                    : "bg-blue-50 text-blue-700 border-blue-100"
+                                    : usr.perfil === "Gestor"
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                      : "bg-blue-50 text-blue-700 border-blue-100"
                                 }`}>
                                   {usr.perfil || "Operador"}
                                 </span>
@@ -2166,7 +2168,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                                   <td className="px-3 py-2.5 font-mono text-[11px] whitespace-nowrap text-gray-600">{log.re}</td>
                                   <td className="px-3 py-2.5 whitespace-nowrap">
                                     <span className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-full ${
-                                      profile === "Administrador" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
+                                      profile === "Administrador"
+                                        ? "bg-purple-100 text-purple-800"
+                                        : profile === "Gestor"
+                                          ? "bg-emerald-100 text-emerald-800"
+                                          : "bg-blue-100 text-blue-800"
                                     }`}>
                                       {profile}
                                     </span>
@@ -2462,6 +2468,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     >
                       <option value="Operador">Operador</option>
                       <option value="Administrador">Administrador</option>
+                      <option value="Gestor">Gestor</option>
                     </select>
                   </div>
                 </div>

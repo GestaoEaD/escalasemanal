@@ -45,6 +45,41 @@ export const OFFICIAL_COLLABORATORS = [
   { ordem: 20, postoGrad: "CB PM", re: "147445-6", nome: "RODRIGUES", secao: "Seç Gest Educ", ativo: true },
 ];
 
+/** Nomes de guerra dos gestores iniciais (perfil aplicado via Firestore, sem hardcode de permissão). */
+const INITIAL_GESTOR_NOMES = ["AUGUSTO", "FERREIRA", "FABBRI", "DAMACENO", "LEANDRO"] as const;
+
+/**
+ * Garante usuários gestores iniciais no Firestore (uma vez).
+ * Novos gestores futuros: basta alterar o perfil no cadastro de usuários.
+ */
+async function ensureInitialGestores() {
+  const statusDocRef = doc(db, "configuracoes", "status");
+  const statusSnap = await getDoc(statusDocRef);
+  const statusData = statusSnap.exists() ? statusSnap.data() : null;
+  if (statusData?.gestores_iniciais_seeded) return;
+
+  const batch = writeBatch(db);
+  for (const col of OFFICIAL_COLLABORATORS) {
+    if (!(INITIAL_GESTOR_NOMES as readonly string[]).includes(col.nome)) continue;
+    const userRef = doc(db, "usuarios", col.re);
+    batch.set(
+      userRef,
+      {
+        re: col.re,
+        nome: col.nome,
+        postoGrad: col.postoGrad,
+        secao: col.secao,
+        perfil: "Gestor",
+        ativo: true,
+      },
+      { merge: true }
+    );
+  }
+  batch.set(statusDocRef, { gestores_iniciais_seeded: true }, { merge: true });
+  await batch.commit();
+  console.log("Gestores iniciais cadastrados/atualizados com sucesso.");
+}
+
 export const OFFICIAL_POSTOS = [
   { sigla: "SD PM", descricao: "SOLDADO", ordem: 1 },
   { sigla: "CB PM", descricao: "CABO", ordem: 2 },
@@ -102,6 +137,9 @@ export async function seedDatabaseIfEmpty() {
     const userDocRef = doc(db, "usuarios", TEST_USER.re);
     await setDoc(userDocRef, TEST_USER);
     console.log("Usuário de teste 'VENTURA' configurado com sucesso.");
+
+    // 1b. Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
+    await ensureInitialGestores();
 
     if (needsSeeding) {
       console.log("Semeadura oficial necessária. Iniciando limpeza e cadastro de dados oficiais...");

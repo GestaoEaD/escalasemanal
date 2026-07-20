@@ -7,12 +7,32 @@ import {
   Colaborador, 
   AuditLog, 
   OPCOES_ESCALA,
-  POSTOS_GRADUACOES
+  POSTOS_GRADUACOES,
+  EscalaStatus,
+  EscalaAprovacao,
+  HistoricoEscalaEvento,
 } from "../types";
 import { WeekInfo, formatTimestamp } from "../utils/dateUtils";
 import { exportToExcelCustom, exportToPDFCustom } from "../utils/exportUtils";
+import {
+  buildHistoricoEvento,
+  buildReopenAfterEdit,
+  formatNowParts,
+  getApprovalUrl,
+  normalizeEscalaStatus,
+  submitScaleForApproval,
+} from "../utils/approvalService";
+import {
+  canAccessConfig,
+  canEditScale,
+  canSubmitForApproval,
+  isAdministrador,
+  isGestor,
+} from "../utils/permissions";
+import { normalizeRe } from "../utils/reUtils";
 import CollaboratorModal from "./CollaboratorModal";
 import ConcurrencyModal from "./ConcurrencyModal";
+import StatusBadge from "./StatusBadge";
 import { 
   ArrowLeft, 
   Save, 
@@ -27,7 +47,11 @@ import {
   CheckCircle,
   HelpCircle,
   Settings,
-  Copy
+  Copy,
+  Send,
+  Link2,
+  History,
+  Clock,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -45,6 +69,7 @@ interface ScheduleEditorProps {
   onBack: () => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
+  onOpenApproval?: (escalaId: string) => void;
 }
 
 export default function ScheduleEditor({
@@ -54,6 +79,7 @@ export default function ScheduleEditor({
   onBack,
   onLogout,
   onOpenConfig,
+  onOpenApproval,
 }: ScheduleEditorProps) {
   // Document IDs in Firestore
   const docId = week.id; // Format: "year_week" e.g., "2026_01"
@@ -71,6 +97,15 @@ export default function ScheduleEditor({
   // Metadata timestamps for concurrency tracking
   const [loadedWeeklyTimestamp, setLoadedWeeklyTimestamp] = useState<any | null>(null);
   const [loadedAlterationTimestamp, setLoadedAlterationTimestamp] = useState<any | null>(null);
+
+  // Approval workflow state (from escalas_semanais)
+  const [escalaStatus, setEscalaStatus] = useState<EscalaStatus>("em_edicao");
+  const [escalaVersao, setEscalaVersao] = useState(1);
+  const [escalaAprovacao, setEscalaAprovacao] = useState<EscalaAprovacao | null>(null);
+  const [escalaHistorico, setEscalaHistorico] = useState<HistoricoEscalaEvento[]>([]);
+  const [submittingApproval, setSubmittingApproval] = useState(false);
+  const [approvalLink, setApprovalLink] = useState<string | null>(null);
+  const [showHistorico, setShowHistorico] = useState(false);
 
   // Master collaborators pool (for modal dropdown selection)
   const [collaboratorsPool, setCollaboratorsPool] = useState<Colaborador[]>([]);
@@ -116,6 +151,17 @@ export default function ScheduleEditor({
       alterationObservacoes !== dbAlterationObservacoes
     );
   }, [localWeeklyRows, dbWeeklyRows, localAlterationRows, dbAlterationRows, weeklyObservacoes, dbWeeklyObservacoes, alterationObservacoes, dbAlterationObservacoes]);
+
+  const isEditable = React.useMemo(
+    () => canEditScale(usuario, week, escalaStatus),
+    [usuario, week, escalaStatus]
+  );
+
+  const showSubmitApproval =
+    canSubmitForApproval(usuario) &&
+    (escalaStatus === "em_edicao" || escalaStatus === "rejeitada") &&
+    !isDirty &&
+    dbWeeklySaved !== null;
 
   // Dynamically resolve and sort rows based on the up-to-date collaborators pool!
   const resolvedWeeklyRows = React.useMemo(() => {
@@ -271,6 +317,11 @@ export default function ScheduleEditor({
         setWeeklyObservacoes(obs);
         setDbWeeklyObservacoes(obs);
 
+        setEscalaStatus(normalizeEscalaStatus(data.status));
+        setEscalaVersao(data.versao && data.versao > 0 ? data.versao : 1);
+        setEscalaAprovacao(data.aprovacao || null);
+        setEscalaHistorico(Array.isArray(data.historico) ? data.historico : []);
+
         if (data.lastSaved) {
           hasWeeklySaved = true;
         }
@@ -290,6 +341,13 @@ export default function ScheduleEditor({
           dom: "EN",
           observacao: sanitizeWeeklyObservacao(c.observacao)
         }));
+
+        const criacao = buildHistoricoEvento({
+          tipo: "criacao",
+          descricao: "Escala criada",
+          usuario,
+          versao: 1,
+        });
         
         const docData = {
           id: docId,
@@ -298,7 +356,11 @@ export default function ScheduleEditor({
           periodo: week.periodo,
           rows: rows,
           lastSaved: null,
-          observacoes: ""
+          observacoes: "",
+          status: "em_edicao" as EscalaStatus,
+          versao: 1,
+          aprovacao: null,
+          historico: [criacao],
         };
         await setDoc(weeklyDocRef, docData);
         
@@ -308,6 +370,10 @@ export default function ScheduleEditor({
         setLoadedWeeklyTimestamp(null);
         setWeeklyObservacoes("");
         setDbWeeklyObservacoes("");
+        setEscalaStatus("em_edicao");
+        setEscalaVersao(1);
+        setEscalaAprovacao(null);
+        setEscalaHistorico([criacao]);
       }
 
       // Process Alterations Scale
@@ -388,6 +454,7 @@ export default function ScheduleEditor({
 
   // Add collaborator confirmed in modal
   const handleAddColConfirm = async (col: Colaborador) => {
+    if (!isEditable) return;
     // 1. Instantly register in pool if it doesn't exist
     const existsInPool = collaboratorsPool.some((p) => p.re === col.re);
     if (!existsInPool) {
@@ -490,6 +557,7 @@ export default function ScheduleEditor({
 
   // Delete collaborator row
   const handleDeleteCol = (panel: "semanal" | "alteracao", reToDelete: string) => {
+    if (!isEditable) return;
     if (panel === "semanal") {
       setLocalWeeklyRows((prev) => prev.filter((r) => r.re !== reToDelete));
     } else {
@@ -499,6 +567,7 @@ export default function ScheduleEditor({
 
   // Copy a specific row from Escala Semanal to Escala de Alteração
   const handleCopyToAlteration = (row: ScheduleRow) => {
+    if (!isEditable) return;
     // Check if already exists in alteration rows
     const exists = localAlterationRows.some((r) => r.re === row.re);
     if (exists) {
@@ -553,6 +622,7 @@ export default function ScheduleEditor({
     field: "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom" | "observacao",
     value: string
   ) => {
+    if (!isEditable) return;
     const updateRows = (prev: ScheduleRow[]) =>
       prev.map((r) => {
         if (r.re === reRow) {
@@ -570,6 +640,10 @@ export default function ScheduleEditor({
 
   // Verification and Concurrency-aware Save Trigger
   const handleSaveTrigger = async () => {
+    if (!isEditable) {
+      setSaveError("Você não possui permissão para editar esta escala.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
@@ -799,6 +873,71 @@ export default function ScheduleEditor({
       }
 
       // 2. Perform Saves
+      let nextStatus = normalizeEscalaStatus(escalaStatus);
+      let nextVersao = escalaVersao > 0 ? escalaVersao : 1;
+      let nextAprovacao: EscalaAprovacao | null = escalaAprovacao;
+      let nextHistorico = [...escalaHistorico];
+      let loggedReopen = false;
+      const contentDirty =
+        isWeeklyRowsDirty || isWeeklyObsDirty || isAlterationRowsDirty || isAlterationObsDirty;
+
+      if (
+        isAdministrador(usuario) &&
+        contentDirty &&
+        (nextStatus === "aprovada" || nextStatus === "aguardando_aprovacao")
+      ) {
+        const reopen = buildReopenAfterEdit(nextStatus, nextVersao);
+        nextStatus = reopen.status;
+        nextVersao = reopen.versao;
+        nextAprovacao = null;
+        if (reopen.shouldLog) {
+          const { timestamp: ts, data: d, hora: h } = formatNowParts(now);
+          auditLogsList.push({
+            timestamp: ts,
+            data: d,
+            hora: h,
+            usuario: `${usuario.postoGrad} ${usuario.nome}`.trim(),
+            re: usuario.re,
+            painel: "Aprovação",
+            colaborador: "Geral",
+            campoAlterado: "Escala alterada após aprovação",
+            valorAnterior: reopen.previousStatus,
+            novoValor: "em_edicao",
+            anoSemana: docId,
+            versao: nextVersao,
+            solicitacaoId: escalaAprovacao?.solicitacaoId,
+          });
+          nextHistorico = [
+            ...nextHistorico,
+            buildHistoricoEvento({
+              tipo: "reabertura",
+              descricao: "Escala alterada após aprovação — ciclo reaberto",
+              usuario,
+              versao: nextVersao,
+              solicitacaoId: escalaAprovacao?.solicitacaoId,
+              detalhes: `Status anterior: ${reopen.previousStatus}`,
+              date: now,
+            }),
+          ];
+          loggedReopen = true;
+        }
+      } else if (nextStatus === "rejeitada" && contentDirty) {
+        nextStatus = "em_edicao";
+      }
+
+      if (contentDirty && !loggedReopen) {
+        nextHistorico = [
+          ...nextHistorico,
+          buildHistoricoEvento({
+            tipo: "alteracao",
+            descricao: "Alterações salvas na escala",
+            usuario,
+            versao: nextVersao,
+            date: now,
+          }),
+        ];
+      }
+
       const weeklyDocRef = doc(db, "escalas_semanais", docId);
       const weeklyDocData: EscalaDocument = {
         id: docId,
@@ -807,7 +946,11 @@ export default function ScheduleEditor({
         periodo: week.periodo,
         rows: rowsToSaveWeekly,
         lastSaved: savedMetadata,
-        observacoes: weeklyObservacoes
+        observacoes: weeklyObservacoes,
+        status: nextStatus,
+        versao: nextVersao,
+        aprovacao: nextAprovacao,
+        historico: nextHistorico,
       };
       await setDoc(weeklyDocRef, weeklyDocData);
 
@@ -846,6 +989,11 @@ export default function ScheduleEditor({
 
       setDbWeeklyObservacoes(weeklyObservacoes);
       setDbAlterationObservacoes(alterationObservacoes);
+
+      setEscalaStatus(nextStatus);
+      setEscalaVersao(nextVersao);
+      setEscalaAprovacao(nextAprovacao);
+      setEscalaHistorico(nextHistorico);
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
@@ -1027,6 +1175,33 @@ export default function ScheduleEditor({
     }
   };
 
+  const handleSubmitForApproval = async () => {
+    if (!canSubmitForApproval(usuario)) {
+      alert("Somente Administradores podem enviar escalas para aprovação.");
+      return;
+    }
+    if (isDirty) {
+      alert("Salve as alterações antes de enviar para aprovação.");
+      return;
+    }
+    if (!confirm("Enviar esta escala para aprovação?")) return;
+
+    setSubmittingApproval(true);
+    setSaveError(null);
+    try {
+      const result = await submitScaleForApproval(docId, usuario);
+      setEscalaStatus(result.status);
+      setEscalaVersao(result.versao);
+      setEscalaAprovacao(result.aprovacao);
+      setEscalaHistorico(result.historico);
+      setApprovalLink(result.url);
+    } catch (err: any) {
+      setSaveError(err?.message || "Falha ao enviar para aprovação.");
+    } finally {
+      setSubmittingApproval(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-16">
       {/* Top bar header */}
@@ -1052,10 +1227,13 @@ export default function ScheduleEditor({
                   <span className="text-[10px] sm:text-xs text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900 whitespace-nowrap">
                     {week.periodo}
                   </span>
+                  <StatusBadge status={escalaStatus} />
+                  <span className="text-[10px] text-gray-400 font-mono">v{escalaVersao}</span>
                 </div>
                 <div className="text-[10px] sm:text-xs text-gray-400 mt-1 truncate">
                   Usuário: <b className="text-gray-200">{usuario.postoGrad} {usuario.nome}</b>
                   <span className="hidden sm:inline"> (R.E. {usuario.re})</span>
+                  <span className="ml-2 text-gray-500">· {usuario.perfil || "Operador"}</span>
                 </div>
               </div>
             </div>
@@ -1072,9 +1250,9 @@ export default function ScheduleEditor({
               <button
                 id="save-scale-btn"
                 onClick={handleSaveTrigger}
-                disabled={saving || !isDirty}
+                disabled={saving || !isDirty || !isEditable}
                 className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-md transition-all shadow-sm cursor-pointer ${
-                  isDirty 
+                  isDirty && isEditable
                     ? "bg-blue-600 hover:bg-blue-500 text-white" 
                     : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
                 }`}
@@ -1082,6 +1260,48 @@ export default function ScheduleEditor({
                 <Save size={14} />
                 <span>{saving ? "Salvando..." : "Salvar"}</span>
               </button>
+
+              {showSubmitApproval && (
+                <button
+                  id="submit-approval-btn"
+                  onClick={handleSubmitForApproval}
+                  disabled={submittingApproval}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Send size={14} />
+                  <span className="hidden sm:inline">
+                    {submittingApproval ? "Enviando..." : "Enviar para Aprovação"}
+                  </span>
+                  <span className="sm:hidden">Enviar</span>
+                </button>
+              )}
+
+              {(escalaStatus === "aguardando_aprovacao") && canSubmitForApproval(usuario) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = approvalLink || getApprovalUrl(docId);
+                    navigator.clipboard?.writeText(url);
+                    setApprovalLink(url);
+                    alert(`Link de aprovação (válido apenas enquanto aguarda decisão):\n${url}`);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/50 hover:bg-amber-950 rounded-md border border-amber-900 cursor-pointer"
+                  title="Copiar link de aprovação"
+                >
+                  <Link2 size={14} />
+                  <span className="hidden md:inline">Link</span>
+                </button>
+              )}
+
+              {isGestor(usuario) && escalaStatus === "aguardando_aprovacao" && onOpenApproval && (
+                <button
+                  onClick={() => onOpenApproval(docId)}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md cursor-pointer"
+                >
+                  <CheckCircle size={14} />
+                  <span>Abrir Aprovação</span>
+                </button>
+              )}
 
               <button
                 id="export-scale-btn"
@@ -1092,7 +1312,7 @@ export default function ScheduleEditor({
                 <span className="hidden xs:inline sm:inline">Exportar</span>
               </button>
 
-              {usuario.perfil === "Administrador" && onOpenConfig && (
+              {canAccessConfig(usuario) && onOpenConfig && (
                 <button
                   id="config-editor-btn"
                   onClick={() => {
@@ -1145,6 +1365,131 @@ export default function ScheduleEditor({
           <div className="mb-6 bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 flex items-center space-x-3 text-sm font-semibold">
             <AlertCircle className="text-red-600" size={20} />
             <span>{saveError}</span>
+          </div>
+        )}
+
+        {!isEditable && !loading && (
+          <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg p-3 text-xs font-semibold flex items-start gap-2">
+            <AlertCircle className="text-blue-600 shrink-0 mt-0.5" size={16} />
+            <span>
+              {isGestor(usuario)
+                ? "Perfil Gestor: visualização e aprovação apenas — edição bloqueada."
+                : escalaStatus === "aprovada"
+                  ? "Escala aprovada: somente Administradores podem editar (a edição remove a aprovação)."
+                  : escalaStatus === "aguardando_aprovacao"
+                    ? "Escala aguardando aprovação: edição bloqueada para Operadores."
+                    : "Você só pode editar a semana atual e semanas futuras."}
+            </span>
+          </div>
+        )}
+
+        {escalaStatus === "aguardando_aprovacao" && !loading && (
+          <div className="mb-6 bg-amber-50 border border-amber-300 text-amber-950 rounded-lg p-4 text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <StatusBadge status="aguardando_aprovacao" size="md" />
+              <span>Aguardando decisão do Gestor</span>
+            </div>
+            {escalaAprovacao?.enviadoPor && (
+              <p className="text-xs font-medium text-amber-800 mt-1">
+                Enviado por {escalaAprovacao.enviadoPor.postoGrad} {escalaAprovacao.enviadoPor.nome}{" "}
+                em {escalaAprovacao.enviadoPor.data} às {escalaAprovacao.enviadoPor.hora}
+                {escalaAprovacao.solicitacaoId && (
+                  <span className="ml-2 font-mono text-[10px] text-amber-700">
+                    · {escalaAprovacao.solicitacaoId}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {escalaStatus === "aprovada" && !loading && (
+          <div className="mb-6 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-lg p-4 text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <StatusBadge status="aprovada" size="md" />
+              <span>Escala oficialmente aprovada</span>
+            </div>
+            {escalaAprovacao?.aprovadoPor ? (
+              <p className="text-xs font-medium text-emerald-800 mt-1">
+                Aprovado por{" "}
+                <b>
+                  {escalaAprovacao.aprovadoPor.postoGrad} {escalaAprovacao.aprovadoPor.nome}
+                </b>{" "}
+                (RE {normalizeRe(escalaAprovacao.aprovadoPor.re)}) em{" "}
+                {escalaAprovacao.aprovadoPor.data} às {escalaAprovacao.aprovadoPor.hora}
+                {typeof escalaAprovacao.versaoAprovada === "number" && (
+                  <span> · versão v{escalaAprovacao.versaoAprovada}</span>
+                )}
+              </p>
+            ) : (
+              <p className="text-xs font-medium text-emerald-800 mt-1">Aprovação registrada.</p>
+            )}
+          </div>
+        )}
+
+        {escalaStatus === "rejeitada" && !loading && (
+          <div className="mb-6 bg-red-50 border border-red-300 text-red-950 rounded-lg p-4 text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <StatusBadge status="rejeitada" size="md" />
+              <span>Escala rejeitada — edite e envie novamente</span>
+            </div>
+            {escalaAprovacao?.rejeitadoPor && (
+              <p className="text-xs font-medium text-red-800 mt-1">
+                Rejeitado por {escalaAprovacao.rejeitadoPor.postoGrad}{" "}
+                {escalaAprovacao.rejeitadoPor.nome} em {escalaAprovacao.rejeitadoPor.data} às{" "}
+                {escalaAprovacao.rejeitadoPor.hora}
+                {escalaAprovacao.motivoRejeicao && ` — ${escalaAprovacao.motivoRejeicao}`}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Histórico permanente */}
+        {!loading && (
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowHistorico((v) => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 cursor-pointer"
+            >
+              <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-700">
+                <History size={14} className="text-gray-500" />
+                Histórico da escala
+                <span className="text-gray-400 font-semibold normal-case tracking-normal">
+                  ({escalaHistorico.length})
+                </span>
+              </span>
+              <span className="text-[10px] font-bold text-blue-600">
+                {showHistorico ? "Ocultar" : "Exibir"}
+              </span>
+            </button>
+            {showHistorico && (
+              <div className="border-t border-gray-100 max-h-64 overflow-y-auto divide-y divide-gray-50">
+                {escalaHistorico.length === 0 ? (
+                  <p className="px-4 py-4 text-xs text-gray-400 italic">Nenhum evento registrado.</p>
+                ) : (
+                  [...escalaHistorico].reverse().map((ev) => (
+                    <div key={ev.id} className="px-4 py-2.5 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 text-gray-400 font-medium">
+                          <Clock size={11} />
+                          {ev.data} {ev.hora}
+                        </span>
+                        <span className="font-bold text-gray-800">{ev.descricao}</span>
+                        {typeof ev.versao === "number" && (
+                          <span className="text-[10px] font-mono text-gray-400">v{ev.versao}</span>
+                        )}
+                      </div>
+                      <div className="text-gray-500 mt-0.5">
+                        {ev.postoGrad ? `${ev.postoGrad} ` : ""}
+                        {ev.usuario} (RE {normalizeRe(ev.re)})
+                        {ev.detalhes ? ` · ${ev.detalhes}` : ""}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1217,7 +1562,8 @@ export default function ScheduleEditor({
                               <select
                                 value={row[day]}
                                 onChange={(e) => handleCellChange("semanal", row.re, day, e.target.value)}
-                                className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
+                                disabled={!isEditable}
+                                className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
                                 style={getCellStyle(row[day])}
                                 title={getLegendDescription(row[day])}
                               >
@@ -1235,15 +1581,17 @@ export default function ScheduleEditor({
                               value={row.observacao}
                               placeholder="Observações..."
                               onChange={(e) => handleCellChange("semanal", row.re, "observacao", e.target.value)}
-                              className="w-full max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                              disabled={!isEditable}
+                              className="w-full max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
                             />
                           </td>
 
                           {/* Actions Column */}
                           <td className="px-3 py-2 whitespace-nowrap text-center">
                             <button
-                              onClick={() => handleCopyToAlteration(row)}
-                              className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs"
+                              onClick={() => isEditable && handleCopyToAlteration(row)}
+                              disabled={!isEditable}
+                              className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs disabled:opacity-40 disabled:cursor-not-allowed"
                               title="Copiar militar para a Escala de Alteração"
                             >
                               <Copy size={12} />
@@ -1264,10 +1612,11 @@ export default function ScheduleEditor({
                 </label>
                 <textarea
                   value={weeklyObservacoes}
-                  onChange={(e) => setWeeklyObservacoes(e.target.value)}
+                  onChange={(e) => isEditable && setWeeklyObservacoes(e.target.value)}
+                  disabled={!isEditable}
                   placeholder="Digite aqui as observações gerais para a Escala Semanal desta semana..."
                   rows={4}
-                  className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none shadow-3xs"
+                  className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
                 />
               </div>
             </section>
@@ -1341,7 +1690,8 @@ export default function ScheduleEditor({
                                   <select
                                     value={row[day]}
                                     onChange={(e) => handleCellChange("alteracao", row.re, day, e.target.value)}
-                                    className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
+                                    disabled={!isEditable}
+                                    className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
                                     style={getCellStyle(row[day])}
                                     title={getLegendDescription(row[day])}
                                   >
@@ -1359,15 +1709,17 @@ export default function ScheduleEditor({
                                   value={row.observacao}
                                   placeholder="Observações..."
                                   onChange={(e) => handleCellChange("alteracao", row.re, "observacao", e.target.value)}
-                                  className="w-full max-w-[10rem] sm:max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                                  disabled={!isEditable}
+                                  className="w-full max-w-[10rem] sm:max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
                                 />
                               </td>
 
                               {/* Actions Column */}
                               <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-center">
                                 <button
-                                  onClick={() => handleDeleteCol("alteracao", row.re)}
-                                  className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-all cursor-pointer shadow-3xs"
+                                  onClick={() => isEditable && handleDeleteCol("alteracao", row.re)}
+                                  disabled={!isEditable}
+                                  className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-all cursor-pointer shadow-3xs disabled:opacity-40 disabled:cursor-not-allowed"
                                   title="Remover militar da Escala de Alteração"
                                 >
                                   <Trash2 size={12} />
@@ -1388,10 +1740,11 @@ export default function ScheduleEditor({
                     </label>
                     <textarea
                       value={alterationObservacoes}
-                      onChange={(e) => setAlterationObservacoes(e.target.value)}
+                      onChange={(e) => isEditable && setAlterationObservacoes(e.target.value)}
+                      disabled={!isEditable}
                       placeholder="Digite aqui as observações gerais para a Escala de Alteração desta semana..."
                       rows={4}
-                      className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none shadow-3xs"
+                      className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                 </>

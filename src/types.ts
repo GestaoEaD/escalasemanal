@@ -2,14 +2,70 @@
  * Types for the Weekly Schedule System (Sistema de Escala de Serviço)
  */
 
+export type PerfilUsuario = "Administrador" | "Operador" | "Gestor";
+
+export type EscalaStatus =
+  | "em_edicao"
+  | "aguardando_aprovacao"
+  | "aprovada"
+  | "rejeitada";
+
 export interface Usuario {
   re: string;
   nomeCompleto?: string;
   nome: string; // Nome de Guerra
   postoGrad: string;
   secao: string;
-  perfil?: "Administrador" | "Operador";
+  perfil?: PerfilUsuario;
   ativo?: boolean;
+}
+
+/** Metadados de um ator do fluxo de aprovação. */
+export interface AprovacaoAtor {
+  nome: string;
+  re: string;
+  postoGrad: string;
+  timestamp?: any;
+  data: string;
+  hora: string;
+}
+
+export type HistoricoEscalaTipo =
+  | "criacao"
+  | "alteracao"
+  | "envio_aprovacao"
+  | "aprovacao"
+  | "rejeicao"
+  | "reabertura"
+  | "nova_aprovacao";
+
+/** Evento permanente do histórico da escala (ordem cronológica). */
+export interface HistoricoEscalaEvento {
+  id: string;
+  tipo: HistoricoEscalaTipo;
+  descricao: string;
+  usuario: string;
+  re: string;
+  postoGrad?: string;
+  data: string;
+  hora: string;
+  timestamp: any;
+  versao?: number;
+  solicitacaoId?: string;
+  detalhes?: string;
+}
+
+/** Dados do ciclo de aprovação da Escala Semanal. */
+export interface EscalaAprovacao {
+  /** Identificador único desta solicitação de aprovação (invalida o link após encerrar). */
+  solicitacaoId?: string;
+  enviadoPor?: AprovacaoAtor | null;
+  aprovadoPor?: AprovacaoAtor | null;
+  rejeitadoPor?: AprovacaoAtor | null;
+  motivoRejeicao?: string;
+  observacaoAprovacao?: string;
+  versaoEnviada?: number;
+  versaoAprovada?: number;
 }
 
 export interface Colaborador {
@@ -54,6 +110,14 @@ export interface EscalaDocument {
   rows: ScheduleRow[];
   lastSaved: LastSaved | null;
   observacoes?: string;
+  /** Status do fluxo de aprovação (armazenado na Escala Semanal). */
+  status?: EscalaStatus;
+  /** Versão incremental do conteúdo da escala. */
+  versao?: number;
+  /** Metadados do ciclo de aprovação atual. */
+  aprovacao?: EscalaAprovacao | null;
+  /** Histórico permanente de eventos da escala (cronológico). */
+  historico?: HistoricoEscalaEvento[];
 }
 
 export interface AuditLog {
@@ -63,13 +127,33 @@ export interface AuditLog {
   hora: string; // HH:MM
   usuario: string; // Nome of the user who made the change
   re: string; // RE of the user who made the change
-  painel: "Escala Semanal" | "Escala Alteração" | "Configurações";
+  painel: "Escala Semanal" | "Escala Alteração" | "Configurações" | "Aprovação";
   colaborador: string; // Name and/or RE of collaborator
   campoAlterado: string; // Field that was changed
   valorAnterior: string;
   novoValor: string;
   anoSemana: string; // Format "2026_01" for query filtering
+  /** Campos extras de auditoria do fluxo de aprovação */
+  versao?: number;
+  solicitacaoId?: string;
+  enviadoPor?: string;
+  aprovadoPor?: string;
+  gestorRe?: string;
 }
+
+export const ESCALA_STATUS_LABELS: Record<EscalaStatus, string> = {
+  em_edicao: "Em edição",
+  aguardando_aprovacao: "Aguardando Aprovação",
+  aprovada: "Aprovada",
+  rejeitada: "Rejeitada",
+};
+
+export const ESCALA_STATUS_EMOJI: Record<EscalaStatus, string> = {
+  em_edicao: "🔵",
+  aguardando_aprovacao: "🟡",
+  aprovada: "🟢",
+  rejeitada: "🔴",
+};
 
 export type DayOfWeek = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
 

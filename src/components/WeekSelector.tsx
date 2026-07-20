@@ -1,7 +1,11 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
-import { Usuario } from "../types";
-import { Calendar, LogOut, FileText, ChevronRight, Settings } from "lucide-react";
+import { EscalaStatus, Usuario } from "../types";
+import { db, collection, getDocs, query, where } from "../firebase";
+import { canAccessConfig, isGestor } from "../utils/permissions";
+import { normalizeEscalaStatus } from "../utils/approvalService";
+import StatusBadge from "./StatusBadge";
+import { Calendar, LogOut, ChevronRight, Settings, Link2 } from "lucide-react";
 import { motion } from "motion/react";
 
 interface WeekSelectorProps {
@@ -9,6 +13,7 @@ interface WeekSelectorProps {
   onSelectWeek: (year: number, week: WeekInfo) => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
+  onOpenApproval?: (escalaId: string) => void;
 }
 
 export default function WeekSelector({
@@ -16,23 +21,44 @@ export default function WeekSelector({
   onSelectWeek,
   onLogout,
   onOpenConfig,
+  onOpenApproval,
 }: WeekSelectorProps) {
   const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [statusByWeek, setStatusByWeek] = useState<Record<string, EscalaStatus>>({});
 
-  // Get today's date dynamically
   const today = useMemo(() => new Date(), []);
 
-  // Generate weeks for selected year
   const weeks = useMemo(() => {
     return getWeeksForYear(selectedYear);
   }, [selectedYear]);
 
-  // Determine which week is current based on current local time
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatuses = async () => {
+      try {
+        const q = query(collection(db, "escalas_semanais"), where("ano", "==", selectedYear));
+        const snap = await getDocs(q);
+        const map: Record<string, EscalaStatus> = {};
+        snap.forEach((d) => {
+          const data = d.data();
+          const id = (data.id as string) || d.id;
+          map[id] = normalizeEscalaStatus(data.status);
+        });
+        if (!cancelled) setStatusByWeek(map);
+      } catch (err) {
+        console.error("Falha ao carregar status das escalas:", err);
+      }
+    };
+    loadStatuses();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedYear]);
+
   const currentWeekId = useMemo(() => {
     const todayYear = today.getFullYear();
     if (todayYear !== selectedYear) return null;
 
-    // Find the week containing today
     const currentWeek = weeks.find((w) => {
       const start = new Date(w.startDate);
       start.setHours(0, 0, 0, 0);
@@ -44,7 +70,6 @@ export default function WeekSelector({
     return currentWeek ? currentWeek.id : null;
   }, [selectedYear, weeks, today]);
 
-  // Determine the state of a week (past, current, future)
   const getWeekState = (week: WeekInfo) => {
     const isCurrent = week.id === currentWeekId;
     if (isCurrent) return "current";
@@ -67,7 +92,6 @@ export default function WeekSelector({
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* Top Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
           <div className="flex justify-between gap-2 min-h-16 py-2 sm:py-0 sm:h-16 items-center">
@@ -89,12 +113,12 @@ export default function WeekSelector({
                   {usuario.postoGrad} {usuario.nome}
                 </div>
                 <div className="text-xs text-gray-500">
-                  R.E. {usuario.re} | {usuario.secao}
+                  R.E. {usuario.re} · {usuario.perfil || "Operador"} · {usuario.secao}
                 </div>
               </div>
 
               <div className="flex items-center space-x-2">
-                {usuario.perfil === "Administrador" && onOpenConfig && (
+                {canAccessConfig(usuario) && onOpenConfig && (
                   <button
                     id="config-btn"
                     onClick={onOpenConfig}
@@ -119,7 +143,6 @@ export default function WeekSelector({
         </div>
       </header>
 
-      {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
         <div className="md:flex md:items-center md:justify-between mb-6">
           <div className="flex-1 min-w-0">
@@ -148,13 +171,11 @@ export default function WeekSelector({
           </div>
         </div>
 
-
-
-        {/* Weeks Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {weeks.map((week, idx) => {
+          {weeks.map((week) => {
             const state = getWeekState(week);
-            
+            const approvalStatus = statusByWeek[week.id] || "em_edicao";
+
             let btnClass = "";
             let titleClass = "";
             let periodClass = "";
@@ -182,7 +203,6 @@ export default function WeekSelector({
                 </span>
               );
             } else {
-              // future
               btnClass = "border-gray-200 bg-white hover:border-blue-400 hover:shadow-xs";
               titleClass = "text-gray-900 font-bold";
               periodClass = "text-gray-600 font-semibold";
@@ -190,32 +210,52 @@ export default function WeekSelector({
             }
 
             return (
-              <motion.button
+              <motion.div
                 key={week.id}
-                id={`week-btn-${week.id}`}
                 whileHover={{ scale: 1.015, translateY: -2 }}
-                onClick={() => onSelectWeek(selectedYear, week)}
-                className={`text-left p-4 rounded-lg border flex flex-col justify-between h-28 cursor-pointer transition-all ${btnClass}`}
+                className={`text-left p-4 rounded-lg border flex flex-col justify-between min-h-28 transition-all ${btnClass}`}
               >
-                <div className="w-full">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                      {selectedYear}
-                    </span>
-                    {badge}
+                <button
+                  id={`week-btn-${week.id}`}
+                  type="button"
+                  onClick={() => onSelectWeek(selectedYear, week)}
+                  className="w-full text-left cursor-pointer"
+                >
+                  <div className="w-full">
+                    <div className="flex justify-between items-start gap-1">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                        {selectedYear}
+                      </span>
+                      {badge}
+                    </div>
+                    <h3 className={`text-base mt-1 ${titleClass}`}>{week.label}</h3>
+                    <div className="mt-1.5">
+                      <StatusBadge status={approvalStatus} />
+                    </div>
                   </div>
-                  <h3 className={`text-base mt-1 ${titleClass}`}>
-                    {week.label}
-                  </h3>
-                </div>
 
-                <div className="flex justify-between items-center w-full mt-2 border-t border-gray-100/50 pt-2">
-                  <span className={`text-xs ${periodClass}`}>
-                    {week.periodo}
-                  </span>
-                  <ChevronRight size={16} className={chevronColor} />
-                </div>
-              </motion.button>
+                  <div className="flex justify-between items-center w-full mt-2 border-t border-gray-100/50 pt-2">
+                    <span className={`text-xs ${periodClass}`}>{week.periodo}</span>
+                    <ChevronRight size={16} className={chevronColor} />
+                  </div>
+                </button>
+
+                {isGestor(usuario) &&
+                  approvalStatus === "aguardando_aprovacao" &&
+                  onOpenApproval && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenApproval(week.id);
+                      }}
+                      className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md cursor-pointer"
+                    >
+                      <Link2 size={12} />
+                      Abrir aprovação
+                    </button>
+                  )}
+              </motion.div>
             );
           })}
         </div>

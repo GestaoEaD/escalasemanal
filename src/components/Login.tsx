@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { db, doc, getDoc } from "../firebase";
 import { Usuario } from "../types";
 import { TEST_USER } from "../utils/seedData";
+import { findUsuarioByRe } from "../utils/approvalService";
+import { normalizeRe } from "../utils/reUtils";
 import { Shield, Key, AlertCircle } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -22,24 +23,18 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setError(null);
 
     try {
-      let searchRe = re.trim();
-      let userDocRef = doc(db, "usuarios", searchRe);
-      let userSnap = await getDoc(userDocRef);
+      const userData = await findUsuarioByRe(re);
 
-      if (!userSnap.exists() && searchRe === "124342") {
-        searchRe = "124342-0";
-        userDocRef = doc(db, "usuarios", searchRe);
-        userSnap = await getDoc(userDocRef);
-      }
-
-      if (userSnap.exists()) {
-        const userData = userSnap.data() as Usuario;
+      if (userData) {
         if (userData.ativo === false) {
           setError("Sua conta de usuário está inativa. Entre em contato com um administrador.");
         } else {
           onLoginSuccess(userData);
         }
-      } else if (searchRe === TEST_USER.re || searchRe === "124342") {
+      } else if (
+        normalizeRe(re) === normalizeRe(TEST_USER.re) ||
+        normalizeRe(re) === "124342"
+      ) {
         onLoginSuccess(TEST_USER);
       } else {
         setError(
@@ -55,7 +50,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   const handleFillTestUser = () => {
-    setRe(TEST_USER.re);
+    setRe(normalizeRe(TEST_USER.re));
     setError(null);
   };
 
@@ -76,7 +71,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-gray-100"
@@ -86,6 +81,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               <label htmlFor="re-input" className="block text-sm font-medium text-gray-700">
                 Registro Estatístico (R.E.)
               </label>
+              <p className="mt-0.5 text-[11px] text-gray-400">
+                Informe o R.E. sem o dígito (ex.: 124342)
+              </p>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                   <Key size={18} />
@@ -135,7 +133,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="text-xs font-bold text-gray-700">CB PM Ventura</div>
-                  <div className="text-[11px] text-gray-500">R.E. 124342-0 | Seç Gest Educ</div>
+                  <div className="text-[11px] text-gray-500">
+                    R.E. {normalizeRe(TEST_USER.re)} | Seç Gest Educ | Administrador
+                  </div>
                 </div>
                 <button
                   id="fill-test-user-btn"
