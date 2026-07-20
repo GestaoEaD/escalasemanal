@@ -31,6 +31,13 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
+const AUTO_SYSTEM_USER_OBSERVACAO = /^usu[aá]rio do sistema$/i;
+
+function sanitizeWeeklyObservacao(observacao?: string): string {
+  if (!observacao?.trim()) return "";
+  return AUTO_SYSTEM_USER_OBSERVACAO.test(observacao.trim()) ? "" : observacao;
+}
+
 interface ScheduleEditorProps {
   usuario: Usuario;
   year: number;
@@ -119,12 +126,14 @@ export default function ScheduleEditor({
           postoGrad: col.postoGrad,
           nome: col.nome, // Nome de Guerra
           secao: col.secao,
-          ordem: col.ordem ?? 999
+          ordem: col.ordem ?? 999,
+          observacao: sanitizeWeeklyObservacao(row.observacao),
         };
       }
       return {
         ...row,
-        ordem: 999
+        ordem: 999,
+        observacao: sanitizeWeeklyObservacao(row.observacao),
       };
     }).filter((row) => {
       // Keep only rows of collaborators that exist in the master pool!
@@ -206,8 +215,12 @@ export default function ScheduleEditor({
       // Process Weekly Scale
       if (weeklySnap.exists()) {
         const data = weeklySnap.data() as EscalaDocument;
-        setDbWeeklyRows(data.rows || []);
-        setLocalWeeklyRows(data.rows || []);
+        const loadedRows = (data.rows || []).map((row) => ({
+          ...row,
+          observacao: sanitizeWeeklyObservacao(row.observacao),
+        }));
+        setDbWeeklyRows(loadedRows);
+        setLocalWeeklyRows(loadedRows);
         setDbWeeklySaved(data.lastSaved);
         setLoadedWeeklyTimestamp(data.lastSaved?.timestamp || null);
         
@@ -232,7 +245,7 @@ export default function ScheduleEditor({
           sex: "EN",
           sab: "EN",
           dom: "EN",
-          observacao: c.observacao || ""
+          observacao: sanitizeWeeklyObservacao(c.observacao)
         }));
         
         const docData = {
@@ -369,7 +382,9 @@ export default function ScheduleEditor({
       sex: "EN",
       sab: "EN",
       dom: "EN",
-      observacao: col.observacao || ""
+      observacao: activePanelForModal === "semanal"
+        ? sanitizeWeeklyObservacao(col.observacao)
+        : col.observacao || ""
     };
 
     if (activePanelForModal === "semanal") {

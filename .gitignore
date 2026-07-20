@@ -11,3 +11,5 @@ firebase-debug.log
 .vscode/
 .idea/
 !.env.example
+
+.vercel

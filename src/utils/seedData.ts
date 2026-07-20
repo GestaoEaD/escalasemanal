@@ -125,7 +125,7 @@ export async function seedDatabaseIfEmpty() {
         const colDocRef = doc(db, "colaboradores", col.re);
         colBatch.set(colDocRef, {
           ...col,
-          observacao: col.re === "124342-0" ? "Usuário do sistema" : "",
+          observacao: "",
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
