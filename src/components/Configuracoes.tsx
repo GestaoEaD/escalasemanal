@@ -1968,7 +1968,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.nomeCompleto || ""}
                     onChange={(e) => setCurrentCol({ ...currentCol, nomeCompleto: e.target.value })}
-                    placeholder="Ex.: Nome Completo Fictício"
+                    placeholder="Ex.: João da Silva"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -1980,7 +1980,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.nome}
                     onChange={(e) => setCurrentCol({ ...currentCol, nome: e.target.value })}
-                    placeholder="Ex.: FICTICIO"
+                    placeholder="Ex.: SILVA"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2020,7 +2020,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.observacao || ""}
                     onChange={(e) => setCurrentCol({ ...currentCol, observacao: e.target.value })}
-                    placeholder="Ex: Função fictícia, apoio, etc."
+                    placeholder="Ex: Apoio, motorista, etc."
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
                   />
                 </div>
@@ -2099,7 +2099,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentUser.nomeCompleto || ""}
                     onChange={(e) => setCurrentUser({ ...currentUser, nomeCompleto: e.target.value })}
-                    placeholder="Ex.: Nome Completo Fictício"
+                    placeholder="Ex.: João da Silva"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2111,7 +2111,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentUser.nome}
                     onChange={(e) => setCurrentUser({ ...currentUser, nome: e.target.value })}
-                    placeholder="Ex.: FICTICIO"
+                    placeholder="Ex.: SILVA"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2136,7 +2136,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         prev ? { ...prev, email: normalized } : prev
                       );
                     }}
-                    placeholder="usuario.ficticio@exemplo.com"
+                    placeholder="joao.silva@exemplo.com"
                     autoComplete="email"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
                     required={!usuarios.some((u) => u.re === currentUser.re)}

@@ -325,7 +325,7 @@ export default function CollaboratorModal({
                   <input
                     id="collaborator-name-input"
                     type="text"
-                    placeholder="Ex.: FICTICIO"
+                    placeholder="Ex.: SILVA"
                     value={nome}
                     onChange={(e) => setNome(e.target.value)}
                     className="block w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 font-medium"
@@ -353,7 +353,7 @@ export default function CollaboratorModal({
                   </label>
                   <input
                     type="text"
-                    placeholder="Ex: Observação fictícia de exemplo..."
+                    placeholder="Ex: Observação de exemplo..."
                     value={observacao}
                     onChange={(e) => setObservacao(e.target.value)}
                     className="block w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 font-medium"

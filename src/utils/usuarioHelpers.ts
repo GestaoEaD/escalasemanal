@@ -53,7 +53,7 @@ export function validateUsuarioEmail(options: {
   }
 
   if (email && !isValidEmailFormat(email)) {
-    return { ok: false, message: "Informe um e-mail válido (ex.: usuario.ficticio@exemplo.com)." };
+    return { ok: false, message: "Informe um e-mail válido (ex.: joao.silva@exemplo.com)." };
   }
 
   if (email) {
