@@ -61,6 +61,10 @@ async function ensureInitialGestores() {
         secao: col.secao,
         perfil: "Gestor",
         ativo: true,
+        email: "",
+        authProvider: "local",
+        ultimoLogin: null,
+        emailVerificado: false,
       },
       { merge: true }
     );

@@ -22,10 +22,18 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { auditConfiguracao, loadAuditOperations } from "../utils/auditService";
+import {
+  displayUserEmail,
+  normalizeEmail,
+  prepareUsuarioDocument,
+  validateUsuarioEmail,
+} from "../utils/usuarioHelpers";
+import { exportUsuariosToExcel } from "../utils/exportUtils";
 import LogsAuditPanel from "./LogsAuditPanel";
 
 interface ConfiguracoesProps {
@@ -163,8 +171,15 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       // 2. Fetch Users
       const userSnap = await getDocs(collection(db, "usuarios"));
       const userList: Usuario[] = [];
-      userSnap.forEach((doc) => {
-        userList.push(doc.data() as Usuario);
+      userSnap.forEach((d) => {
+        const data = d.data() as Usuario;
+        userList.push(
+          prepareUsuarioDocument({
+            ...data,
+            re: data.re || d.id,
+            uid: d.id,
+          })
+        );
       });
       userList.sort((a, b) => a.nome.localeCompare(b.nome));
 
@@ -488,11 +503,28 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       }
       // B. Creations and edits
       for (const usr of usuarios) {
-        const original = origUsuarios.find((u) => u.re === usr.re);
-        const docRef = doc(db, "usuarios", usr.re);
-        batch.set(docRef, prepareFirestoreWrite(`usuarios/${usr.re}`, usr as unknown as Record<string, unknown>));
+        const prepared = prepareUsuarioDocument(usr);
+        const original = origUsuarios.find((u) => u.re === prepared.re);
+        const emailCheck = validateUsuarioEmail({
+          email: prepared.email,
+          re: prepared.re,
+          isNew: !original,
+          existingUsers: usuarios,
+        });
+        if (emailCheck.ok === false) {
+          throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
+        }
 
-        const userLabel = `${usr.postoGrad} ${usr.nome}`;
+        const docRef = doc(db, "usuarios", prepared.re);
+        const { uid: _uid, ...toPersist } = prepared;
+        batch.set(
+          docRef,
+          prepareFirestoreWrite(`usuarios/${prepared.re}`, toPersist as unknown as Record<string, unknown>)
+        );
+
+        const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
+        const emailAntes = normalizeEmail(original?.email);
+        const emailDepois = normalizeEmail(prepared.email);
 
         if (!original) {
           createAuditLog(
@@ -501,26 +533,39 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             userLabel,
             "Todos",
             "",
-            `RE: ${usr.re}, Posto: ${usr.postoGrad}, Nome Completo: ${usr.nomeCompleto || ""}, Guerra: ${usr.nome}, Seção: ${usr.secao}, Perfil: ${usr.perfil || "Operador"}, Ativo: ${usr.ativo ? "Sim" : "Não"}`
+            `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
           );
+          if (emailDepois) {
+            createAuditLog("Usuários", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
+          }
         } else {
-          if (usr.postoGrad !== original.postoGrad) {
-            createAuditLog("Usuários", "Edição", userLabel, "Posto/Graduação", original.postoGrad, usr.postoGrad);
+          if (prepared.postoGrad !== original.postoGrad) {
+            createAuditLog("Usuários", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
           }
-          if (usr.nome !== original.nome) {
-            createAuditLog("Usuários", "Edição", userLabel, "Nome de Guerra", original.nome, usr.nome);
+          if (prepared.nome !== original.nome) {
+            createAuditLog("Usuários", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
           }
-          if (usr.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Usuários", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", usr.nomeCompleto || "");
+          if (prepared.nomeCompleto !== original.nomeCompleto) {
+            createAuditLog("Usuários", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
           }
-          if (usr.secao !== original.secao) {
-            createAuditLog("Usuários", "Edição", userLabel, "Seção", original.secao, usr.secao);
+          if (emailAntes !== emailDepois) {
+            createAuditLog(
+              "Usuários",
+              emailAntes ? "Edição" : "Inclusão",
+              userLabel,
+              "E-mail Google",
+              emailAntes,
+              emailDepois
+            );
           }
-          if (usr.perfil !== original.perfil) {
-            createAuditLog("Usuários", "Edição", userLabel, "Perfil", original.perfil || "Operador", usr.perfil || "Operador");
+          if (prepared.secao !== original.secao) {
+            createAuditLog("Usuários", "Edição", userLabel, "Seção", original.secao, prepared.secao);
           }
-          if (usr.ativo !== original.ativo) {
-            createAuditLog("Usuários", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", usr.ativo ? "Ativo" : "Inativo");
+          if (prepared.perfil !== original.perfil) {
+            createAuditLog("Usuários", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
+          }
+          if (prepared.ativo !== original.ativo) {
+            createAuditLog("Usuários", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
           }
         }
       }
@@ -670,7 +715,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
     } catch (err: any) {
       console.error("Erro ao salvar alterações no banco:", err);
-      setSaveError("Ocorreu um erro ao salvar as alterações no Firestore. Verifique suas regras.");
+      setSaveError(
+        err?.message
+          ? String(err.message)
+          : "Ocorreu um erro ao salvar as alterações no Firestore. Verifique suas regras."
+      );
     } finally {
       setSaving(false);
     }
@@ -721,17 +770,33 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     }
 
     const existingIndex = usuarios.findIndex((u) => u.re === currentUser.re);
-    let updatedList = [...usuarios];
+    const isNew = existingIndex < 0;
+    const emailCheck = validateUsuarioEmail({
+      email: currentUser.email,
+      re: currentUser.re,
+      isNew,
+      existingUsers: usuarios,
+    });
+    if (emailCheck.ok === false) {
+      alert(emailCheck.message);
+      return;
+    }
 
+    const prepared = prepareUsuarioDocument({
+      ...currentUser,
+      email: emailCheck.email,
+      perfil: currentUser.perfil || "Operador",
+      ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
+      authProvider: "local",
+      ultimoLogin: null,
+      emailVerificado: false,
+    });
+
+    let updatedList = [...usuarios];
     if (existingIndex > -1) {
-      updatedList[existingIndex] = { ...currentUser };
+      updatedList[existingIndex] = prepared;
     } else {
-      const newUser: Usuario = {
-        ...currentUser,
-        perfil: currentUser.perfil || "Operador",
-        ativo: currentUser.ativo !== undefined ? currentUser.ativo : true
-      };
-      updatedList.push(newUser);
+      updatedList.push(prepared);
     }
 
     setUsuarios(updatedList);
@@ -861,7 +926,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
           u.re.toLowerCase().includes(query) ||
           (u.nomeCompleto && u.nomeCompleto.toLowerCase().includes(query)) ||
           u.postoGrad.toLowerCase().includes(query) ||
-          u.secao.toLowerCase().includes(query)
+          u.secao.toLowerCase().includes(query) ||
+          (u.perfil || "").toLowerCase().includes(query) ||
+          normalizeEmail(u.email).includes(query)
       );
     }
     return list;
@@ -1279,7 +1346,17 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <h2 className="text-base font-bold text-gray-900">Módulo Usuários</h2>
                     <p className="text-xs text-gray-500">Gerencie contas de usuários com permissões de Operador, Administrador ou Gestor.</p>
                   </div>
-                  <button
+                  <div className="mt-3 sm:mt-0 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => exportUsuariosToExcel(usuarios)}
+                      className="inline-flex items-center space-x-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                      title="Exportar usuários"
+                    >
+                      <FileSpreadsheet size={14} />
+                      <span>Exportar</span>
+                    </button>
+                    <button
                     id="new-user-btn"
                     onClick={() => {
                       setCurrentUser({
@@ -1287,17 +1364,22 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         postoGrad: postos[0]?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
+                        email: "",
                         secao: secoes[0]?.nome || "Seç Gest Educ",
                         perfil: "Operador",
-                        ativo: true
+                        ativo: true,
+                        authProvider: "local",
+                        ultimoLogin: null,
+                        emailVerificado: false,
                       });
                       setUserModalOpen(true);
                     }}
-                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                    className="inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                   >
                     <Plus size={14} />
                     <span>Novo Usuário</span>
                   </button>
+                  </div>
                 </div>
 
                 {/* Search Bar */}
@@ -1308,7 +1390,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <input
                     id="user-search"
                     type="text"
-                    placeholder="Pesquisar por RE, Nome, Perfil..."
+                    placeholder="Pesquisar por RE, Nome, E-mail, Perfil..."
                     value={userSearch}
                     onChange={(e) => {
                       setUserSearch(e.target.value);
@@ -1326,6 +1408,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         <th className="px-4 py-3">Posto/Grad</th>
                         <th className="px-4 py-3">R.E.</th>
                         <th className="px-4 py-3">Nome de Guerra</th>
+                        <th className="px-4 py-3">E-mail Google</th>
                         <th className="px-4 py-3">Nome Completo</th>
                         <th className="px-4 py-3">Seção</th>
                         <th className="px-4 py-3 text-center">Perfil</th>
@@ -1336,7 +1419,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {pagedUsuarios.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum usuário correspondente encontrado.</td>
+                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum usuário correspondente encontrado.</td>
                         </tr>
                       ) : (
                         pagedUsuarios.map((usr) => (
@@ -1344,6 +1427,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <td className="px-4 py-3 text-gray-600 font-semibold">{usr.postoGrad}</td>
                               <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{usr.re}</td>
                               <td className="px-4 py-3 font-bold text-gray-800">{usr.nome}</td>
+                              <td className="px-4 py-3 text-gray-500 text-[11px] lowercase">
+                                {displayUserEmail(usr.email) === "Não informado" ? (
+                                  <span className="text-gray-400 normal-case">Não informado</span>
+                                ) : (
+                                  displayUserEmail(usr.email)
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{usr.nomeCompleto || "Não informado"}</td>
                               <td className="px-4 py-3 text-gray-600 font-medium">{usr.secao}</td>
                               <td className="px-4 py-3 text-center">
@@ -1367,7 +1457,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <td className="px-4 py-3 text-right space-x-1">
                                 <button
                                   onClick={() => {
-                                    setCurrentUser({ ...usr });
+                                    setCurrentUser({
+                                      ...usr,
+                                      email: usr.email || "",
+                                      authProvider: usr.authProvider || "local",
+                                      ultimoLogin: usr.ultimoLogin ?? null,
+                                      emailVerificado: usr.emailVerificado === true,
+                                    });
                                     setUserModalOpen(true);
                                   }}
                                   className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -1970,19 +2066,6 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
               <form onSubmit={handleUserSubmit} className="p-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">RE (Registro Estatístico) *</label>
-                    <input
-                      type="text"
-                      value={currentUser.re}
-                      disabled={usuarios.some((u) => u.re === currentUser.re)}
-                      onChange={(e) => setCurrentUser({ ...currentUser, re: e.target.value })}
-                      placeholder="Ex: 124342-0"
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
-                      required
-                    />
-                  </div>
-
-                  <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Posto/Graduação *</label>
                     <select
                       value={currentUser.postoGrad}
@@ -1994,6 +2077,19 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         <option key={p.sigla} value={p.sigla}>{p.sigla}</option>
                       ))}
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">RE (Registro Estatístico) *</label>
+                    <input
+                      type="text"
+                      value={currentUser.re}
+                      disabled={usuarios.some((u) => u.re === currentUser.re)}
+                      onChange={(e) => setCurrentUser({ ...currentUser, re: e.target.value })}
+                      placeholder="Ex: 124342-0"
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                      required
+                    />
                   </div>
                 </div>
 
@@ -2021,21 +2117,36 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção *</label>
-                    <select
-                      value={currentUser.secao}
-                      onChange={(e) => setCurrentUser({ ...currentUser, secao: e.target.value })}
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
-                      required
-                    >
-                      {secoes.map((s) => (
-                        <option key={s.nome} value={s.nome}>{s.nome}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    E-mail Google {usuarios.some((u) => u.re === currentUser.re) ? "" : "*"}
+                  </label>
+                  <input
+                    type="email"
+                    value={currentUser.email || ""}
+                    onChange={(e) =>
+                      setCurrentUser({
+                        ...currentUser,
+                        email: e.target.value,
+                      })
+                    }
+                    onBlur={(e) => {
+                      const normalized = normalizeEmail(e.target.value);
+                      setCurrentUser((prev) =>
+                        prev ? { ...prev, email: normalized } : prev
+                      );
+                    }}
+                    placeholder="usuario@gmail.com"
+                    autoComplete="email"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
+                    required={!usuarios.some((u) => u.re === currentUser.re)}
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    Usado futuramente para autenticação Google. Armazenado em minúsculas.
+                  </p>
+                </div>
 
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Perfil de Acesso *</label>
                     <select
@@ -2047,6 +2158,20 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       <option value="Operador">Operador</option>
                       <option value="Administrador">Administrador</option>
                       <option value="Gestor">Gestor</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção *</label>
+                    <select
+                      value={currentUser.secao}
+                      onChange={(e) => setCurrentUser({ ...currentUser, secao: e.target.value })}
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                      required
+                    >
+                      {secoes.map((s) => (
+                        <option key={s.nome} value={s.nome}>{s.nome}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

@@ -15,6 +15,9 @@ export type EscalaStatus =
 /** Documento oficial com ciclo de aprovação próprio. */
 export type TipoEscalaDocumento = "semanal" | "alteracao";
 
+/** Provedor de autenticação — preparado para futura migração Google. */
+export type AuthProvider = "local" | "google";
+
 export interface Usuario {
   /** Identificador da sessão (ID do documento no Firestore). */
   uid?: string;
@@ -26,6 +29,17 @@ export interface Usuario {
   /** Perfil carregado exclusivamente do Firestore. */
   perfil?: PerfilUsuario;
   ativo?: boolean;
+  /**
+   * E-mail Google (minúsculas). Usado futuramente para Firebase Auth.
+   * Usuários legados podem estar sem valor.
+   */
+  email?: string;
+  /** Nesta fase permanece sempre "local". */
+  authProvider?: AuthProvider;
+  /** Preenchido no futuro ao autenticar via Google. */
+  ultimoLogin?: string | null;
+  /** Preenchido no futuro pela verificação do Firebase Auth. */
+  emailVerificado?: boolean;
 }
 
 /** Metadados de um ator do fluxo de aprovação. */
