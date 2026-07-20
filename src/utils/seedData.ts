@@ -10,17 +10,7 @@ import {
   writeBatch,
   Timestamp 
 } from "../firebase";
-import { Colaborador, Usuario } from "../types";
-
-export const TEST_USER: Usuario = {
-  re: "124342-0",
-  nome: "VENTURA",
-  nomeCompleto: "Alex Herlemann Ventura",
-  postoGrad: "CB PM",
-  secao: "Seç Gest Educ",
-  perfil: "Administrador",
-  ativo: true
-};
+import { Colaborador } from "../types";
 
 export const OFFICIAL_COLLABORATORS = [
   { ordem: 1, postoGrad: "MAJ PM", re: "104585-7", nome: "AUGUSTO", secao: "Seç Gest Educ", ativo: true },
@@ -133,12 +123,7 @@ export async function seedDatabaseIfEmpty() {
 
     const needsSeeding = !statusData || !statusData.official_seeded;
 
-    // 1. Seed/Update Test User in usuarios
-    const userDocRef = doc(db, "usuarios", TEST_USER.re);
-    await setDoc(userDocRef, TEST_USER);
-    console.log("Usuário de teste 'VENTURA' configurado com sucesso.");
-
-    // 1b. Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
+    // Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
     await ensureInitialGestores();
 
     if (needsSeeding) {

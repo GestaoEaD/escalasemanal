@@ -28,6 +28,7 @@ import {
   ArrowUpDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { exportLogsToExcel, exportLogsToPDF } from "../utils/exportUtils";
 
 interface ConfiguracoesProps {
@@ -460,11 +461,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const col of colaboradores) {
         const original = origColaboradores.find((c) => c.re === col.re);
         const docRef = doc(db, "colaboradores", col.re);
-        batch.set(docRef, {
+        batch.set(docRef, prepareFirestoreWrite(`colaboradores/${col.re}`, {
           ...col,
           updatedAt: timestamp,
           createdAt: col.createdAt || timestamp
-        });
+        }));
 
         const colLabel = `${col.postoGrad} ${col.nome}`;
 
@@ -516,7 +517,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const usr of usuarios) {
         const original = origUsuarios.find((u) => u.re === usr.re);
         const docRef = doc(db, "usuarios", usr.re);
-        batch.set(docRef, usr);
+        batch.set(docRef, prepareFirestoreWrite(`usuarios/${usr.re}`, usr as unknown as Record<string, unknown>));
 
         const userLabel = `${usr.postoGrad} ${usr.nome}`;
 
@@ -563,7 +564,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origPostos.find((op) => op.sigla === p.sigla);
         const docId = p.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "postos", docId);
-        batch.set(docRef, p);
+        batch.set(docRef, prepareFirestoreWrite(`postos/${docId}`, p as unknown as Record<string, unknown>));
 
         if (!original) {
           auditLogs.push(createAuditLog("Postos e Graduações", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`));
@@ -589,7 +590,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origSecoes.find((os) => os.nome === s.nome);
         const docId = s.nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "secoes", docId);
-        batch.set(docRef, s);
+        batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, s as unknown as Record<string, unknown>));
 
         if (!original) {
           auditLogs.push(createAuditLog("Seções", "Inclusão", s.nome, "Todos", "", `Nome: ${s.nome}, Ordem: ${s.ordem}, Ativo: ${s.ativo ? "Sim" : "Não"}`));
@@ -615,7 +616,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origLegendas.find((ol) => ol.sigla === l.sigla);
         const docId = l.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "legendas", docId);
-        batch.set(docRef, l);
+        batch.set(docRef, prepareFirestoreWrite(`legendas/${docId}`, l as unknown as Record<string, unknown>));
 
         if (!original) {
           auditLogs.push(createAuditLog("Legendas da Escala", "Inclusão", l.sigla, "Todos", "", `Sigla: ${l.sigla}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`));
@@ -637,10 +638,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
       // --- 6. AUDIT & SAVE: CONFIGS GERAIS ---
       if (JSON.stringify(gerais) !== JSON.stringify(origGerais)) {
-        batch.set(doc(db, "configuracoes", "gerais"), {
-          ...gerais,
-          updatedAt: timestamp
-        });
+        batch.set(
+          doc(db, "configuracoes", "gerais"),
+          prepareFirestoreWrite("configuracoes/gerais", {
+            ...gerais,
+            updatedAt: timestamp
+          })
+        );
 
         if (gerais.nomeOrganizacao !== origGerais.nomeOrganizacao) {
           auditLogs.push(createAuditLog("Configurações Gerais", "Edição", "Gerais", "Nome da Organização", origGerais.nomeOrganizacao, gerais.nomeOrganizacao));
@@ -665,7 +669,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       // --- 7. WRITE ALL AUDIT LOGS ---
       auditLogs.forEach((log) => {
         const logId = `log_adm_${now.getTime()}_${Math.floor(Math.random() * 10000)}`;
-        batch.set(doc(db, "logs", logId), log);
+        batch.set(
+          doc(db, "logs", logId),
+          prepareFirestoreWrite(`logs/${logId}`, log as unknown as Record<string, unknown>)
+        );
       });
 
       // Commit the database batch

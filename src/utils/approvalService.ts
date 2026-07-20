@@ -18,6 +18,8 @@ import {
   Usuario,
 } from "../types";
 import { normalizeRe } from "./reUtils";
+import { prepareFirestoreWrite } from "./firestoreSanitize";
+import { cleanAprovacao, cleanHistorico } from "./escalaPayload";
 
 export function buildApprovalPath(escalaId: string): string {
   return `/aprovacao/${encodeURIComponent(escalaId)}`;
@@ -54,9 +56,9 @@ export function formatNowParts(date: Date = new Date()): {
 export function toAprovacaoAtor(usuario: Usuario, date: Date = new Date()): AprovacaoAtor {
   const { timestamp, data, hora } = formatNowParts(date);
   return {
-    nome: usuario.nome,
-    re: usuario.re,
-    postoGrad: usuario.postoGrad,
+    nome: usuario.nome || "",
+    re: usuario.re || "",
+    postoGrad: usuario.postoGrad || "",
     timestamp,
     data,
     hora,
@@ -73,20 +75,21 @@ export function buildHistoricoEvento(options: {
   date?: Date;
 }): HistoricoEscalaEvento {
   const { timestamp, data, hora } = formatNowParts(options.date);
-  return {
+  const evento: HistoricoEscalaEvento = {
     id: `hist_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     tipo: options.tipo,
     descricao: options.descricao,
     usuario: options.usuario.nome,
     re: options.usuario.re,
-    postoGrad: options.usuario.postoGrad,
+    postoGrad: options.usuario.postoGrad || "",
     data,
     hora,
     timestamp,
-    versao: options.versao,
-    solicitacaoId: options.solicitacaoId,
-    detalhes: options.detalhes,
   };
+  if (typeof options.versao === "number") evento.versao = options.versao;
+  if (options.solicitacaoId) evento.solicitacaoId = options.solicitacaoId;
+  if (options.detalhes) evento.detalhes = options.detalhes;
+  return evento;
 }
 
 function appendHistorico(
@@ -124,13 +127,17 @@ async function writeApprovalLog(partial: {
     valorAnterior: partial.valorAnterior || "",
     novoValor: partial.novoValor || "",
     anoSemana: partial.anoSemana,
-    versao: partial.versao,
-    solicitacaoId: partial.solicitacaoId,
-    enviadoPor: partial.enviadoPor,
-    aprovadoPor: partial.aprovadoPor,
-    gestorRe: partial.gestorRe,
   };
-  await setDoc(doc(collection(db, "logs")), log);
+  if (typeof partial.versao === "number") log.versao = partial.versao;
+  if (partial.solicitacaoId) log.solicitacaoId = partial.solicitacaoId;
+  if (partial.enviadoPor) log.enviadoPor = partial.enviadoPor;
+  if (partial.aprovadoPor) log.aprovadoPor = partial.aprovadoPor;
+  if (partial.gestorRe) log.gestorRe = partial.gestorRe;
+
+  await setDoc(
+    doc(collection(db, "logs")),
+    prepareFirestoreWrite("logs/aprovacao", log as unknown as Record<string, unknown>)
+  );
 }
 
 export async function findUsuarioByRe(inputRe: string): Promise<Usuario | null> {
@@ -142,7 +149,13 @@ export async function findUsuarioByRe(inputRe: string): Promise<Usuario | null> 
   for (const id of tryIds) {
     const snap = await getDoc(doc(db, "usuarios", id));
     if (snap.exists()) {
-      return { ...(snap.data() as Usuario), re: (snap.data() as Usuario).re || snap.id };
+      const data = snap.data() as Usuario;
+      return {
+        ...data,
+        uid: snap.id,
+        re: data.re || snap.id,
+        perfil: data.perfil,
+      };
     }
   }
 
@@ -150,7 +163,12 @@ export async function findUsuarioByRe(inputRe: string): Promise<Usuario | null> 
   for (const d of all.docs) {
     const data = d.data() as Usuario;
     if (normalizeRe(d.id) === base || normalizeRe(data.re || "") === base) {
-      return { ...data, re: data.re || d.id };
+      return {
+        ...data,
+        uid: d.id,
+        re: data.re || d.id,
+        perfil: data.perfil,
+      };
     }
   }
   return null;
@@ -242,16 +260,24 @@ export async function submitScaleForApproval(
     versao,
     solicitacaoId,
   });
-  const historico = appendHistorico(data.historico, evento);
+  const historico = cleanHistorico(appendHistorico(data.historico, evento));
+  const aprovacaoLimpa = cleanAprovacao(aprovacao);
+
+  console.log("Escala antes do Firestore (submit):", {
+    status: "aguardando_aprovacao",
+    versao,
+    aprovacao: aprovacaoLimpa,
+    historico,
+  });
 
   await setDoc(
     ref,
-    {
+    prepareFirestoreWrite("escalas_semanais/submit", {
       status: "aguardando_aprovacao" as EscalaStatus,
       versao,
-      aprovacao,
+      aprovacao: aprovacaoLimpa,
       historico,
-    },
+    }),
     { merge: true }
   );
 
@@ -274,7 +300,7 @@ export async function submitScaleForApproval(
   return {
     status: "aguardando_aprovacao",
     versao,
-    aprovacao,
+    aprovacao: aprovacaoLimpa || aprovacao,
     historico,
     url: getApprovalUrl(escalaId),
   };
@@ -299,8 +325,8 @@ export async function approveScale(
   const aprovadoPor = toAprovacaoAtor(gestor);
   const enviadoPor = data.aprovacao?.enviadoPor || null;
   const aprovacao: EscalaAprovacao = {
-    ...(data.aprovacao || {}),
-    solicitacaoId,
+    solicitacaoId: solicitacaoId || undefined,
+    enviadoPor,
     aprovadoPor,
     rejeitadoPor: null,
     motivoRejeicao: "",
@@ -317,16 +343,24 @@ export async function approveScale(
     solicitacaoId,
     detalhes: observacao || undefined,
   });
-  const historico = appendHistorico(data.historico, evento);
+  const historico = cleanHistorico(appendHistorico(data.historico, evento));
+  const aprovacaoLimpa = cleanAprovacao(aprovacao);
+
+  console.log("Escala antes do Firestore (approve):", {
+    status: "aprovada",
+    versao,
+    aprovacao: aprovacaoLimpa,
+    historico,
+  });
 
   await setDoc(
     ref,
-    {
+    prepareFirestoreWrite("escalas_semanais/approve", {
       status: "aprovada" as EscalaStatus,
       versao,
-      aprovacao,
+      aprovacao: aprovacaoLimpa,
       historico,
-    },
+    }),
     { merge: true }
   );
 
@@ -370,12 +404,13 @@ export async function rejectScale(
   const rejeitadoPor = toAprovacaoAtor(gestor);
   const enviadoPor = data.aprovacao?.enviadoPor || null;
   const aprovacao: EscalaAprovacao = {
-    ...(data.aprovacao || {}),
-    solicitacaoId,
+    solicitacaoId: solicitacaoId || undefined,
+    enviadoPor,
     rejeitadoPor,
     aprovadoPor: null,
     motivoRejeicao: motivo || "",
     observacaoAprovacao: motivo || "",
+    versaoEnviada: data.aprovacao?.versaoEnviada,
   };
 
   const evento = buildHistoricoEvento({
@@ -386,15 +421,22 @@ export async function rejectScale(
     solicitacaoId,
     detalhes: motivo || undefined,
   });
-  const historico = appendHistorico(data.historico, evento);
+  const historico = cleanHistorico(appendHistorico(data.historico, evento));
+  const aprovacaoLimpa = cleanAprovacao(aprovacao);
+
+  console.log("Escala antes do Firestore (reject):", {
+    status: "rejeitada",
+    aprovacao: aprovacaoLimpa,
+    historico,
+  });
 
   await setDoc(
     ref,
-    {
+    prepareFirestoreWrite("escalas_semanais/reject", {
       status: "rejeitada" as EscalaStatus,
-      aprovacao,
+      aprovacao: aprovacaoLimpa,
       historico,
-    },
+    }),
     { merge: true }
   );
 

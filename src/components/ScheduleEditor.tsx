@@ -30,6 +30,13 @@ import {
   isGestor,
 } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
+import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
+import {
+  cleanAprovacao,
+  cleanHistorico,
+  cleanLastSaved,
+  cleanScheduleRow,
+} from "../utils/escalaPayload";
 import CollaboratorModal from "./CollaboratorModal";
 import ConcurrencyModal from "./ConcurrencyModal";
 import StatusBadge from "./StatusBadge";
@@ -362,7 +369,10 @@ export default function ScheduleEditor({
           aprovacao: null,
           historico: [criacao],
         };
-        await setDoc(weeklyDocRef, docData);
+        await setDoc(
+          weeklyDocRef,
+          prepareFirestoreWrite(`escalas_semanais/${docId}/create`, docData as unknown as Record<string, unknown>)
+        );
         
         setDbWeeklyRows(rows);
         setLocalWeeklyRows(rows);
@@ -401,7 +411,10 @@ export default function ScheduleEditor({
             lastSaved: null,
             observacoes: ""
           };
-          await setDoc(alterationDocRef, docData);
+          await setDoc(
+            alterationDocRef,
+            prepareFirestoreWrite(`escalas_alteracao/${docId}/create`, docData as unknown as Record<string, unknown>)
+          );
 
           setDbAlterationRows(rows);
           setLocalAlterationRows(rows);
@@ -472,7 +485,10 @@ export default function ScheduleEditor({
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
-        await setDoc(doc(db, "colaboradores", col.re), newColDoc);
+        await setDoc(
+          doc(db, "colaboradores", col.re),
+          prepareFirestoreWrite(`colaboradores/${col.re}`, newColDoc as unknown as Record<string, unknown>)
+        );
         setCollaboratorsPool((prev) => [...prev, newColDoc].sort((a, b) => (a.ordem || 0) - (b.ordem || 0)));
       } catch (err) {
         console.error("Failed to add new collaborator to global pool:", err);
@@ -520,7 +536,10 @@ export default function ScheduleEditor({
         updatedAt: Timestamp.now()
       };
       
-      await setDoc(doc(db, "colaboradores", updated.re), updatedColDoc);
+      await setDoc(
+        doc(db, "colaboradores", updated.re),
+        prepareFirestoreWrite(`colaboradores/${updated.re}`, updatedColDoc as unknown as Record<string, unknown>)
+      );
       if (oldRe !== updated.re) {
         await deleteDoc(doc(db, "colaboradores", oldRe));
       }
@@ -723,14 +742,14 @@ export default function ScheduleEditor({
       const dataStr = String(now.getDate()).padStart(2, "0") + "/" + String(now.getMonth() + 1).padStart(2, "0") + "/" + now.getFullYear();
       const horaStr = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
 
-      const savedMetadata = {
-        nome: usuario.nome,
-        postoGrad: usuario.postoGrad,
-        re: usuario.re,
+      const savedMetadata = cleanLastSaved({
+        nome: usuario.nome || "",
+        postoGrad: usuario.postoGrad || "",
+        re: usuario.re || "",
         timestamp: timestamp,
         data: dataStr,
         hora: horaStr
-      };
+      });
 
       const isWeeklyRowsDirty = JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows);
       const isWeeklyObsDirty = weeklyObservacoes !== dbWeeklyObservacoes;
@@ -905,7 +924,9 @@ export default function ScheduleEditor({
             novoValor: "em_edicao",
             anoSemana: docId,
             versao: nextVersao,
-            solicitacaoId: escalaAprovacao?.solicitacaoId,
+            ...(escalaAprovacao?.solicitacaoId
+              ? { solicitacaoId: escalaAprovacao.solicitacaoId }
+              : {}),
           });
           nextHistorico = [
             ...nextHistorico,
@@ -914,7 +935,9 @@ export default function ScheduleEditor({
               descricao: "Escala alterada após aprovação — ciclo reaberto",
               usuario,
               versao: nextVersao,
-              solicitacaoId: escalaAprovacao?.solicitacaoId,
+              ...(escalaAprovacao?.solicitacaoId
+                ? { solicitacaoId: escalaAprovacao.solicitacaoId }
+                : {}),
               detalhes: `Status anterior: ${reopen.previousStatus}`,
               date: now,
             }),
@@ -939,39 +962,49 @@ export default function ScheduleEditor({
       }
 
       const weeklyDocRef = doc(db, "escalas_semanais", docId);
-      const weeklyDocData: EscalaDocument = {
+      const weeklyDocData = {
         id: docId,
         ano: year,
         semana: week.numero,
         periodo: week.periodo,
-        rows: rowsToSaveWeekly,
+        rows: rowsToSaveWeekly.map(cleanScheduleRow),
         lastSaved: savedMetadata,
-        observacoes: weeklyObservacoes,
+        observacoes: weeklyObservacoes ?? "",
         status: nextStatus,
         versao: nextVersao,
-        aprovacao: nextAprovacao,
-        historico: nextHistorico,
+        aprovacao: cleanAprovacao(nextAprovacao),
+        historico: cleanHistorico(nextHistorico),
       };
-      await setDoc(weeklyDocRef, weeklyDocData);
+      console.log("Escala antes do Firestore:", weeklyDocData);
+      await setDoc(
+        weeklyDocRef,
+        prepareFirestoreWrite(`escalas_semanais/${docId}`, weeklyDocData as unknown as Record<string, unknown>)
+      );
 
       const alterationDocRef = doc(db, "escalas_alteracao", docId);
-      const alterationDocData: EscalaDocument = {
+      const alterationDocData = {
         id: docId,
         ano: year,
         semana: week.numero,
         periodo: week.periodo,
-        rows: rowsToSaveAlteration,
+        rows: rowsToSaveAlteration.map(cleanScheduleRow),
         lastSaved: savedMetadata,
-        observacoes: alterationObservacoes
+        observacoes: alterationObservacoes ?? "",
       };
-      await setDoc(alterationDocRef, alterationDocData);
+      await setDoc(
+        alterationDocRef,
+        prepareFirestoreWrite(`escalas_alteracao/${docId}`, alterationDocData as unknown as Record<string, unknown>)
+      );
 
       // 3. Save generated logs to Firestore
       const logsCollectionRef = collection(db, "logs");
       await Promise.all(
         auditLogsList.map((log) => {
           const logDocRef = doc(logsCollectionRef); // Auto-generated ID
-          return setDoc(logDocRef, log);
+          return setDoc(
+            logDocRef,
+            prepareFirestoreWrite("logs/escala", log as unknown as Record<string, unknown>)
+          );
         })
       );
 

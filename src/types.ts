@@ -11,11 +11,14 @@ export type EscalaStatus =
   | "rejeitada";
 
 export interface Usuario {
+  /** Identificador da sessão (ID do documento no Firestore). */
+  uid?: string;
   re: string;
   nomeCompleto?: string;
   nome: string; // Nome de Guerra
   postoGrad: string;
   secao: string;
+  /** Perfil carregado exclusivamente do Firestore. */
   perfil?: PerfilUsuario;
   ativo?: boolean;
 }

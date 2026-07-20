@@ -76,8 +76,18 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: Usuario) => {
-    setUsuario(user);
-    localStorage.setItem("escala_sessao_usuario", JSON.stringify(user));
+    const sessionUser: Usuario = {
+      uid: user.uid || user.re,
+      re: user.re,
+      nome: user.nome,
+      nomeCompleto: user.nomeCompleto,
+      postoGrad: user.postoGrad,
+      secao: user.secao,
+      perfil: user.perfil,
+      ativo: user.ativo,
+    };
+    setUsuario(sessionUser);
+    localStorage.setItem("escala_sessao_usuario", JSON.stringify(sessionUser));
     const pending = parseApprovalPath(window.location.pathname);
     if (pending) {
       setApprovalEscalaId(pending);
