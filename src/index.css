@@ -5,3 +5,58 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
+/* Base responsiva */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* Tabelas largas: rolagem horizontal com indicação em touch */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+/* Impressão direta da tela (Ctrl+P) — A4 retrato */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 7mm;
+  }
+
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  .table-scroll {
+    overflow: visible !important;
+  }
+
+  table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    font-size: 7px !important;
+  }
+}

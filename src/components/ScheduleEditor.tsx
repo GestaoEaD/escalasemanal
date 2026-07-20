@@ -105,6 +105,7 @@ export default function ScheduleEditor({
   const [exportWeekly, setExportWeekly] = useState(true);
   const [exportAlteration, setExportAlteration] = useState(true);
   const [exportFormat, setExportFormat] = useState<"pdf" | "excel">("pdf");
+  const [exportSelectedRes, setExportSelectedRes] = useState<string[]>([]);
 
   // Track if local state has unsaved changes
   const isDirty = React.useMemo(() => {
@@ -162,6 +163,48 @@ export default function ScheduleEditor({
       return collaboratorsPool.some((c) => c.re === row.re);
     }).sort((a, b) => a.ordem - b.ordem);
   }, [localAlterationRows, collaboratorsPool]);
+
+  /** Colaboradores da escala aberta, na ordem de exibição (semanal primeiro, depois exclusivos da alteração). */
+  const exportCollaborators = React.useMemo(() => {
+    const seen = new Set<string>();
+    const list: { re: string; label: string }[] = [];
+    for (const row of resolvedWeeklyRows) {
+      if (seen.has(row.re)) continue;
+      seen.add(row.re);
+      list.push({ re: row.re, label: `${row.postoGrad} ${row.nome}`.trim() });
+    }
+    for (const row of resolvedAlterationRows) {
+      if (seen.has(row.re)) continue;
+      seen.add(row.re);
+      list.push({ re: row.re, label: `${row.postoGrad} ${row.nome}`.trim() });
+    }
+    return list;
+  }, [resolvedWeeklyRows, resolvedAlterationRows]);
+
+  const exportAllSelected =
+    exportCollaborators.length > 0 &&
+    exportCollaborators.every((c) => exportSelectedRes.includes(c.re));
+
+  const openExportModal = () => {
+    setExportWeekly(true);
+    setExportAlteration(true);
+    setExportFormat("pdf");
+    setExportSelectedRes(exportCollaborators.map((c) => c.re));
+    setIsExportModalOpen(true);
+  };
+
+  const toggleExportAllCollaborators = (checked: boolean) => {
+    setExportSelectedRes(checked ? exportCollaborators.map((c) => c.re) : []);
+  };
+
+  const toggleExportCollaborator = (re: string, checked: boolean) => {
+    setExportSelectedRes((prev) => {
+      if (checked) {
+        return prev.includes(re) ? prev : [...prev, re];
+      }
+      return prev.filter((r) => r !== re);
+    });
+  };
 
   // Handle unload alert for unsaved changes
   useEffect(() => {
@@ -987,38 +1030,38 @@ export default function ScheduleEditor({
   return (
     <div className="min-h-screen bg-gray-50 pb-16">
       {/* Top bar header */}
-      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-0 z-20 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
+      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-0 z-20 shadow-md no-print">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
             
             {/* Back & Week details */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-start sm:items-center gap-2 sm:gap-3 min-w-0">
               <button
                 id="back-btn"
                 onClick={handleBackWithCheck}
-                className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
                 title="Voltar para Seleção de Semanas"
               >
                 <ArrowLeft size={20} />
               </button>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h1 className="text-sm sm:text-base font-bold text-white uppercase tracking-wider">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-sm sm:text-base font-bold text-white uppercase tracking-wider truncate">
                     {week.label}
                   </h1>
-                  <span className="text-[10px] sm:text-xs text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900">
+                  <span className="text-[10px] sm:text-xs text-blue-400 font-bold bg-blue-950 px-2 py-0.5 rounded border border-blue-900 whitespace-nowrap">
                     {week.periodo}
                   </span>
                 </div>
-                <div className="text-[10px] sm:text-xs text-gray-400 mt-1">
-                  Usuário logado: <b className="text-gray-200">{usuario.postoGrad} {usuario.nome} (R.E. {usuario.re})</b>
+                <div className="text-[10px] sm:text-xs text-gray-400 mt-1 truncate">
+                  Usuário: <b className="text-gray-200">{usuario.postoGrad} {usuario.nome}</b>
+                  <span className="hidden sm:inline"> (R.E. {usuario.re})</span>
                 </div>
               </div>
             </div>
 
             {/* Main Editor Action Buttons */}
-            <div className="flex items-center space-x-2">
-              {/* Unsaved Changes status dot */}
+            <div className="flex flex-wrap items-center gap-2 justify-end">
               {isDirty && (
                 <span className="hidden lg:flex items-center space-x-1.5 bg-amber-950 border border-amber-900 text-amber-400 px-2 py-1 rounded text-[10px] font-bold uppercase animate-pulse">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
@@ -1030,7 +1073,7 @@ export default function ScheduleEditor({
                 id="save-scale-btn"
                 onClick={handleSaveTrigger}
                 disabled={saving || !isDirty}
-                className={`inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all shadow-sm cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-md transition-all shadow-sm cursor-pointer ${
                   isDirty 
                     ? "bg-blue-600 hover:bg-blue-500 text-white" 
                     : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
@@ -1042,11 +1085,11 @@ export default function ScheduleEditor({
 
               <button
                 id="export-scale-btn"
-                onClick={() => setIsExportModalOpen(true)}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold text-gray-300 bg-gray-800 hover:bg-gray-750 hover:text-white rounded-md border border-gray-750 transition-colors cursor-pointer"
+                onClick={openExportModal}
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-gray-300 bg-gray-800 hover:bg-gray-750 hover:text-white rounded-md border border-gray-750 transition-colors cursor-pointer"
               >
                 <Download size={14} />
-                <span>Exportar</span>
+                <span className="hidden xs:inline sm:inline">Exportar</span>
               </button>
 
               {usuario.perfil === "Administrador" && onOpenConfig && (
@@ -1061,10 +1104,10 @@ export default function ScheduleEditor({
                       onOpenConfig();
                     }
                   }}
-                  className="inline-flex items-center space-x-1 px-3 py-1.5 text-xs font-bold text-blue-400 bg-gray-800 hover:bg-gray-750 hover:text-blue-300 rounded-md border border-gray-750 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-blue-400 bg-gray-800 hover:bg-gray-750 hover:text-blue-300 rounded-md border border-gray-750 transition-colors cursor-pointer"
                 >
                   <Settings size={14} />
-                  <span>Configurações</span>
+                  <span className="hidden md:inline">Configurações</span>
                 </button>
               )}
 
@@ -1079,7 +1122,7 @@ export default function ScheduleEditor({
                     onLogout();
                   }
                 }}
-                className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-red-400 hover:text-red-300 bg-red-950/45 hover:bg-red-950 rounded-md transition-colors border border-red-900/50 cursor-pointer"
+                className="inline-flex items-center px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-400 hover:text-red-300 bg-red-950/45 hover:bg-red-950 rounded-md transition-colors border border-red-900/50 cursor-pointer"
               >
                 Sair
               </button>
@@ -1134,22 +1177,22 @@ export default function ScheduleEditor({
               </div>
 
               {/* Table Weekly Scale */}
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
+              <div className="table-scroll">
+                <table className="w-full min-w-[760px] divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
-                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
-                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
-                      <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
-                      <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
-                      <th className="px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
+                      <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
+                      <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
+                      <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
+                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
+                      <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
+                      <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200 text-xs">
@@ -1174,7 +1217,7 @@ export default function ScheduleEditor({
                               <select
                                 value={row[day]}
                                 onChange={(e) => handleCellChange("semanal", row.re, day, e.target.value)}
-                                className="w-[68px] mx-auto block border rounded text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
+                                className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
                                 style={getCellStyle(row[day])}
                                 title={getLegendDescription(row[day])}
                               >
@@ -1200,11 +1243,11 @@ export default function ScheduleEditor({
                           <td className="px-3 py-2 whitespace-nowrap text-center">
                             <button
                               onClick={() => handleCopyToAlteration(row)}
-                              className="inline-flex items-center space-x-1 px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs"
+                              className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs"
                               title="Copiar militar para a Escala de Alteração"
                             >
                               <Copy size={12} />
-                              <span>Alterar</span>
+                              <span className="hidden sm:inline">Alterar</span>
                             </button>
                           </td>
                         </tr>
@@ -1253,22 +1296,22 @@ export default function ScheduleEditor({
               ) : (
                 <>
                   {/* Table Alteration Scale */}
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
+                  <div className="table-scroll">
+                    <table className="w-full min-w-[760px] divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
-                          <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
-                          <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
-                          <th className="px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
-                          <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
-                          <th className="px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
+                          <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
+                          <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
+                          <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
+                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
+                          <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
+                          <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200 text-xs">
@@ -1286,9 +1329,9 @@ export default function ScheduleEditor({
                                 highlightedRe === row.re ? "bg-purple-100" : ""
                               }`}
                             >
-                              <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-900">{row.postoGrad}</td>
-                              <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-500">{row.re}</td>
-                              <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-800" title={`Seção: ${row.secao}`}>
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap font-bold text-gray-900">{row.postoGrad}</td>
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap font-mono text-gray-500">{row.re}</td>
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap font-bold text-gray-800" title={`Seção: ${row.secao}`}>
                                 {row.nome}
                               </td>
                               
@@ -1298,7 +1341,7 @@ export default function ScheduleEditor({
                                   <select
                                     value={row[day]}
                                     onChange={(e) => handleCellChange("alteracao", row.re, day, e.target.value)}
-                                    className="w-[68px] mx-auto block border rounded text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
+                                    className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer"
                                     style={getCellStyle(row[day])}
                                     title={getLegendDescription(row[day])}
                                   >
@@ -1310,25 +1353,25 @@ export default function ScheduleEditor({
                               ))}
 
                               {/* Observations Input */}
-                              <td className="px-3 py-2 whitespace-nowrap">
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap">
                                 <input
                                   type="text"
                                   value={row.observacao}
                                   placeholder="Observações..."
                                   onChange={(e) => handleCellChange("alteracao", row.re, "observacao", e.target.value)}
-                                  className="w-full max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                                  className="w-full max-w-[10rem] sm:max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
                                 />
                               </td>
 
                               {/* Actions Column */}
-                              <td className="px-3 py-2 whitespace-nowrap text-center">
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-center">
                                 <button
                                   onClick={() => handleDeleteCol("alteracao", row.re)}
-                                  className="inline-flex items-center space-x-1 px-2.5 py-1 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-all cursor-pointer shadow-3xs"
+                                  className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-all cursor-pointer shadow-3xs"
                                   title="Remover militar da Escala de Alteração"
                                 >
                                   <Trash2 size={12} />
-                                  <span>Remover</span>
+                                  <span className="hidden sm:inline">Remover</span>
                                 </button>
                               </td>
                             </tr>
@@ -1383,8 +1426,8 @@ export default function ScheduleEditor({
       {/* EXPORT MODAL */}
       {isExportModalOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
-            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200 max-h-[90vh] flex flex-col">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-2">
                 <Download size={18} className="text-blue-400" />
                 <h3 className="text-sm font-bold uppercase tracking-wider">Exportar Escala</h3>
@@ -1397,11 +1440,11 @@ export default function ScheduleEditor({
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-5 overflow-y-auto">
               {/* Select Scales */}
               <div>
                 <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-                  Selecione as Escalas
+                  Tipo de relatório
                 </span>
                 <div className="space-y-3">
                   <label className="flex items-center space-x-3 cursor-pointer group">
@@ -1428,6 +1471,58 @@ export default function ScheduleEditor({
                   </label>
                 </div>
               </div>
+
+              <div className="border-t border-gray-150" />
+
+              {/* Collaborator selection */}
+              <div>
+                <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                  Colaboradores a exportar
+                </span>
+                {exportCollaborators.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">
+                    Nenhum colaborador na escala desta semana.
+                  </p>
+                ) : (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <label className="flex items-center space-x-3 px-3 py-2.5 bg-gray-50 border-b border-gray-200 cursor-pointer sticky top-0">
+                      <input
+                        type="checkbox"
+                        checked={exportAllSelected}
+                        onChange={(e) => toggleExportAllCollaborators(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-bold text-gray-800">Todos</span>
+                      <span className="text-[10px] text-gray-400 ml-auto">
+                        {exportSelectedRes.length}/{exportCollaborators.length}
+                      </span>
+                    </label>
+                    <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
+                      {exportCollaborators.map((col) => {
+                        const checked = exportSelectedRes.includes(col.re);
+                        return (
+                          <label
+                            key={col.re}
+                            className="flex items-center space-x-3 px-3 py-2 cursor-pointer hover:bg-gray-50 group"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => toggleExportCollaborator(col.re, e.target.checked)}
+                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 shrink-0"
+                            />
+                            <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 truncate">
+                              {col.label}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-gray-150" />
 
               {/* Format selection */}
               <div>
@@ -1477,7 +1572,7 @@ export default function ScheduleEditor({
             </div>
 
             {/* Footer buttons */}
-            <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-150">
+            <div className="bg-gray-50 px-6 py-4 flex items-center justify-end space-x-3 border-t border-gray-150 shrink-0">
               <button
                 onClick={() => setIsExportModalOpen(false)}
                 className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
@@ -1490,28 +1585,36 @@ export default function ScheduleEditor({
                     alert("Selecione pelo menos uma escala para exportar.");
                     return;
                   }
+                  if (exportSelectedRes.length === 0) {
+                    alert("Selecione pelo menos um colaborador para exportar.");
+                    return;
+                  }
+                  const selectedSet = new Set(exportSelectedRes);
+                  const filteredWeekly = resolvedWeeklyRows.filter((r) => selectedSet.has(r.re));
+                  const filteredAlteration = resolvedAlterationRows.filter((r) => selectedSet.has(r.re));
                   if (exportFormat === "pdf") {
                     exportToPDFCustom(
                       year,
                       week.label,
                       week.periodo,
-                      resolvedWeeklyRows,
-                      resolvedAlterationRows,
+                      filteredWeekly,
+                      filteredAlteration,
                       dbWeeklySaved,
                       dbAlterationSaved,
                       exportWeekly,
                       exportAlteration,
                       weeklyObservacoes,
                       alterationObservacoes,
-                      legendasList
+                      legendasList,
+                      { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad }
                     );
                   } else {
                     exportToExcelCustom(
                       year,
                       week.label,
                       week.periodo,
-                      resolvedWeeklyRows,
-                      resolvedAlterationRows,
+                      filteredWeekly,
+                      filteredAlteration,
                       exportWeekly,
                       exportAlteration,
                       weeklyObservacoes,

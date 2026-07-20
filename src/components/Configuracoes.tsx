@@ -1021,30 +1021,31 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     <div className="min-h-screen bg-gray-50 pb-16">
       {/* Top Header */}
       <header className="bg-slate-900 text-white sticky top-0 z-10 shadow-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center space-x-3">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
+            <div className="flex items-center space-x-3 min-w-0">
               <button
                 id="back-btn"
                 onClick={handleBackWithCheck}
-                className="p-2 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
                 title="Voltar"
               >
                 <ArrowLeft size={20} />
               </button>
-              <div>
-                <h1 className="text-lg font-bold tracking-tight leading-none text-white">
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-lg font-bold tracking-tight leading-none text-white truncate">
                   Painel de Configurações
                 </h1>
-                <p className="text-[11px] text-slate-400 mt-1">Administração do Sistema de Escalas</p>
+                <p className="text-[11px] text-slate-400 mt-1 hidden sm:block">Administração do Sistema de Escalas</p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-2 justify-end">
               {isDirty && (
-                <span className="flex items-center space-x-1.5 bg-amber-950/80 border border-amber-900 text-amber-400 px-2.5 py-1 rounded text-xs font-bold uppercase animate-pulse">
+                <span className="flex items-center space-x-1.5 bg-amber-950/80 border border-amber-900 text-amber-400 px-2.5 py-1 rounded text-[10px] sm:text-xs font-bold uppercase animate-pulse">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
-                  <span>Alterações Pendentes</span>
+                  <span className="hidden sm:inline">Alterações Pendentes</span>
+                  <span className="sm:hidden">Pendente</span>
                 </span>
               )}
 
@@ -1065,14 +1066,15 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 id="save-config-btn"
                 onClick={() => setConfirmSaveOpen(true)}
                 disabled={!isDirty || saving}
-                className={`inline-flex items-center space-x-1.5 px-4 py-1.5 text-xs font-bold rounded-md shadow-sm transition-all cursor-pointer ${
+                className={`inline-flex items-center space-x-1.5 px-3 sm:px-4 py-1.5 text-xs font-bold rounded-md shadow-sm transition-all cursor-pointer ${
                   isDirty 
                     ? "bg-blue-600 hover:bg-blue-500 text-white border border-transparent" 
                     : "bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed"
                 }`}
               >
                 <Save size={14} />
-                <span>Salvar Configurações</span>
+                <span className="hidden sm:inline">Salvar Configurações</span>
+                <span className="sm:hidden">Salvar</span>
               </button>
             </div>
           </div>
@@ -1295,7 +1297,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 </div>
 
                 {/* Table */}
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <div className="table-scroll border border-gray-200 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                     <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                       <tr>
@@ -1450,7 +1452,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 </div>
 
                 {/* Table */}
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <div className="table-scroll border border-gray-200 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                     <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                       <tr>
@@ -1563,7 +1565,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   </button>
                 </div>
 
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <div className="table-scroll border border-gray-200 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                     <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                       <tr>
@@ -1653,7 +1655,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   </button>
                 </div>
 
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <div className="table-scroll border border-gray-200 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                     <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                       <tr>
@@ -1749,7 +1751,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   </button>
                 </div>
 
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <div className="table-scroll border border-gray-200 rounded-lg">
                   <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                     <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                       <tr>
@@ -1959,7 +1961,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       <span>Exportar Excel</span>
                     </button>
                     <button
-                      onClick={() => exportLogsToPDF(filteredLogs)}
+                      onClick={() => exportLogsToPDF(filteredLogs, { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad })}
                       disabled={filteredLogs.length === 0}
                       className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
@@ -2108,7 +2110,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   </div>
                 ) : (
                   <div>
-                    <div className="overflow-x-auto border border-gray-200 rounded-lg shadow-2xs">
+                    <div className="table-scroll border border-gray-200 rounded-lg shadow-2xs">
                       <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
                         <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                           <tr>

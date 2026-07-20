@@ -69,21 +69,21 @@ export default function WeekSelector({
     <div className="min-h-screen bg-gray-50 pb-12">
       {/* Top Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center space-x-3">
-              <div className="bg-blue-600 p-2 rounded-lg text-white">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex justify-between gap-2 min-h-16 py-2 sm:py-0 sm:h-16 items-center">
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+              <div className="bg-blue-600 p-2 rounded-lg text-white shrink-0">
                 <Calendar size={22} />
               </div>
-              <div>
-                <h1 className="text-lg font-bold text-gray-900 tracking-tight leading-none">
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-lg font-bold text-gray-900 tracking-tight leading-none truncate">
                   Sistema de Escala de Serviço
                 </h1>
-                <p className="text-[11px] text-gray-500 mt-1">Escalas Semanais Digitais</p>
+                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">Escalas Semanais Digitais</p>
               </div>
             </div>
 
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4 shrink-0">
               <div className="hidden md:block text-right">
                 <div className="text-sm font-semibold text-gray-800">
                   {usuario.postoGrad} {usuario.nome}
@@ -98,17 +98,17 @@ export default function WeekSelector({
                   <button
                     id="config-btn"
                     onClick={onOpenConfig}
-                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer border border-blue-100"
+                    className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer border border-blue-100"
                   >
                     <Settings size={14} />
-                    <span>Configurações</span>
+                    <span className="hidden sm:inline">Configurações</span>
                   </button>
                 )}
 
                 <button
                   id="logout-btn"
                   onClick={onLogout}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
                 >
                   <LogOut size={14} />
                   <span className="hidden sm:inline">Sair</span>
