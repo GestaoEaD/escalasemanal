@@ -1825,7 +1825,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         value={gerais.nomeOrganizacao}
                         onChange={(e) => setGerais((prev: any) => ({ ...prev, nomeOrganizacao: e.target.value }))}
                         className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
-                        placeholder="Ex: Polícia Militar do Estado de São Paulo"
+                        placeholder="Ex: Organização Exemplo S.A."
                       />
                     </div>
 
@@ -1836,7 +1836,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         value={gerais.unidade}
                         onChange={(e) => setGerais((prev: any) => ({ ...prev, unidade: e.target.value }))}
                         className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
-                        placeholder="Ex: CPI-1 / 1º BPM/I"
+                        placeholder="Ex: Diretoria / Setor Exemplo"
                       />
                     </div>
 
@@ -1941,7 +1941,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       value={currentCol.re}
                       disabled={colaboradores.some((c) => c.re === currentCol.re)}
                       onChange={(e) => setCurrentCol({ ...currentCol, re: e.target.value })}
-                      placeholder="Ex: 124342-0"
+                      placeholder="Ex: 999888-0"
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                       required
                     />
@@ -1968,7 +1968,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.nomeCompleto || ""}
                     onChange={(e) => setCurrentCol({ ...currentCol, nomeCompleto: e.target.value })}
-                    placeholder="Alex Herlemann Ventura"
+                    placeholder="Ex.: Nome Completo Fictício"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -1980,7 +1980,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.nome}
                     onChange={(e) => setCurrentCol({ ...currentCol, nome: e.target.value })}
-                    placeholder="VENTURA"
+                    placeholder="Ex.: FICTICIO"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2020,7 +2020,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentCol.observacao || ""}
                     onChange={(e) => setCurrentCol({ ...currentCol, observacao: e.target.value })}
-                    placeholder="Ex: Motorista, Adjunto, etc."
+                    placeholder="Ex: Função fictícia, apoio, etc."
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
                   />
                 </div>
@@ -2086,7 +2086,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       value={currentUser.re}
                       disabled={usuarios.some((u) => u.re === currentUser.re)}
                       onChange={(e) => setCurrentUser({ ...currentUser, re: e.target.value })}
-                      placeholder="Ex: 124342-0"
+                      placeholder="Ex: 999888-0"
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                       required
                     />
@@ -2099,7 +2099,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentUser.nomeCompleto || ""}
                     onChange={(e) => setCurrentUser({ ...currentUser, nomeCompleto: e.target.value })}
-                    placeholder="Ex: Alex Herlemann Ventura"
+                    placeholder="Ex.: Nome Completo Fictício"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2111,7 +2111,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentUser.nome}
                     onChange={(e) => setCurrentUser({ ...currentUser, nome: e.target.value })}
-                    placeholder="Ex: VENTURA"
+                    placeholder="Ex.: FICTICIO"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2136,7 +2136,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         prev ? { ...prev, email: normalized } : prev
                       );
                     }}
-                    placeholder="usuario@gmail.com"
+                    placeholder="usuario.ficticio@exemplo.com"
                     autoComplete="email"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
                     required={!usuarios.some((u) => u.re === currentUser.re)}
@@ -2234,7 +2234,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     value={currentPosto.sigla}
                     disabled={postos.some((p) => p.sigla === currentPosto.sigla)}
                     onChange={(e) => setCurrentPosto({ ...currentPosto, sigla: e.target.value })}
-                    placeholder="Ex: CB PM"
+                    placeholder="Ex: 3º SGT"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                     required
                   />
@@ -2246,7 +2246,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentPosto.descricao}
                     onChange={(e) => setCurrentPosto({ ...currentPosto, descricao: e.target.value })}
-                    placeholder="Ex: CABO"
+                    placeholder="Ex: TERCEIRO SARGENTO"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2298,7 +2298,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     value={currentSecao.nome}
                     disabled={secoes.some((s) => s.nome === currentSecao.nome)}
                     onChange={(e) => setCurrentSecao({ ...currentSecao, nome: e.target.value })}
-                    placeholder="Ex: Seç Tec Educ"
+                    placeholder="Ex: Seção Exemplo"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                     required
                   />
@@ -2362,7 +2362,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     value={currentLegenda.sigla}
                     disabled={legendas.some((l) => l.sigla === currentLegenda.sigla)}
                     onChange={(e) => setCurrentLegenda({ ...currentLegenda, sigla: e.target.value })}
-                    placeholder="Ex: EN"
+                    placeholder="Ex: FX"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                     required
                   />
@@ -2374,7 +2374,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     type="text"
                     value={currentLegenda.descricao}
                     onChange={(e) => setCurrentLegenda({ ...currentLegenda, descricao: e.target.value })}
-                    placeholder="Ex: EXPEDIENTE NORMAL"
+                    placeholder="Ex: FOLGA EXEMPLO"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
@@ -2393,7 +2393,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       type="text"
                       value={currentLegenda.cor || ""}
                       onChange={(e) => setCurrentLegenda({ ...currentLegenda, cor: e.target.value })}
-                      placeholder="Ex: #00FF00"
+                      placeholder="Ex: #3B82F6"
                       className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-semibold font-mono"
                     />
                     {currentLegenda.cor && (

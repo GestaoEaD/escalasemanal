@@ -460,7 +460,7 @@ export default function AprovacaoPage({
                   type="text"
                   value={confirmRe}
                   onChange={(e) => setConfirmRe(e.target.value)}
-                  placeholder="Ex: 104585"
+                  placeholder="Ex: 999888"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   autoFocus
                 />
@@ -524,7 +524,7 @@ export default function AprovacaoPage({
                   type="text"
                   value={confirmRe}
                   onChange={(e) => setConfirmRe(e.target.value)}
-                  placeholder="Ex: 104585"
+                  placeholder="Ex: 999888"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500"
                   autoFocus
                 />
