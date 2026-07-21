@@ -340,6 +340,7 @@ export const ESCALA_STATUS_EMOJI: Record<EscalaStatus, string> = {
 export type DayOfWeek = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
 
 export const OPCOES_ESCALA = [
+  "-", // Sem escala
   "EN", // Escala Normal
   "F", // Folga
   "FC", // Folga Complementar

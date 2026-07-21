@@ -149,6 +149,11 @@ export default function ScheduleEditor({
 
   // Dynamic legendas pool (from database)
   const [legendasList, setLegendasList] = useState<{ sigla: string; descricao: string; cor: string; ordem?: number }[]>([]);
+  const configuredScaleOptions =
+    legendasList.length > 0 ? legendasList.map((legenda) => legenda.sigla) : OPCOES_ESCALA;
+  const scaleOptions = configuredScaleOptions.includes("-")
+    ? configuredScaleOptions
+    : ["-", ...configuredScaleOptions];
 
   // Independent panel observations
   const [weeklyObservacoes, setWeeklyObservacoes] = useState("");
@@ -398,8 +403,8 @@ export default function ScheduleEditor({
           qua: "EN",
           qui: "EN",
           sex: "EN",
-          sab: "EN",
-          dom: "EN",
+          sab: "-",
+          dom: "-",
           observacao: sanitizeWeeklyObservacao(c.observacao)
         }));
 
@@ -591,8 +596,8 @@ export default function ScheduleEditor({
       qua: "EN",
       qui: "EN",
       sex: "EN",
-      sab: "EN",
-      dom: "EN",
+      sab: "-",
+      dom: "-",
       observacao: activePanelForModal === "semanal"
         ? sanitizeWeeklyObservacao(col.observacao)
         : col.observacao || ""
@@ -1196,6 +1201,7 @@ export default function ScheduleEditor({
     }
     // Fallbacks for standard options
     const fallbacks: Record<string, string> = {
+      "-": "Sem escala",
       "EN": "Expediente Normal / Escala Normal",
       "F": "Folga",
       "FC": "Folga Complementar / Folga Chefe",
@@ -1932,7 +1938,7 @@ export default function ScheduleEditor({
                                 style={getCellStyle(row[day])}
                                 title={getLegendDescription(row[day])}
                               >
-                                {(legendasList.length > 0 ? legendasList.map((l) => l.sigla) : OPCOES_ESCALA).map((opt) => (
+                                {scaleOptions.map((opt) => (
                                   <option key={opt} value={opt} title={getLegendDescription(opt)}>{opt}</option>
                                 ))}
                               </select>
@@ -2070,7 +2076,7 @@ export default function ScheduleEditor({
                                     style={getCellStyle(row[day])}
                                     title={getLegendDescription(row[day])}
                                   >
-                                    {(legendasList.length > 0 ? legendasList.map((l) => l.sigla) : OPCOES_ESCALA).map((opt) => (
+                                    {scaleOptions.map((opt) => (
                                       <option key={opt} value={opt} title={getLegendDescription(opt)}>{opt}</option>
                                     ))}
                                   </select>
