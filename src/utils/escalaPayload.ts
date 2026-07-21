@@ -1,5 +1,17 @@
 import { ScheduleRow, EscalaAprovacao, HistoricoEscalaEvento, LastSaved, AprovacaoAtor } from "../types";
 
+/**
+ * Fim de semana sem escala: converte o antigo padrão "EN" de sábado/domingo para "-".
+ * Aplica-se ao carregar escalas gravadas antes da mudança do valor padrão.
+ */
+export function applyWeekendDefault<T extends Pick<ScheduleRow, "sab" | "dom">>(row: T): T {
+  return {
+    ...row,
+    sab: row.sab === "EN" ? "-" : row.sab,
+    dom: row.dom === "EN" ? "-" : row.dom,
+  };
+}
+
 /** Monta uma linha da escala só com campos válidos (sem spread de props extras/undefined). */
 export function cleanScheduleRow(row: ScheduleRow | Record<string, unknown>): ScheduleRow {
   const r = row as ScheduleRow;

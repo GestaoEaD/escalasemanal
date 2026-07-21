@@ -39,6 +39,7 @@ import {
 import { normalizeRe } from "../utils/reUtils";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import {
+  applyWeekendDefault,
   cleanAprovacao,
   cleanHistorico,
   cleanLastSaved,
@@ -370,7 +371,7 @@ export default function ScheduleEditor({
       // Process Weekly Scale
       if (weeklySnap.exists()) {
         const data = weeklySnap.data() as EscalaDocument;
-        const loadedRows = (data.rows || []).map((row) => ({
+        const loadedRows = (data.rows || []).map((row) => applyWeekendDefault({
           ...row,
           observacao: sanitizeWeeklyObservacao(row.observacao),
         }));
@@ -449,8 +450,9 @@ export default function ScheduleEditor({
       if (hasWeeklySaved) {
         if (alterationSnap.exists()) {
           const data = alterationSnap.data() as EscalaDocument;
-          setDbAlterationRows(data.rows || []);
-          setLocalAlterationRows(data.rows || []);
+          const loadedAltRows = (data.rows || []).map(applyWeekendDefault);
+          setDbAlterationRows(loadedAltRows);
+          setLocalAlterationRows(loadedAltRows);
           setDbAlterationSaved(data.lastSaved);
           setLoadedAlterationTimestamp(data.lastSaved?.timestamp || null);
           

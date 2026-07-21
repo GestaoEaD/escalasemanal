@@ -24,6 +24,7 @@ import {
   tipoEscalaFromDocumento,
 } from "../utils/solicitacaoAprovacaoService";
 import { auditAbrirLinkAprovacao } from "../utils/auditService";
+import { applyWeekendDefault } from "../utils/escalaPayload";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
 import { SolicitacaoAprovacao } from "../types";
@@ -551,7 +552,7 @@ export default function AprovacaoPage({
                 <Lock size={12} />
                 Visualização somente leitura — {docLabel}
               </div>
-              <ReadOnlyScheduleTable title={docLabel} rows={escala.rows || []} />
+              <ReadOnlyScheduleTable title={docLabel} rows={(escala.rows || []).map(applyWeekendDefault)} />
               {escala.observacoes && (
                 <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs text-gray-700">
                   <div className="font-bold text-gray-500 uppercase text-[10px] mb-1">
