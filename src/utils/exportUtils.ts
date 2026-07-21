@@ -83,8 +83,10 @@ const A4_PORTRAIT_PRINT_CSS = `
       margin: 0 !important;
       padding: 0 !important;
       background: #fff !important;
+      color: #000000 !important;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
+      text-rendering: optimizeLegibility;
     }
     .no-print { display: none !important; }
     .header-container {
@@ -92,9 +94,9 @@ const A4_PORTRAIT_PRINT_CSS = `
       padding-bottom: 4px !important;
     }
     .header-title { font-size: 12px !important; }
-    .header-subtitle, .header-meta { font-size: 8px !important; }
+    .header-subtitle, .header-meta { font-size: 8.5px !important; }
     .section-title {
-      font-size: 8px !important;
+      font-size: 8.5px !important;
       margin: 6px 0 3px 0 !important;
       padding: 3px 6px !important;
     }
@@ -102,21 +104,22 @@ const A4_PORTRAIT_PRINT_CSS = `
       width: 100% !important;
       max-width: 100% !important;
       table-layout: fixed !important;
-      font-size: 6.5px !important;
+      font-size: 7.5px !important;
       margin-bottom: 6px !important;
     }
     th, td {
       padding: 2px 1px !important;
-      font-size: 6.5px !important;
-      line-height: 1.15 !important;
+      font-size: 7.5px !important;
+      line-height: 1.2 !important;
       overflow-wrap: anywhere;
       word-break: break-word;
       vertical-align: middle;
     }
-    th { font-size: 6px !important; letter-spacing: 0 !important; }
-    .font-mono, .font-dense, .text-obs { font-size: 6px !important; }
-    .footer-info, .export-footer { font-size: 6px !important; }
-    .obs-block { padding: 6px !important; margin-bottom: 6px !important; font-size: 6.5px !important; }
+    td { color: #000000; }
+    th { font-size: 7px !important; letter-spacing: 0 !important; }
+    .font-mono, .font-dense, .text-obs { font-size: 7px !important; }
+    .footer-info, .export-footer { font-size: 7px !important; }
+    .obs-block { padding: 6px !important; margin-bottom: 6px !important; font-size: 7.5px !important; }
     .print-section { page-break-inside: avoid; }
     .export-footer { page-break-inside: avoid; margin-top: 8px !important; }
   }
@@ -125,12 +128,13 @@ const A4_PORTRAIT_PRINT_CSS = `
 const REPORT_BASE_CSS = `
   body {
     font-family: 'Inter', Arial, sans-serif;
-    color: #111827;
+    color: #000000;
     background-color: #ffffff;
     margin: 0;
     padding: 12px;
     font-size: 9px;
     line-height: 1.3;
+    text-rendering: optimizeLegibility;
   }
   ${A4_PORTRAIT_PRINT_CSS}
   .header-container {
@@ -145,7 +149,7 @@ const REPORT_BASE_CSS = `
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin: 0 0 2px 0;
-    color: #374151;
+    color: #111827;
   }
   .header-title {
     font-size: 15px;
@@ -156,7 +160,7 @@ const REPORT_BASE_CSS = `
   .header-meta {
     font-size: 10px;
     font-weight: 600;
-    color: #4B5563;
+    color: #111827;
     margin: 2px 0 0 0;
   }
   .section-title {
@@ -190,10 +194,11 @@ const REPORT_BASE_CSS = `
   }
   td {
     padding: 3px 2px;
-    border: 1px solid #D1D5DB;
+    border: 1px solid #9CA3AF;
     text-align: center;
     overflow-wrap: anywhere;
     word-break: break-word;
+    color: #000000;
   }
   tr:nth-child(even) { background-color: #F9FAFB; }
   .text-left { text-align: left; }
@@ -201,10 +206,10 @@ const REPORT_BASE_CSS = `
   .bold { font-weight: 700; }
   .font-mono { font-family: monospace; font-size: 7.5px; }
   .font-dense { font-size: 7.5px; }
-  .bg-cell { background-color: #F3F4F6; font-weight: 700; color: #1F2937; }
+  .bg-cell { background-color: #F3F4F6; font-weight: 700; color: #000000; }
   .bg-weekend { background-color: #E5E7EB; }
-  .weekend-cell { border: 1.5px solid #9CA3AF !important; }
-  .text-obs { font-size: 7px; color: #4B5563; }
+  .weekend-cell { border: 1.5px solid #6B7280 !important; }
+  .text-obs { font-size: 7.5px; color: #1F2937; }
   .empty-state {
     text-align: center;
     padding: 8px;
@@ -212,8 +217,8 @@ const REPORT_BASE_CSS = `
     font-style: italic;
   }
   .footer-info {
-    font-size: 7px;
-    color: #6B7280;
+    font-size: 7.5px;
+    color: #1F2937;
     margin-top: 2px;
     margin-bottom: 6px;
     display: flex;
@@ -225,19 +230,19 @@ const REPORT_BASE_CSS = `
     margin-bottom: 8px;
     padding: 6px 8px;
     background-color: #F9FAFB;
-    border: 1px solid #D1D5DB;
+    border: 1px solid #9CA3AF;
     border-radius: 4px;
     white-space: pre-wrap;
     font-size: 8px;
-    color: #374151;
+    color: #111827;
     text-align: left;
   }
   .export-footer {
     margin-top: 10px;
     padding-top: 6px;
-    border-top: 1px solid #D1D5DB;
-    font-size: 7px;
-    color: #4B5563;
+    border-top: 1px solid #9CA3AF;
+    font-size: 7.5px;
+    color: #1F2937;
     line-height: 1.5;
   }
   .print-btn-bar {
@@ -272,12 +277,13 @@ const REPORT_BASE_CSS = `
 const LOGS_REPORT_CSS = `
   body {
     font-family: 'Inter', Arial, sans-serif;
-    color: #111827;
+    color: #000000;
     background-color: #ffffff;
     margin: 0;
     padding: 12px;
-    font-size: 7.5px;
+    font-size: 8px;
     line-height: 1.25;
+    text-rendering: optimizeLegibility;
   }
   ${A4_PORTRAIT_PRINT_CSS}
   .header {
@@ -293,7 +299,7 @@ const LOGS_REPORT_CSS = `
   }
   .meta {
     font-size: 8px;
-    color: #4B5563;
+    color: #1F2937;
     margin-top: 3px;
   }
   table {
@@ -302,35 +308,36 @@ const LOGS_REPORT_CSS = `
     margin-top: 6px;
     margin-bottom: 8px;
     table-layout: fixed;
-    font-size: 7px;
+    font-size: 7.5px;
   }
   th {
     background-color: #111827;
     color: #ffffff;
     font-weight: 700;
     text-transform: uppercase;
-    font-size: 6.5px;
+    font-size: 7px;
     padding: 3px 2px;
     border: 1px solid #111827;
   }
   td {
     padding: 3px 2px;
-    border: 1px solid #D1D5DB;
+    border: 1px solid #9CA3AF;
     text-align: left;
     overflow-wrap: anywhere;
     word-break: break-word;
+    color: #000000;
   }
   tr:nth-child(even) { background-color: #F9FAFB; }
   .bold { font-weight: 700; }
-  .font-mono { font-family: monospace; font-size: 6.5px; }
-  .text-gray-500 { color: #6B7280; }
-  .text-blue-800 { color: #1E40AF; }
+  .font-mono { font-family: monospace; font-size: 7px; }
+  .text-gray-500 { color: #374151; }
+  .text-blue-800 { color: #1E3A8A; }
   .export-footer {
     margin-top: 8px;
     padding-top: 6px;
-    border-top: 1px solid #D1D5DB;
-    font-size: 7px;
-    color: #4B5563;
+    border-top: 1px solid #9CA3AF;
+    font-size: 7.5px;
+    color: #1F2937;
     line-height: 1.5;
   }
   .print-btn-bar {
@@ -443,9 +450,9 @@ function createLegendCellStyleGetter(
         const yiq = (r * 299 + g * 587 + b * 114) / 1000;
         textColor = yiq >= 128 ? "#000000" : "#ffffff";
       }
-      return `background-color: ${translatedCor}; color: ${textColor}; border: 1px solid rgba(0,0,0,0.15);`;
+      return `background-color: ${translatedCor}; color: ${textColor}; border: 1px solid #9CA3AF;`;
     }
-    return "background-color: #ffffff; color: #000000; border: 1px solid #D1D5DB;";
+    return "background-color: #ffffff; color: #000000; border: 1px solid #9CA3AF;";
   };
 }
 
