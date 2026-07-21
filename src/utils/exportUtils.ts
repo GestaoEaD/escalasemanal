@@ -203,7 +203,7 @@ const REPORT_BASE_CSS = `
   .font-dense { font-size: 7.5px; }
   .bg-cell { background-color: #F3F4F6; font-weight: 700; color: #1F2937; }
   .bg-weekend { background-color: #E5E7EB; }
-  .weekend-cell { border: 1.5px solid #DC2626 !important; }
+  .weekend-cell { border: 1.5px solid #9CA3AF !important; }
   .text-obs { font-size: 7px; color: #4B5563; }
   .empty-state {
     text-align: center;

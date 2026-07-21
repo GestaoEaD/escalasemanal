@@ -94,7 +94,7 @@ function ReadOnlyScheduleTable({
                     <td
                       key={d}
                       className={`px-1 py-1.5 text-center font-bold text-gray-700 ${
-                        d === "sab" || d === "dom" ? "border-2 border-red-500" : ""
+                        d === "sab" || d === "dom" ? "border-2 border-gray-400" : ""
                       }`}
                     >
                       {row[d]}

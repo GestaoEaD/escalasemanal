@@ -1922,7 +1922,7 @@ export default function ScheduleEditor({
                           {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
                             <td
                               key={day}
-                              className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-red-500" : ""}`}
+                              className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-gray-400" : ""}`}
                             >
                               <select
                                 value={row[day]}
@@ -2060,7 +2060,7 @@ export default function ScheduleEditor({
                               {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
                                 <td
                                   key={day}
-                                  className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-red-500" : ""}`}
+                                  className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-gray-400" : ""}`}
                                 >
                                   <select
                                     value={row[day]}
