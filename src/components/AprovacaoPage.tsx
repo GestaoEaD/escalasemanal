@@ -91,7 +91,12 @@ function ReadOnlyScheduleTable({
                   <td className="px-2 py-1.5 font-mono text-gray-600">{row.re}</td>
                   <td className="px-2 py-1.5 font-semibold text-gray-800">{row.nome}</td>
                   {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((d) => (
-                    <td key={d} className="px-1 py-1.5 text-center font-bold text-gray-700">
+                    <td
+                      key={d}
+                      className={`px-1 py-1.5 text-center font-bold text-gray-700 ${
+                        d === "sab" || d === "dom" ? "border-2 border-red-500" : ""
+                      }`}
+                    >
                       {row[d]}
                     </td>
                   ))}

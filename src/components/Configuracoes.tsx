@@ -144,12 +144,16 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
   const [postoModalOpen, setPostoModalOpen] = useState(false);
   const [currentPosto, setCurrentPosto] = useState<any | null>(null);
+  // Sigla original do posto em edição (null = inclusão de novo posto)
+  const [postoOriginalSigla, setPostoOriginalSigla] = useState<string | null>(null);
 
   const [secaoModalOpen, setSecaoModalOpen] = useState(false);
   const [currentSecao, setCurrentSecao] = useState<any | null>(null);
 
   const [legendaModalOpen, setLegendaModalOpen] = useState(false);
   const [currentLegenda, setCurrentLegenda] = useState<any | null>(null);
+  // Sigla original da legenda em edição (null = inclusão de nova legenda)
+  const [legendaOriginalSigla, setLegendaOriginalSigla] = useState<string | null>(null);
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -808,20 +812,37 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     e.preventDefault();
     if (!currentPosto) return;
 
-    if (!currentPosto.sigla.trim() || !currentPosto.descricao.trim()) {
+    const novaSigla = String(currentPosto.sigla || "").trim();
+    if (!novaSigla || !currentPosto.descricao.trim()) {
       alert("Por favor, preencha todos os campos obrigatórios (*).");
       return;
     }
 
-    const existingIndex = postos.findIndex((p) => p.sigla === currentPosto.sigla);
-    let updatedList = [...postos];
+    const duplicada = postos.some(
+      (p) => p.sigla === novaSigla && p.sigla !== postoOriginalSigla
+    );
+    if (duplicada) {
+      alert("Já existe um posto/graduação com esta sigla.");
+      return;
+    }
 
-    if (existingIndex > -1) {
-      updatedList[existingIndex] = { ...currentPosto };
+    let updatedList = [...postos];
+    const editIndex = postoOriginalSigla !== null
+      ? postos.findIndex((p) => p.sigla === postoOriginalSigla)
+      : -1;
+
+    if (editIndex > -1) {
+      updatedList[editIndex] = { ...currentPosto, sigla: novaSigla };
+      if (postoOriginalSigla !== null && postoOriginalSigla !== novaSigla) {
+        setRemovedPostos((prev) =>
+          prev.includes(postoOriginalSigla) ? prev : [...prev, postoOriginalSigla]
+        );
+      }
     } else {
       const maxOrdem = postos.reduce((max, p) => (p.ordem && p.ordem > max ? p.ordem : max), 0);
       updatedList.push({
         ...currentPosto,
+        sigla: novaSigla,
         ordem: maxOrdem + 1
       });
     }
@@ -829,6 +850,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     setPostos(updatedList);
     setPostoModalOpen(false);
     setCurrentPosto(null);
+    setPostoOriginalSigla(null);
   };
 
   const handleSecaoSubmit = (e: React.FormEvent) => {
@@ -863,20 +885,39 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     e.preventDefault();
     if (!currentLegenda) return;
 
-    if (!currentLegenda.sigla.trim() || !currentLegenda.descricao.trim()) {
+    const novaSigla = String(currentLegenda.sigla || "").trim();
+    if (!novaSigla || !currentLegenda.descricao.trim()) {
       alert("Por favor, preencha os campos obrigatórios (*).");
       return;
     }
 
-    const existingIndex = legendas.findIndex((l) => l.sigla === currentLegenda.sigla);
-    let updatedList = [...legendas];
+    // Não permitir sigla duplicada (ignorando a própria legenda em edição)
+    const duplicada = legendas.some(
+      (l) => l.sigla === novaSigla && l.sigla !== legendaOriginalSigla
+    );
+    if (duplicada) {
+      alert("Já existe uma legenda com esta sigla.");
+      return;
+    }
 
-    if (existingIndex > -1) {
-      updatedList[existingIndex] = { ...currentLegenda };
+    let updatedList = [...legendas];
+    const editIndex = legendaOriginalSigla !== null
+      ? legendas.findIndex((l) => l.sigla === legendaOriginalSigla)
+      : -1;
+
+    if (editIndex > -1) {
+      updatedList[editIndex] = { ...currentLegenda, sigla: novaSigla };
+      // Sigla renomeada: o documento antigo precisa ser removido no salvamento
+      if (legendaOriginalSigla !== null && legendaOriginalSigla !== novaSigla) {
+        setRemovedLegendas((prev) =>
+          prev.includes(legendaOriginalSigla) ? prev : [...prev, legendaOriginalSigla]
+        );
+      }
     } else {
       const maxOrdem = legendas.reduce((max, l) => (l.ordem && l.ordem > max ? l.ordem : max), 0);
       updatedList.push({
         ...currentLegenda,
+        sigla: novaSigla,
         ordem: maxOrdem + 1,
         ativo: true
       });
@@ -885,6 +926,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     setLegendas(updatedList);
     setLegendaModalOpen(false);
     setCurrentLegenda(null);
+    setLegendaOriginalSigla(null);
   };
 
   // --- LIST COMPUTATIONS (SEARCH, FILTER & PAGINATION) ---
@@ -1521,6 +1563,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     id="new-posto-btn"
                     onClick={() => {
                       setCurrentPosto({ sigla: "", descricao: "" });
+                      setPostoOriginalSigla(null);
                       setPostoModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -1575,6 +1618,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <button
                                 onClick={() => {
                                   setCurrentPosto({ ...p });
+                                  setPostoOriginalSigla(p.sigla);
                                   setPostoModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -1707,6 +1751,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     id="new-legenda-btn"
                     onClick={() => {
                       setCurrentLegenda({ sigla: "", descricao: "", cor: "verde", ativo: true });
+                      setLegendaOriginalSigla(null);
                       setLegendaModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -1784,6 +1829,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <button
                                 onClick={() => {
                                   setCurrentLegenda({ ...l });
+                                  setLegendaOriginalSigla(l.sigla);
                                   setLegendaModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -2219,7 +2265,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             >
               <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {postos.some((p) => p.sigla === currentPosto.sigla) ? "Editar Posto/Grad" : "Adicionar Posto/Grad"}
+                  {postoOriginalSigla !== null ? "Editar Posto/Grad" : "Adicionar Posto/Grad"}
                 </h3>
                 <button onClick={() => setPostoModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
                   <X size={18} />
@@ -2232,10 +2278,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <input
                     type="text"
                     value={currentPosto.sigla}
-                    disabled={postos.some((p) => p.sigla === currentPosto.sigla)}
                     onChange={(e) => setCurrentPosto({ ...currentPosto, sigla: e.target.value })}
                     placeholder="Ex: 3º SGT"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
                 </div>
@@ -2347,7 +2392,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             >
               <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {legendas.some((l) => l.sigla === currentLegenda.sigla) ? "Editar Legenda" : "Adicionar Legenda"}
+                  {legendaOriginalSigla !== null ? "Editar Legenda" : "Adicionar Legenda"}
                 </h3>
                 <button onClick={() => setLegendaModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
                   <X size={18} />
@@ -2360,10 +2405,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <input
                     type="text"
                     value={currentLegenda.sigla}
-                    disabled={legendas.some((l) => l.sigla === currentLegenda.sigla)}
                     onChange={(e) => setCurrentLegenda({ ...currentLegenda, sigla: e.target.value })}
                     placeholder="Ex: FX"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
                 </div>

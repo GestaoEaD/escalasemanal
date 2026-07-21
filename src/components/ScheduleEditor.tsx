@@ -1920,7 +1920,10 @@ export default function ScheduleEditor({
                           
                           {/* Days Cells */}
                           {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
-                            <td key={day} className="p-1">
+                            <td
+                              key={day}
+                              className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-red-500" : ""}`}
+                            >
                               <select
                                 value={row[day]}
                                 onChange={(e) => handleCellChange("semanal", row.re, day, e.target.value)}
@@ -2055,7 +2058,10 @@ export default function ScheduleEditor({
                               
                               {/* Days Cells */}
                               {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
-                                <td key={day} className="p-1">
+                                <td
+                                  key={day}
+                                  className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-red-500" : ""}`}
+                                >
                                   <select
                                     value={row[day]}
                                     onChange={(e) => handleCellChange("alteracao", row.re, day, e.target.value)}
