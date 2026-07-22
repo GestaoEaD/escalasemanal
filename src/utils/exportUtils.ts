@@ -93,8 +93,9 @@ const A4_LANDSCAPE_PRINT_CSS = `
       margin-bottom: 5px !important;
       padding-bottom: 3px !important;
     }
-    .header-title { font-size: 12px !important; }
-    .header-subtitle, .header-meta { font-size: 8.5px !important; }
+    .header-title { font-size: 11px !important; }
+    .header-org, .header-subtitle, .header-meta { font-size: 8.5px !important; }
+    .header-org-main { font-size: 10px !important; }
     .section-title {
       font-size: 8.5px !important;
       margin: 5px 0 3px 0 !important;
@@ -155,18 +156,25 @@ const REPORT_BASE_CSS = `
     border-bottom: 2px solid #111827;
     padding-bottom: 8px;
   }
-  .header-subtitle {
+  .header-org {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 0 0 2px 0;
+    letter-spacing: 0.4px;
+    margin: 0;
     color: #111827;
+    line-height: 1.35;
+  }
+  .header-org-main {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
   }
   .header-title {
-    font-size: 15px;
+    font-size: 11px;
     font-weight: 800;
-    margin: 2px 0;
+    text-transform: uppercase;
+    margin: 6px 0 2px 0;
     color: #111827;
   }
   .header-meta {
@@ -557,8 +565,9 @@ function buildScheduleReportDocument(options: {
 <body>
   ${buildPrintButtonBar("Impressão A4 paisagem (horizontal). Use Imprimir / PDF com orientação Paisagem.")}
   <div class="header-container">
-    <div class="header-subtitle">Polícia Militar do Estado de São Paulo</div>
-    <div class="header-title">Escala de Serviço Operacional e Administrativo</div>
+    <div class="header-org header-org-main">Polícia Militar do Estado de São Paulo</div>
+    <div class="header-org">Diretoria de Educação e Cultura</div>
+    <div class="header-org">Divisão de Educação a Distância</div>
     <div class="header-meta">${escapeHtml(weekLabel)} &nbsp;|&nbsp; Período: ${escapeHtml(weekPeriod)} &nbsp;|&nbsp; Ano: ${year}</div>
   </div>
   ${bodyContent}
