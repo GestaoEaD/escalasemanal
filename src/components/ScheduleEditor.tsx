@@ -81,6 +81,45 @@ function sanitizeWeeklyObservacao(observacao?: string): string {
   return AUTO_SYSTEM_USER_OBSERVACAO.test(observacao.trim()) ? "" : observacao;
 }
 
+/** Textarea de 1 linha que cresce conforme o conteúdo. */
+function AutoGrowTextarea({
+  value,
+  onChange,
+  disabled,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const ref = React.useRef<HTMLTextAreaElement>(null);
+
+  const resize = React.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  React.useEffect(() => {
+    resize();
+  }, [value, resize]);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onInput={resize}
+      disabled={disabled}
+      placeholder={placeholder}
+      rows={1}
+      className="w-full text-xs font-medium text-gray-800 border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none overflow-hidden disabled:bg-gray-100 disabled:cursor-not-allowed"
+    />
+  );
+}
+
 interface ScheduleEditorProps {
   usuario: Usuario;
   year: number;
@@ -778,13 +817,11 @@ export default function ScheduleEditor({
                 <span>Remover</span>
               </button>
             </div>
-            <textarea
+            <AutoGrowTextarea
               value={row.observacao}
-              onChange={(e) => handleCellChange(panel, row.re, "observacao", e.target.value)}
+              onChange={(value) => handleCellChange(panel, row.re, "observacao", value)}
               disabled={!editable}
               placeholder={`Observação de ${formatObsLabel(row)}...`}
-              rows={3}
-              className="w-full text-xs font-medium text-gray-800 border border-gray-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[72px] disabled:bg-gray-100 disabled:cursor-not-allowed"
             />
           </div>
         ))}

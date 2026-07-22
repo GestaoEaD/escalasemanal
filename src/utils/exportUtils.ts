@@ -71,11 +71,11 @@ function buildPrintButtonBar(hint: string): string {
   `;
 }
 
-/** CSS compartilhado: A4 retrato, layout compacto, sem áreas de assinatura. */
-const A4_PORTRAIT_PRINT_CSS = `
+/** CSS compartilhado: A4 paisagem, layout horizontal, mais espaço para observações. */
+const A4_LANDSCAPE_PRINT_CSS = `
   @page {
-    size: A4 portrait;
-    margin: 8mm 6mm;
+    size: A4 landscape;
+    margin: 6mm 5mm;
   }
   @media print {
     html, body {
@@ -90,14 +90,14 @@ const A4_PORTRAIT_PRINT_CSS = `
     }
     .no-print { display: none !important; }
     .header-container {
-      margin-bottom: 6px !important;
-      padding-bottom: 4px !important;
+      margin-bottom: 5px !important;
+      padding-bottom: 3px !important;
     }
     .header-title { font-size: 12px !important; }
     .header-subtitle, .header-meta { font-size: 8.5px !important; }
     .section-title {
       font-size: 8.5px !important;
-      margin: 6px 0 3px 0 !important;
+      margin: 5px 0 3px 0 !important;
       padding: 3px 6px !important;
     }
     table {
@@ -105,10 +105,10 @@ const A4_PORTRAIT_PRINT_CSS = `
       max-width: 100% !important;
       table-layout: fixed !important;
       font-size: 7.5px !important;
-      margin-bottom: 6px !important;
+      margin-bottom: 5px !important;
     }
     th, td {
-      padding: 2px 1px !important;
+      padding: 2px 2px !important;
       font-size: 7.5px !important;
       line-height: 1.2 !important;
       overflow-wrap: anywhere;
@@ -117,7 +117,19 @@ const A4_PORTRAIT_PRINT_CSS = `
     }
     td { color: #000000; }
     th { font-size: 7px !important; letter-spacing: 0 !important; }
-    .font-mono, .font-dense, .text-obs { font-size: 7px !important; }
+    .col-nome, .col-secao {
+      font-size: 7px !important;
+      line-height: 1.15 !important;
+    }
+    .font-mono, .font-dense { font-size: 7px !important; }
+    .text-obs, .col-obs {
+      font-size: 7.5px !important;
+      line-height: 1.25 !important;
+      text-align: left !important;
+      white-space: pre-wrap !important;
+      vertical-align: top !important;
+      padding: 3px 4px !important;
+    }
     .footer-info, .export-footer { font-size: 7px !important; }
     .obs-block { padding: 6px !important; margin-bottom: 6px !important; font-size: 7.5px !important; }
     .print-section { page-break-inside: avoid; }
@@ -136,7 +148,7 @@ const REPORT_BASE_CSS = `
     line-height: 1.3;
     text-rendering: optimizeLegibility;
   }
-  ${A4_PORTRAIT_PRINT_CSS}
+  ${A4_LANDSCAPE_PRINT_CSS}
   .header-container {
     text-align: center;
     margin-bottom: 12px;
@@ -209,7 +221,20 @@ const REPORT_BASE_CSS = `
   .bg-cell { background-color: #F3F4F6; font-weight: 700; color: #000000; }
   .bg-weekend { background-color: #E5E7EB; }
   .weekend-cell { border: 1.5px solid #6B7280 !important; }
-  .text-obs { font-size: 7.5px; color: #1F2937; }
+  .col-nome, .col-secao {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    hyphens: auto;
+  }
+  .text-obs, .col-obs {
+    font-size: 7.5px;
+    color: #1F2937;
+    text-align: left;
+    white-space: pre-wrap;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .empty-state {
     text-align: center;
     padding: 8px;
@@ -285,7 +310,7 @@ const LOGS_REPORT_CSS = `
     line-height: 1.25;
     text-rendering: optimizeLegibility;
   }
-  ${A4_PORTRAIT_PRINT_CSS}
+  ${A4_LANDSCAPE_PRINT_CSS}
   .header {
     text-align: center;
     margin-bottom: 10px;
@@ -370,18 +395,18 @@ const LOGS_REPORT_CSS = `
 function buildScheduleTableHeader(): string {
   return `
     <tr>
-      <th style="width: 9%;">Posto</th>
-      <th style="width: 9%;">R.E.</th>
-      <th style="width: 14%;">Nome</th>
-      <th style="width: 12%;">Seção</th>
-      <th style="width: 5%;">Seg</th>
-      <th style="width: 5%;">Ter</th>
-      <th style="width: 5%;">Qua</th>
-      <th style="width: 5%;">Qui</th>
-      <th style="width: 5%;">Sex</th>
-      <th style="width: 5%;">Sáb</th>
-      <th style="width: 5%;">Dom</th>
-      <th style="width: 21%;">Obs.</th>
+      <th style="width: 7%;">Posto</th>
+      <th style="width: 7%;">R.E.</th>
+      <th class="col-nome" style="width: 8%;">Nome</th>
+      <th class="col-secao" style="width: 7%;">Seção</th>
+      <th style="width: 4%;">Seg</th>
+      <th style="width: 4%;">Ter</th>
+      <th style="width: 4%;">Qua</th>
+      <th style="width: 4%;">Qui</th>
+      <th style="width: 4%;">Sex</th>
+      <th style="width: 4%;">Sáb</th>
+      <th style="width: 4%;">Dom</th>
+      <th class="col-obs" style="width: 43%;">Observação</th>
     </tr>
   `;
 }
@@ -394,8 +419,8 @@ function renderPlainTableRows(rows: ScheduleRow[]): string {
     <tr>
       <td class="bold font-dense">${escapeHtml(r.postoGrad)}</td>
       <td class="font-mono text-center">${escapeHtml(r.re)}</td>
-      <td class="bold text-left">${escapeHtml(r.nome)}</td>
-      <td class="text-left">${escapeHtml(r.secao)}</td>
+      <td class="bold text-left col-nome">${escapeHtml(r.nome)}</td>
+      <td class="text-left col-secao">${escapeHtml(r.secao)}</td>
       <td class="text-center bold bg-cell">${escapeHtml(r.seg)}</td>
       <td class="text-center bold bg-cell">${escapeHtml(r.ter)}</td>
       <td class="text-center bold bg-cell">${escapeHtml(r.qua)}</td>
@@ -403,7 +428,7 @@ function renderPlainTableRows(rows: ScheduleRow[]): string {
       <td class="text-center bold bg-cell">${escapeHtml(r.sex)}</td>
       <td class="text-center bold bg-cell bg-weekend weekend-cell">${escapeHtml(r.sab)}</td>
       <td class="text-center bold bg-cell bg-weekend weekend-cell">${escapeHtml(r.dom)}</td>
-      <td class="text-left text-obs">${escapeHtml(r.observacao || "-")}</td>
+      <td class="text-left text-obs col-obs">${escapeHtml(r.observacao || "-")}</td>
     </tr>
   `).join("");
 }
@@ -467,8 +492,8 @@ function renderColoredTableRows(
     <tr>
       <td class="bold font-dense">${escapeHtml(r.postoGrad)}</td>
       <td class="font-mono text-center">${escapeHtml(r.re)}</td>
-      <td class="bold text-left">${escapeHtml(r.nome)}</td>
-      <td class="text-left">${escapeHtml(r.secao)}</td>
+      <td class="bold text-left col-nome">${escapeHtml(r.nome)}</td>
+      <td class="text-left col-secao">${escapeHtml(r.secao)}</td>
       <td class="text-center bold" style="${getCellStyle(r.seg)}">${escapeHtml(r.seg)}</td>
       <td class="text-center bold" style="${getCellStyle(r.ter)}">${escapeHtml(r.ter)}</td>
       <td class="text-center bold" style="${getCellStyle(r.qua)}">${escapeHtml(r.qua)}</td>
@@ -476,7 +501,7 @@ function renderColoredTableRows(
       <td class="text-center bold" style="${getCellStyle(r.sex)}">${escapeHtml(r.sex)}</td>
       <td class="text-center bold weekend-cell" style="${getCellStyle(r.sab)}">${escapeHtml(r.sab)}</td>
       <td class="text-center bold weekend-cell" style="${getCellStyle(r.dom)}">${escapeHtml(r.dom)}</td>
-      <td class="text-left text-obs">${escapeHtml(r.observacao || "-")}</td>
+      <td class="text-left text-obs col-obs">${escapeHtml(r.observacao || "-")}</td>
     </tr>
   `).join("");
 }
@@ -530,7 +555,7 @@ function buildScheduleReportDocument(options: {
   <style>${REPORT_BASE_CSS}</style>
 </head>
 <body>
-  ${buildPrintButtonBar("Impressão A4 retrato (vertical). Use Imprimir / PDF com orientação Retrato.")}
+  ${buildPrintButtonBar("Impressão A4 paisagem (horizontal). Use Imprimir / PDF com orientação Paisagem.")}
   <div class="header-container">
     <div class="header-subtitle">Polícia Militar do Estado de São Paulo</div>
     <div class="header-title">Escala de Serviço Operacional e Administrativo</div>
