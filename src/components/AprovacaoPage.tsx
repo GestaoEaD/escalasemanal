@@ -56,6 +56,8 @@ function ReadOnlyScheduleTable({
   title: string;
   rows: ScheduleRow[];
 }) {
+  const rowsWithObs = rows.filter((row) => Boolean(row.observacao?.trim()));
+
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
       <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-bold uppercase tracking-wider text-gray-700">
@@ -75,7 +77,7 @@ function ReadOnlyScheduleTable({
               <th className="px-1 py-2 text-center font-bold">Sex</th>
               <th className="px-1 py-2 text-center font-bold">Sáb</th>
               <th className="px-1 py-2 text-center font-bold">Dom</th>
-              <th className="px-2 py-2 text-left font-bold">Obs.</th>
+              <th className="px-2 py-2 text-center font-bold">Obs.</th>
             </tr>
           </thead>
           <tbody>
@@ -86,28 +88,54 @@ function ReadOnlyScheduleTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row, idx) => (
-                <tr key={row.re} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                  <td className="px-2 py-1.5 font-bold text-gray-900">{row.postoGrad}</td>
-                  <td className="px-2 py-1.5 font-mono text-gray-600">{row.re}</td>
-                  <td className="px-2 py-1.5 font-semibold text-gray-800">{row.nome}</td>
-                  {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((d) => (
-                    <td
-                      key={d}
-                      className={`px-1 py-1.5 text-center font-bold text-gray-700 ${
-                        d === "sab" || d === "dom" ? "border-2 border-gray-400" : ""
-                      }`}
-                    >
-                      {row[d]}
+              rows.map((row, idx) => {
+                const hasObs = Boolean(row.observacao?.trim());
+                return (
+                  <tr key={row.re} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    <td className="px-2 py-1.5 font-bold text-gray-900">{row.postoGrad}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-600">{row.re}</td>
+                    <td className="px-2 py-1.5 font-semibold text-gray-800">{row.nome}</td>
+                    {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((d) => (
+                      <td
+                        key={d}
+                        className={`px-1 py-1.5 text-center font-bold text-gray-700 ${
+                          d === "sab" || d === "dom" ? "border-2 border-gray-400" : ""
+                        }`}
+                      >
+                        {row[d]}
+                      </td>
+                    ))}
+                    <td className="px-2 py-1.5 text-center">
+                      {hasObs ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                          Sim
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
                     </td>
-                  ))}
-                  <td className="px-2 py-1.5 text-gray-500">{row.observacao || "-"}</td>
-                </tr>
-              ))
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+      {rowsWithObs.length > 0 && (
+        <div className="border-t border-gray-200 px-4 py-3 space-y-2 bg-gray-50">
+          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+            Observações por militar
+          </div>
+          {rowsWithObs.map((row) => (
+            <div key={row.re} className="rounded-lg border border-gray-200 bg-white p-2.5">
+              <div className="text-[11px] font-bold text-gray-900 mb-1">
+                {`${row.postoGrad} ${row.re} ${row.nome}`.replace(/\s+/g, " ").trim()}
+              </div>
+              <div className="text-[11px] text-gray-700 whitespace-pre-wrap">{row.observacao}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -553,14 +581,6 @@ export default function AprovacaoPage({
                 Visualização somente leitura — {docLabel}
               </div>
               <ReadOnlyScheduleTable title={docLabel} rows={(escala.rows || []).map(applyWeekendDefault)} />
-              {escala.observacoes && (
-                <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs text-gray-700">
-                  <div className="font-bold text-gray-500 uppercase text-[10px] mb-1">
-                    Observações — {docLabel}
-                  </div>
-                  <div className="whitespace-pre-wrap">{escala.observacoes}</div>
-                </div>
-              )}
             </div>
 
             {requestOpen ? (

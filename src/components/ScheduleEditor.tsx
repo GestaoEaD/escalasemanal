@@ -70,6 +70,7 @@ import {
   Clock,
   RotateCcw,
   XCircle,
+  MessageSquare,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -156,11 +157,14 @@ export default function ScheduleEditor({
     ? configuredScaleOptions
     : ["-", ...configuredScaleOptions];
 
-  // Independent panel observations
-  const [weeklyObservacoes, setWeeklyObservacoes] = useState("");
-  const [alterationObservacoes, setAlterationObservacoes] = useState("");
-  const [dbWeeklyObservacoes, setDbWeeklyObservacoes] = useState("");
-  const [dbAlterationObservacoes, setDbAlterationObservacoes] = useState("");
+  // Painéis de observação por militar (abertos abaixo da tabela)
+  const [openWeeklyObs, setOpenWeeklyObs] = useState<string[]>([]);
+  const [openAltObs, setOpenAltObs] = useState<string[]>([]);
+  const [confirmClearObs, setConfirmClearObs] = useState<{
+    panel: "semanal" | "alteracao";
+    re: string;
+    label: string;
+  } | null>(null);
 
   // UI Control states
   const [loading, setLoading] = useState(true);
@@ -187,17 +191,13 @@ export default function ScheduleEditor({
 
   // Independent dirty / editability per panel
   const isWeeklyDirty = React.useMemo(
-    () =>
-      JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows) ||
-      weeklyObservacoes !== dbWeeklyObservacoes,
-    [localWeeklyRows, dbWeeklyRows, weeklyObservacoes, dbWeeklyObservacoes]
+    () => JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows),
+    [localWeeklyRows, dbWeeklyRows]
   );
 
   const isAltDirty = React.useMemo(
-    () =>
-      JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows) ||
-      alterationObservacoes !== dbAlterationObservacoes,
-    [localAlterationRows, dbAlterationRows, alterationObservacoes, dbAlterationObservacoes]
+    () => JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows),
+    [localAlterationRows, dbAlterationRows]
   );
 
   const isDirty = isWeeklyDirty || isAltDirty;
@@ -377,12 +377,11 @@ export default function ScheduleEditor({
         }));
         setDbWeeklyRows(loadedRows);
         setLocalWeeklyRows(loadedRows);
+        setOpenWeeklyObs(
+          loadedRows.filter((row) => Boolean(row.observacao?.trim())).map((row) => row.re)
+        );
         setDbWeeklySaved(data.lastSaved);
         setLoadedWeeklyTimestamp(data.lastSaved?.timestamp || null);
-        
-        const obs = data.observacoes || "";
-        setWeeklyObservacoes(obs);
-        setDbWeeklyObservacoes(obs);
 
         setWeeklyStatus(normalizeEscalaStatus(data.status));
         setWeeklyVersao(data.versao && data.versao > 0 ? data.versao : 1);
@@ -436,10 +435,9 @@ export default function ScheduleEditor({
         
         setDbWeeklyRows(rows);
         setLocalWeeklyRows(rows);
+        setOpenWeeklyObs([]);
         setDbWeeklySaved(null);
         setLoadedWeeklyTimestamp(null);
-        setWeeklyObservacoes("");
-        setDbWeeklyObservacoes("");
         setWeeklyStatus("em_edicao");
         setWeeklyVersao(1);
         setWeeklyAprovacao(null);
@@ -453,12 +451,11 @@ export default function ScheduleEditor({
           const loadedAltRows = (data.rows || []).map(applyWeekendDefault);
           setDbAlterationRows(loadedAltRows);
           setLocalAlterationRows(loadedAltRows);
+          setOpenAltObs(
+            loadedAltRows.filter((row) => Boolean(row.observacao?.trim())).map((row) => row.re)
+          );
           setDbAlterationSaved(data.lastSaved);
           setLoadedAlterationTimestamp(data.lastSaved?.timestamp || null);
-          
-          const obs = data.observacoes || "";
-          setAlterationObservacoes(obs);
-          setDbAlterationObservacoes(obs);
 
           const hasStatusField = data.status !== undefined && data.status !== null;
           setAltStatus(hasStatusField ? normalizeEscalaStatus(data.status) : "em_edicao");
@@ -501,10 +498,9 @@ export default function ScheduleEditor({
 
           setDbAlterationRows(rows);
           setLocalAlterationRows(rows);
+          setOpenAltObs([]);
           setDbAlterationSaved(null);
           setLoadedAlterationTimestamp(null);
-          setAlterationObservacoes("");
-          setDbAlterationObservacoes("");
           setAltStatus("em_edicao");
           setAltVersao(1);
           setAltAprovacao(null);
@@ -514,10 +510,9 @@ export default function ScheduleEditor({
         // Escala Alteração is empty / not saved yet
         setDbAlterationRows([]);
         setLocalAlterationRows([]);
+        setOpenAltObs([]);
         setDbAlterationSaved(null);
         setLoadedAlterationTimestamp(null);
-        setAlterationObservacoes("");
-        setDbAlterationObservacoes("");
         setAltStatus("em_edicao");
         setAltVersao(1);
         setAltAprovacao(null);
@@ -671,10 +666,130 @@ export default function ScheduleEditor({
     if (panel === "semanal") {
       if (!isWeeklyEditable) return;
       setLocalWeeklyRows((prev) => prev.filter((r) => r.re !== reToDelete));
+      setOpenWeeklyObs((prev) => prev.filter((re) => re !== reToDelete));
     } else {
       if (!isAltEditable) return;
       setLocalAlterationRows((prev) => prev.filter((r) => r.re !== reToDelete));
+      setOpenAltObs((prev) => prev.filter((re) => re !== reToDelete));
     }
+  };
+
+  const formatObsLabel = (row: ScheduleRow) =>
+    `${row.postoGrad} ${row.re} ${row.nome}`.replace(/\s+/g, " ").trim();
+
+  const toggleObservationPanel = (panel: "semanal" | "alteracao", re: string) => {
+    const setter = panel === "semanal" ? setOpenWeeklyObs : setOpenAltObs;
+    setter((prev) => {
+      if (prev.includes(re)) {
+        return prev.filter((item) => item !== re);
+      }
+      return [...prev, re];
+    });
+    // Garante que o painel fique visível após abrir
+    setTimeout(() => {
+      const el = document.getElementById(`obs-panel-${panel}-${re}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 50);
+  };
+
+  const requestClearObservation = (panel: "semanal" | "alteracao", row: ScheduleRow) => {
+    setConfirmClearObs({
+      panel,
+      re: row.re,
+      label: formatObsLabel(row),
+    });
+  };
+
+  const confirmClearObservation = () => {
+    if (!confirmClearObs) return;
+    const { panel, re } = confirmClearObs;
+    handleCellChange(panel, re, "observacao", "");
+    if (panel === "semanal") {
+      setOpenWeeklyObs((prev) => prev.filter((item) => item !== re));
+    } else {
+      setOpenAltObs((prev) => prev.filter((item) => item !== re));
+    }
+    setConfirmClearObs(null);
+  };
+
+  const renderObservationButton = (
+    panel: "semanal" | "alteracao",
+    row: ScheduleRow,
+    editable: boolean
+  ) => {
+    const hasObs = Boolean(row.observacao?.trim());
+    const isOpen =
+      panel === "semanal" ? openWeeklyObs.includes(row.re) : openAltObs.includes(row.re);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleObservationPanel(panel, row.re)}
+        className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] sm:text-[11px] font-bold rounded-md border transition-all cursor-pointer ${
+          hasObs
+            ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-400"
+            : isOpen
+              ? "bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300"
+              : "bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200"
+        } ${!editable ? "opacity-80" : ""}`}
+        title={
+          hasObs
+            ? "Observação preenchida — clique para abrir/fechar"
+            : "Adicionar observação"
+        }
+      >
+        <MessageSquare size={12} />
+        <span className="hidden sm:inline">Obs.</span>
+      </button>
+    );
+  };
+
+  const renderObservationPanels = (
+    panel: "semanal" | "alteracao",
+    rows: ScheduleRow[],
+    openRes: string[],
+    editable: boolean
+  ) => {
+    const openRows = rows.filter((row) => openRes.includes(row.re));
+    if (openRows.length === 0) return null;
+
+    return (
+      <div className="px-4 py-4 sm:px-6 bg-white border-t border-gray-200 space-y-3">
+        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+          Observações por militar
+        </div>
+        {openRows.map((row) => (
+          <div
+            key={row.re}
+            id={`obs-panel-${panel}-${row.re}`}
+            className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-bold text-gray-900">
+                {formatObsLabel(row)}
+              </div>
+              <button
+                type="button"
+                onClick={() => editable && requestClearObservation(panel, row)}
+                disabled={!editable}
+                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Remover observação"
+              >
+                <Trash2 size={12} />
+                <span>Remover</span>
+              </button>
+            </div>
+            <textarea
+              value={row.observacao}
+              onChange={(e) => handleCellChange(panel, row.re, "observacao", e.target.value)}
+              disabled={!editable}
+              placeholder={`Observação de ${formatObsLabel(row)}...`}
+              rows={3}
+              className="w-full text-xs font-medium text-gray-800 border border-gray-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[72px] disabled:bg-gray-100 disabled:cursor-not-allowed"
+            />
+          </div>
+        ))}
+      </div>
+    );
   };
 
   // Copy a specific row from Escala Semanal to Escala de Alteração
@@ -947,19 +1062,10 @@ export default function ScheduleEditor({
       let savedVersao = 1;
 
       if (target === "semanal") {
-        const isWeeklyRowsDirty =
+        const contentDirty =
           JSON.stringify(localWeeklyRows) !== JSON.stringify(dbWeeklyRows);
-        const isWeeklyObsDirty = weeklyObservacoes !== dbWeeklyObservacoes;
-        const contentDirty = isWeeklyRowsDirty || isWeeklyObsDirty;
 
         collectDiffs(localWeeklyRows, dbWeeklyRows);
-        if (isWeeklyObsDirty) {
-          alteracoes.push({
-            campo: "Observações do Painel",
-            antes: dbWeeklyObservacoes || "",
-            depois: weeklyObservacoes || "",
-          });
-        }
 
         let nextStatus = normalizeEscalaStatus(weeklyStatus);
         const nextVersao = weeklyVersao > 0 ? weeklyVersao : 1;
@@ -999,7 +1105,7 @@ export default function ScheduleEditor({
             periodo: week.periodo,
             rows: localWeeklyRows.map(cleanScheduleRow),
             lastSaved: savedMetadata,
-            observacoes: weeklyObservacoes ?? "",
+            observacoes: "",
             status: nextStatus,
             versao: nextVersao,
             aprovacao: cleanAprovacao(nextAprovacao),
@@ -1011,7 +1117,6 @@ export default function ScheduleEditor({
         setLocalWeeklyRows(JSON.parse(JSON.stringify(localWeeklyRows)));
         setDbWeeklySaved(savedMetadata);
         setLoadedWeeklyTimestamp(timestamp);
-        setDbWeeklyObservacoes(weeklyObservacoes);
         setWeeklyStatus(nextStatus);
         setWeeklyVersao(nextVersao);
         setWeeklyAprovacao(nextAprovacao);
@@ -1019,19 +1124,10 @@ export default function ScheduleEditor({
         savedStatus = statusLabel(nextStatus);
         savedVersao = nextVersao;
       } else {
-        const isAltRowsDirty =
+        const contentDirty =
           JSON.stringify(localAlterationRows) !== JSON.stringify(dbAlterationRows);
-        const isAltObsDirty = alterationObservacoes !== dbAlterationObservacoes;
-        const contentDirty = isAltRowsDirty || isAltObsDirty;
 
         collectDiffs(localAlterationRows, dbAlterationRows);
-        if (isAltObsDirty) {
-          alteracoes.push({
-            campo: "Observações do Painel",
-            antes: dbAlterationObservacoes || "",
-            depois: alterationObservacoes || "",
-          });
-        }
 
         let nextStatus = normalizeEscalaStatus(altStatus);
         const nextVersao = altVersao > 0 ? altVersao : 1;
@@ -1071,7 +1167,7 @@ export default function ScheduleEditor({
             periodo: week.periodo,
             rows: localAlterationRows.map(cleanScheduleRow),
             lastSaved: savedMetadata,
-            observacoes: alterationObservacoes ?? "",
+            observacoes: "",
             status: nextStatus,
             versao: nextVersao,
             aprovacao: cleanAprovacao(nextAprovacao),
@@ -1083,7 +1179,6 @@ export default function ScheduleEditor({
         setLocalAlterationRows(JSON.parse(JSON.stringify(localAlterationRows)));
         setDbAlterationSaved(savedMetadata);
         setLoadedAlterationTimestamp(timestamp);
-        setDbAlterationObservacoes(alterationObservacoes);
         setAltStatus(nextStatus);
         setAltVersao(nextVersao);
         setAltAprovacao(nextAprovacao);
@@ -1906,7 +2001,7 @@ export default function ScheduleEditor({
                       <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
                       <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
                       <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
-                      <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
+                      <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Obs.</th>
                       <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                     </tr>
                   </thead>
@@ -1947,16 +2042,9 @@ export default function ScheduleEditor({
                             </td>
                           ))}
 
-                          {/* Observations Input */}
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <input
-                              type="text"
-                              value={row.observacao}
-                              placeholder="Observações..."
-                              onChange={(e) => handleCellChange("semanal", row.re, "observacao", e.target.value)}
-                              disabled={!isWeeklyEditable}
-                              className="w-full max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
-                            />
+                          {/* Observation Button */}
+                          <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-center">
+                            {renderObservationButton("semanal", row, isWeeklyEditable)}
                           </td>
 
                           {/* Actions Column */}
@@ -1978,20 +2066,7 @@ export default function ScheduleEditor({
                 </table>
               </div>
 
-              {/* Seção de Observações Independentes */}
-              <div className="px-4 py-4 sm:px-6 bg-gray-50 border-t border-gray-200">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                  Observações Gerais da Semana (Exclusivo Escala Semanal)
-                </label>
-                <textarea
-                  value={weeklyObservacoes}
-                  onChange={(e) => isWeeklyEditable && setWeeklyObservacoes(e.target.value)}
-                  disabled={!isWeeklyEditable}
-                  placeholder="Digite aqui as observações gerais para a Escala Semanal desta semana..."
-                  rows={4}
-                  className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
-                />
-              </div>
+              {renderObservationPanels("semanal", resolvedWeeklyRows, openWeeklyObs, isWeeklyEditable)}
             </section>
 
 
@@ -2039,7 +2114,7 @@ export default function ScheduleEditor({
                           <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
                           <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
                           <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
-                          <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Observação</th>
+                          <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Obs.</th>
                           <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                         </tr>
                       </thead>
@@ -2085,16 +2160,9 @@ export default function ScheduleEditor({
                                 </td>
                               ))}
 
-                              {/* Observations Input */}
-                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap">
-                                <input
-                                  type="text"
-                                  value={row.observacao}
-                                  placeholder="Observações..."
-                                  onChange={(e) => handleCellChange("alteracao", row.re, "observacao", e.target.value)}
-                                  disabled={!isAltEditable}
-                                  className="w-full max-w-[10rem] sm:max-w-xs border border-gray-200 rounded px-2 py-1 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium disabled:bg-gray-50 disabled:cursor-not-allowed"
-                                />
+                              {/* Observation Button */}
+                              <td className="px-2 sm:px-3 py-2 whitespace-nowrap text-center">
+                                {renderObservationButton("alteracao", row, isAltEditable)}
                               </td>
 
                               {/* Actions Column */}
@@ -2116,20 +2184,7 @@ export default function ScheduleEditor({
                     </table>
                   </div>
 
-                  {/* Seção de Observações Independentes */}
-                  <div className="px-4 py-4 sm:px-6 bg-gray-50 border-t border-gray-200">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                      Observações Gerais de Alterações (Exclusivo Escala Alteração)
-                    </label>
-                    <textarea
-                      value={alterationObservacoes}
-                      onChange={(e) => isAltEditable && setAlterationObservacoes(e.target.value)}
-                      disabled={!isAltEditable}
-                      placeholder="Digite aqui as observações gerais para a Escala de Alteração desta semana..."
-                      rows={4}
-                      className="w-full text-xs font-semibold text-gray-800 border border-gray-200 rounded-lg p-3 bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none shadow-3xs disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    />
-                  </div>
+                  {renderObservationPanels("alteracao", resolvedAlterationRows, openAltObs, isAltEditable)}
                 </>
               )}
             </section>
@@ -2139,6 +2194,52 @@ export default function ScheduleEditor({
       </main>
 
       {/* MODALS */}
+      {/* CLEAR OBSERVATION CONFIRMATION */}
+      {confirmClearObs && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Trash2 size={18} className="text-red-400" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Remover observação
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmClearObs(null)}
+                className="text-gray-400 hover:text-white cursor-pointer"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                A remoção apagará todos os dados da observação de{" "}
+                <span className="font-bold text-gray-900">{confirmClearObs.label}</span>.
+                Tem certeza disso?
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearObs(null)}
+                  className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmClearObservation}
+                  className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg cursor-pointer"
+                >
+                  Sim, apagar observação
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SUBMIT FOR APPROVAL CONFIRMATION */}
       {submitConfirmTipo && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -2557,8 +2658,8 @@ export default function ScheduleEditor({
                       dbAlterationSaved,
                       exportWeekly,
                       exportAlteration,
-                      weeklyObservacoes,
-                      alterationObservacoes,
+                      undefined,
+                      undefined,
                       legendasList,
                       { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad },
                       formatHomologacaoResumo(weeklyStatus, weeklyAprovacao, weeklyVersao),
@@ -2573,8 +2674,8 @@ export default function ScheduleEditor({
                       filteredAlteration,
                       exportWeekly,
                       exportAlteration,
-                      weeklyObservacoes,
-                      alterationObservacoes,
+                      undefined,
+                      undefined,
                       formatHomologacaoResumo(weeklyStatus, weeklyAprovacao, weeklyVersao),
                       formatHomologacaoResumo(altStatus, altAprovacao, altVersao)
                     );
