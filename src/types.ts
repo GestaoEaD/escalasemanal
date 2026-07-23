@@ -225,6 +225,7 @@ export type AuditOperacaoTipo =
   | "EXCLUIR_USUARIO"
   | "ABRIR_LINK_APROVACAO"
   | "LOAD_PREVIOUS_WEEK_DATA"
+  | "CLEAR_WEEKLY_SCHEDULE"
   | "OPERACAO_LEGADA";
 
 export type AuditDocumentoTipo = "SEMANAL" | "ALTERACAO" | "CONFIGURACAO" | "SISTEMA" | "AUTENTICACAO";
@@ -312,6 +313,7 @@ export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
   EXCLUIR_USUARIO: "Excluir Usuário",
   ABRIR_LINK_APROVACAO: "Abriu Link Aprovação",
   LOAD_PREVIOUS_WEEK_DATA: "Dados Semana Anterior",
+  CLEAR_WEEKLY_SCHEDULE: "Limpar Escala",
   OPERACAO_LEGADA: "Operação",
 };
 

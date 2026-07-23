@@ -107,6 +107,23 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
     geraLog: "Sim (LOAD_PREVIOUS_WEEK_DATA)",
   },
   {
+    tela: "Escala Semanal",
+    botao: "Limpar escala",
+    funcaoEsperada:
+      "Restaurar campos editáveis ao estado inicial em memória (mantém colaboradores; sem gravar)",
+    perfilPermitido: "Quem pode editar a Escala Semanal (bloqueado se aprovada)",
+    acaoFirestore: "Nenhuma até Salvar; não altera Escala Alteração nem outras semanas",
+    geraLog: "Sim (CLEAR_WEEKLY_SCHEDULE)",
+  },
+  {
+    tela: "Escala Alteração",
+    botao: "Limpar escala",
+    funcaoEsperada: "Não aplicável nesta etapa (sem botão)",
+    perfilPermitido: "—",
+    acaoFirestore: "Nenhuma",
+    geraLog: "Não",
+  },
+  {
     tela: "Escala Alteração",
     botao: "Dados da semana anterior",
     funcaoEsperada: "Não aplicável nesta etapa (sem botão)",

@@ -32,6 +32,11 @@ import {
   auditLoadPreviousWeek,
   fetchPreviousWeeklyScale,
 } from "../utils/previousWeekService";
+import {
+  auditClearWeeklySchedule,
+  clearWeeklySchedule,
+  getInitialWeeklyEditableFields,
+} from "../utils/clearWeeklySchedule";
 import { getPreviousWeekRef } from "../utils/dateUtils";
 import {
   canAccessConfig,
@@ -76,6 +81,7 @@ import {
   RotateCcw,
   XCircle,
   MessageSquare,
+  Eraser,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -217,6 +223,7 @@ export default function ScheduleEditor({
     rows: ScheduleRow[];
   } | null>(null);
   const [previousWeekInfo, setPreviousWeekInfo] = useState<string | null>(null);
+  const [clearWeeklyConfirmOpen, setClearWeeklyConfirmOpen] = useState(false);
 
   // UI Control states
   const [loading, setLoading] = useState(true);
@@ -445,19 +452,14 @@ export default function ScheduleEditor({
         }
       } else {
         // Create automatically in Firestore & set state based on all active collaborators
+        const initialDays = getInitialWeeklyEditableFields();
         const rows = activeCols.map((c) => ({
           re: c.re,
           postoGrad: c.postoGrad,
           nome: c.nome,
           secao: c.secao,
-          seg: "EN",
-          ter: "EN",
-          qua: "EN",
-          qui: "EN",
-          sex: "EN",
-          sab: "-",
-          dom: "-",
-          observacao: sanitizeWeeklyObservacao(c.observacao)
+          ...initialDays,
+          observacao: sanitizeWeeklyObservacao(c.observacao),
         }));
 
         const criacao = buildHistoricoEvento({
@@ -635,18 +637,13 @@ export default function ScheduleEditor({
     }
 
     // 2. Add row in local state
+    const initialDays = getInitialWeeklyEditableFields();
     const newRow: ScheduleRow = {
       re: col.re,
       postoGrad: col.postoGrad,
       nome: col.nome,
       secao: col.secao,
-      seg: "EN",
-      ter: "EN",
-      qua: "EN",
-      qui: "EN",
-      sex: "EN",
-      sab: "-",
-      dom: "-",
+      ...initialDays,
       observacao: activePanelForModal === "semanal"
         ? sanitizeWeeklyObservacao(col.observacao)
         : col.observacao || ""
@@ -849,6 +846,91 @@ export default function ScheduleEditor({
       previousWeek: pending.weekNumber,
       resultado: "carregado",
       detalhes: `${rows.length} colaborador(es) carregado(s) em memória`,
+    });
+  };
+
+  const handleRequestClearWeekly = () => {
+    if (!isWeeklyEditable) return;
+    const gate = clearWeeklySchedule({
+      usuario,
+      week,
+      status: weeklyStatus,
+      rows: localWeeklyRows,
+    });
+    if (!gate.ok) {
+      setPreviousWeekInfo(gate.message);
+      void auditClearWeeklySchedule({
+        usuario,
+        year,
+        weekNumber: week.numero,
+        resultado: "bloqueado",
+        detalhes: gate.message,
+      });
+      return;
+    }
+    setClearWeeklyConfirmOpen(true);
+  };
+
+  const handleCancelClearWeekly = async () => {
+    if (!clearWeeklyConfirmOpen) return;
+    setClearWeeklyConfirmOpen(false);
+    await auditClearWeeklySchedule({
+      usuario,
+      year,
+      weekNumber: week.numero,
+      resultado: "cancelado",
+    });
+  };
+
+  const handleConfirmClearWeekly = async () => {
+    let statusForClear = weeklyStatus;
+    try {
+      const weeklySnap = await getDoc(doc(db, "escalas_semanais", docId));
+      if (weeklySnap.exists()) {
+        const serverData = weeklySnap.data() as EscalaDocument;
+        const serverStatus = normalizeEscalaStatus(serverData.status);
+        statusForClear = serverStatus;
+        if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
+          setWeeklyStatus(serverStatus);
+          setWeeklyVersao(serverData.versao && serverData.versao > 0 ? serverData.versao : 1);
+          setWeeklyAprovacao(serverData.aprovacao || null);
+          setWeeklyHistorico(Array.isArray(serverData.historico) ? serverData.historico : []);
+        }
+      }
+    } catch (err) {
+      console.warn("[clearWeekly] falha ao verificar status no servidor:", err);
+    }
+
+    const result = clearWeeklySchedule({
+      usuario,
+      week,
+      status: statusForClear,
+      rows: localWeeklyRows,
+    });
+    if (!result.ok) {
+      setClearWeeklyConfirmOpen(false);
+      setPreviousWeekInfo(result.message);
+      await auditClearWeeklySchedule({
+        usuario,
+        year,
+        weekNumber: week.numero,
+        resultado: "bloqueado",
+        detalhes: result.message,
+      });
+      return;
+    }
+    setLocalWeeklyRows(result.rows);
+    setOpenWeeklyObs([]);
+    setClearWeeklyConfirmOpen(false);
+    setPreviousWeekInfo(
+      "Escala Semanal restaurada ao estado inicial em memória. Revise e clique em Salvar para persistir."
+    );
+    await auditClearWeeklySchedule({
+      usuario,
+      year,
+      weekNumber: week.numero,
+      resultado: "confirmado",
+      detalhes: `${result.rows.length} colaborador(es) mantidos; campos editáveis reiniciados`,
     });
   };
 
@@ -1912,6 +1994,28 @@ export default function ScheduleEditor({
             <span>{previousWeekBusy ? "Buscando..." : "Dados da semana anterior"}</span>
           </button>
         )}
+        {tipo === "semanal" && editable && (
+          <button
+            type="button"
+            onClick={() => handleRequestClearWeekly()}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-red-800 bg-red-50 hover:bg-red-100 rounded-md border border-red-300 cursor-pointer"
+            title="Limpar escala: restaurar campos editáveis ao estado inicial (sem gravar automaticamente)"
+          >
+            <Eraser size={14} />
+            <span>Limpar escala</span>
+          </button>
+        )}
+        {tipo === "semanal" && !editable && weeklyStatus === "aprovada" && (
+          <button
+            type="button"
+            disabled
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-red-400 bg-red-50/50 rounded-md border border-red-200 cursor-not-allowed opacity-60"
+            title="Esta escala está aprovada e não pode ser alterada."
+          >
+            <Eraser size={14} />
+            <span>Limpar escala</span>
+          </button>
+        )}
         {showSubmit && (
           <button
             type="button"
@@ -2391,6 +2495,55 @@ export default function ScheduleEditor({
                   className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg cursor-pointer"
                 >
                   Confirmar carregamento
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CLEAR WEEKLY SCHEDULE CONFIRMATION */}
+      {clearWeeklyConfirmOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Eraser size={18} className="text-red-400" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Limpar escala
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCancelClearWeekly()}
+                className="text-gray-400 hover:text-white cursor-pointer"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700 font-semibold">
+                Tem certeza de que deseja limpar toda a escala?
+              </p>
+              <p className="text-[11px] text-gray-500">
+                Todos os dados preenchidos nesta escala serão removidos e os campos retornarão ao
+                estado inicial. Os dados somente serão gravados após clicar em Salvar. Os
+                colaboradores permanecerão na escala. A Escala Alteração não será alterada.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCancelClearWeekly()}
+                  className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmClearWeekly()}
+                  className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg cursor-pointer"
+                >
+                  Limpar escala
                 </button>
               </div>
             </div>

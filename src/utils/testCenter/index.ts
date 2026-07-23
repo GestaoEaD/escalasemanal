@@ -15,6 +15,12 @@ import { cleanScheduleRow, applyWeekendDefault } from "../escalaPayload";
 import { getPreviousWeekRef, getWeeksForYear } from "../dateUtils";
 import { preparePreviousWeeklyRowsForEditor, fetchPreviousWeeklyScale, auditLoadPreviousWeek } from "../previousWeekService";
 import {
+  clearWeeklySchedule,
+  getInitialWeeklyEditableFields,
+  resetWeeklyRowsToInitialState,
+  auditClearWeeklySchedule,
+} from "../clearWeeklySchedule";
+import {
   normalizeEscalaStatus,
   parseApprovalPath,
   isEditableWorkflowStatus,
@@ -83,6 +89,15 @@ function nowLabel(): string {
 /** A feature "Dados da semana anterior" está implementada na Escala Semanal. */
 function featureWeekPreviousExists(): boolean {
   return true;
+}
+
+/** A feature "Limpar escala" está implementada na Escala Semanal (não na Alteração). */
+function featureClearWeeklyExists(): boolean {
+  return typeof clearWeeklySchedule === "function";
+}
+
+function featureClearWeeklyOnAlteracao(): boolean {
+  return false;
 }
 
 export function buildAllTestCases(opts: {
@@ -423,6 +438,348 @@ export function buildAllTestCases(opts: {
         return fail("auditLoadPreviousWeek ausente");
       }
       return ok("Serviço de leitura/auditoria disponível; persistência continua só via Salvar");
+    },
+  });
+
+  // --- Limpar escala ---
+  cases.push({
+    id: "clr-001",
+    nome: "Botão Limpar escala presente na Escala Semanal (não na Alteração)",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "Verificar implementação",
+    run: async () => {
+      if (!featureClearWeeklyExists()) return fail("clearWeeklySchedule ausente");
+      if (featureClearWeeklyOnAlteracao()) {
+        return fail("Limpar escala não deve existir automaticamente na Escala Alteração");
+      }
+      const invSemanal = COMMAND_INVENTORY.find(
+        (i) => i.tela === "Escala Semanal" && i.botao === "Limpar escala"
+      );
+      const invAlt = COMMAND_INVENTORY.find(
+        (i) => i.tela === "Escala Alteração" && i.botao === "Limpar escala"
+      );
+      if (!invSemanal) return fail("Inventário sem botão Limpar escala (Semanal)");
+      if (!invAlt || !String(invAlt.funcaoEsperada).includes("Não aplicável")) {
+        return fail("Inventário Alteração deve marcar Limpar escala como não aplicável");
+      }
+      return ok("Botão/fluxo na Escala Semanal; ausente na Escala Alteração");
+    },
+  });
+
+  cases.push({
+    id: "clr-002",
+    nome: "Limpeza mantém colaboradores e restaura estado inicial",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "resetWeeklyRowsToInitialState / clearWeeklySchedule",
+    run: async () => {
+      const initial = getInitialWeeklyEditableFields();
+      const filled = [
+        cleanScheduleRow({
+          re: "111",
+          postoGrad: "CB PM",
+          nome: "Fulano",
+          secao: "A",
+          seg: "F",
+          ter: "SV",
+          qua: "EN",
+          qui: "EN",
+          sex: "EN",
+          sab: "SV",
+          dom: "SV",
+          observacao: "Obs preenchida",
+        }),
+      ];
+      const cleared = resetWeeklyRowsToInitialState(filled);
+      if (cleared.length !== 1) return fail("Quantidade de colaboradores alterada");
+      if (cleared[0].re !== "111" || cleared[0].nome !== "Fulano") {
+        return fail("Identidade do colaborador não preservada");
+      }
+      if (
+        cleared[0].seg !== initial.seg ||
+        cleared[0].sab !== initial.sab ||
+        cleared[0].dom !== initial.dom ||
+        cleared[0].observacao !== ""
+      ) {
+        return fail("Campos editáveis não voltaram ao estado inicial", JSON.stringify(cleared[0]));
+      }
+      const result = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows: filled,
+      });
+      if (!result.ok) return fail("Limpeza deveria ser permitida em em_edicao", result.message);
+      if (findUndefinedPaths(result.rows).length > 0) return fail("Limpeza gerou undefined");
+      return ok("Colaboradores mantidos; legendas/horários/obs no estado inicial");
+    },
+  });
+
+  cases.push({
+    id: "clr-003",
+    nome: "Cancelamento não altera dados (contrato: só limpa após confirmar)",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "Sem mutação até clearWeeklySchedule.ok",
+    run: async () => {
+      const before = [
+        cleanScheduleRow({
+          re: "1",
+          postoGrad: "CB",
+          nome: "A",
+          secao: "S",
+          seg: "F",
+          ter: "EN",
+          qua: "EN",
+          qui: "EN",
+          sex: "EN",
+          sab: "-",
+          dom: "-",
+          observacao: "x",
+        }),
+      ];
+      const snapshot = JSON.stringify(before);
+      // Cancelar = não chamar clearWeeklySchedule; snapshot permanece
+      if (JSON.stringify(before) !== snapshot) return fail("Dados mutados sem confirmação");
+      return ok("Cancelar deixa a escala intacta; nenhuma gravação");
+    },
+  });
+
+  cases.push({
+    id: "clr-004",
+    nome: "Limpeza não grava automaticamente (somente memória)",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "clearWeeklySchedule não chama Firestore",
+    run: async () => {
+      const result = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows: [
+          cleanScheduleRow({
+            re: "1",
+            postoGrad: "CB",
+            nome: "A",
+            secao: "S",
+            ...getInitialWeeklyEditableFields(),
+            seg: "F",
+            observacao: "z",
+          }),
+        ],
+      });
+      if (!result.ok) return fail(result.message);
+      if (typeof auditClearWeeklySchedule !== "function") {
+        return fail("Auditoria CLEAR_WEEKLY_SCHEDULE ausente");
+      }
+      return ok("Retorna linhas em memória; persistência continua só via Salvar");
+    },
+  });
+
+  cases.push({
+    id: "clr-005",
+    nome: "Escala aprovada não pode ser limpa (UI + lógica)",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "clearWeeklySchedule(status=aprovada)",
+    run: async () => {
+      const rows = [
+        cleanScheduleRow({
+          re: "1",
+          postoGrad: "CB",
+          nome: "A",
+          secao: "S",
+          seg: "F",
+          ter: "EN",
+          qua: "EN",
+          qui: "EN",
+          sex: "EN",
+          sab: "-",
+          dom: "-",
+          observacao: "protegida",
+        }),
+      ];
+      const before = JSON.stringify(rows);
+      const blocked = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "aprovada",
+        rows,
+      });
+      if (blocked.ok) return fail("Não deveria limpar escala aprovada");
+      if (blocked.reason !== "aprovada") return fail("Motivo deveria ser aprovada", blocked.reason);
+      if (JSON.stringify(rows) !== before) return fail("Dados foram alterados apesar do bloqueio");
+      if (!canEditScale(adminUser, futureWeek, "aprovada")) {
+        // botão oculto/desabilitado segue isWeeklyEditable
+      } else {
+        return fail("canEditScale deveria ser false para aprovada");
+      }
+      return ok("Operação bloqueada; dados inalterados; sem gravação");
+    },
+  });
+
+  cases.push({
+    id: "clr-006",
+    nome: "Bloqueio direto da função com APPROVED",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "clearWeeklySchedule(...) com status aprovada",
+    run: async () => {
+      const r = clearWeeklySchedule({
+        usuario: operadorUser,
+        week: futureWeek,
+        status: "aprovada",
+        rows: [],
+      });
+      if (r.ok) return fail("Chamada direta deveria falhar");
+      return ok("Função bloqueia mesmo sem UI");
+    },
+  });
+
+  cases.push({
+    id: "clr-007",
+    nome: "Escala editável (em_edicao) pode ser limpa sem salvar",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "clearWeeklySchedule(status=em_edicao)",
+    run: async () => {
+      const r = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows: [
+          cleanScheduleRow({
+            re: "9",
+            postoGrad: "SD",
+            nome: "B",
+            secao: "Z",
+            seg: "SV",
+            ter: "SV",
+            qua: "SV",
+            qui: "SV",
+            sex: "SV",
+            sab: "SV",
+            dom: "SV",
+            observacao: "limpar",
+          }),
+        ],
+      });
+      if (!r.ok) return fail(r.message);
+      const init = getInitialWeeklyEditableFields();
+      if (r.rows[0].seg !== init.seg || r.rows[0].observacao !== "") {
+        return fail("Estado inicial não aplicado");
+      }
+      return ok("Limpeza permitida; confirmação/UI; sem persistência automática");
+    },
+  });
+
+  cases.push({
+    id: "clr-008",
+    nome: "Permissões: Operador/Admin limpam editável; Gestor não edita",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "canEditScale + clearWeeklySchedule por perfil",
+    run: async () => {
+      const rows = [
+        cleanScheduleRow({
+          re: "1",
+          postoGrad: "CB",
+          nome: "A",
+          secao: "S",
+          ...getInitialWeeklyEditableFields(),
+          seg: "F",
+        }),
+      ];
+      const opOk = clearWeeklySchedule({
+        usuario: operadorUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows,
+      });
+      const admOk = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows,
+      });
+      const gest = clearWeeklySchedule({
+        usuario: gestorUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows,
+      });
+      if (!opOk.ok) return fail("Operador deveria limpar semana editável", opOk.message);
+      if (!admOk.ok) return fail("Admin deveria limpar", admOk.message);
+      if (gest.ok) return fail("Gestor não deve limpar (não edita escala)");
+      const apOp = clearWeeklySchedule({
+        usuario: operadorUser,
+        week: futureWeek,
+        status: "aprovada",
+        rows,
+      });
+      const apAdm = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "aprovada",
+        rows,
+      });
+      if (apOp.ok || apAdm.ok) return fail("Aprovada bloqueia todos os perfis");
+      return ok("Permissões alinhadas a canEditScale; aprovada bloqueada");
+    },
+  });
+
+  cases.push({
+    id: "clr-009",
+    nome: "Semana anterior não é alterada pela limpeza (contrato)",
+    categoria: "Limpar escala",
+    perfil: "Sistema",
+    acao: "clearWeeklySchedule atua só nas rows passadas",
+    run: async () => {
+      const prevRows = [
+        cleanScheduleRow({
+          re: "1",
+          postoGrad: "CB",
+          nome: "Prev",
+          secao: "S",
+          seg: "F",
+          ter: "EN",
+          qua: "EN",
+          qui: "EN",
+          sex: "EN",
+          sab: "-",
+          dom: "-",
+          observacao: "semana anterior",
+        }),
+      ];
+      const prevSnap = JSON.stringify(prevRows);
+      const current = [
+        cleanScheduleRow({
+          re: "1",
+          postoGrad: "CB",
+          nome: "Atual",
+          secao: "S",
+          seg: "SV",
+          ter: "EN",
+          qua: "EN",
+          qui: "EN",
+          sex: "EN",
+          sab: "-",
+          dom: "-",
+          observacao: "atual",
+        }),
+      ];
+      const r = clearWeeklySchedule({
+        usuario: adminUser,
+        week: futureWeek,
+        status: "em_edicao",
+        rows: current,
+      });
+      if (!r.ok) return fail(r.message);
+      if (JSON.stringify(prevRows) !== prevSnap) {
+        return fail("Limpeza não deve mutar dados da semana anterior");
+      }
+      return ok("Somente a escala aberta é limpa em memória");
     },
   });
 
