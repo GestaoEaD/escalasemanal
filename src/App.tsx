@@ -26,6 +26,7 @@ import Configuracoes from "./components/Configuracoes";
 import AprovacaoPage from "./components/AprovacaoPage";
 import FrequenciaApp from "./components/frequencia/FrequenciaApp";
 import PendenciasAprovacaoPage from "./components/PendenciasAprovacaoPage";
+import AppShell from "./components/AppShell";
 
 const APPROVAL_RETURN_KEY = "aprovacao_return_view";
 
@@ -215,66 +216,64 @@ export default function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  let page: React.ReactNode = null;
+
   if (route.view === "aprovacao") {
     const token = route.mode === "token" ? route.token : null;
     const escalaId = route.mode === "legacy" ? route.escalaId : null;
     const tipo = route.mode === "legacy" ? route.tipo : "semanal";
     if (!token && !escalaId) {
-      return <SessionLoadingScreen />;
+      page = <SessionLoadingScreen />;
+    } else {
+      page = (
+        <AprovacaoPage
+          token={token}
+          escalaId={escalaId}
+          tipo={tipo}
+          usuario={usuario}
+          onBack={handleApprovalBack}
+          onLogout={handleLogout}
+        />
+      );
     }
-    return (
-      <AprovacaoPage
-        token={token}
-        escalaId={escalaId}
-        tipo={tipo}
-        usuario={usuario}
-        onBack={handleApprovalBack}
-        onLogout={handleLogout}
-      />
-    );
-  }
-
-  if (route.view === "pendencias") {
+  } else if (route.view === "pendencias") {
     if (!canApproveScales(usuario)) {
-      return <SessionLoadingScreen />;
+      page = <SessionLoadingScreen />;
+    } else {
+      page = (
+        <PendenciasAprovacaoPage
+          usuario={usuario}
+          onBack={goHome}
+          onOpenApproval={(tok, tipo) => {
+            void openApproval(tok, tipo || "semanal", "pendencias");
+          }}
+        />
+      );
     }
-    return (
-      <PendenciasAprovacaoPage
-        usuario={usuario}
-        onBack={goHome}
-        onOpenApproval={(tok, tipo) => {
-          void openApproval(tok, tipo || "semanal", "pendencias");
-        }}
-      />
-    );
-  }
-
-  if (route.view === "editor") {
+  } else if (route.view === "editor") {
     if (!selectedWeek) {
-      return <SessionLoadingScreen />;
+      page = <SessionLoadingScreen />;
+    } else {
+      page = (
+        <ScheduleEditor
+          usuario={usuario}
+          year={selectedYear}
+          week={selectedWeek}
+          onBack={goHome}
+          onLogout={handleLogout}
+          onOpenConfig={() => navigate({ view: "config" })}
+          onOpenApproval={openApproval}
+        />
+      );
     }
-    return (
-      <ScheduleEditor
-        usuario={usuario}
-        year={selectedYear}
-        week={selectedWeek}
-        onBack={goHome}
-        onLogout={handleLogout}
-        onOpenConfig={() => navigate({ view: "config" })}
-        onOpenApproval={openApproval}
-      />
-    );
-  }
-
-  if (route.view === "config") {
+  } else if (route.view === "config") {
     if (!canAccessConfig(usuario)) {
-      return <SessionLoadingScreen />;
+      page = <SessionLoadingScreen />;
+    } else {
+      page = <Configuracoes usuario={usuario} onBack={goHome} />;
     }
-    return <Configuracoes usuario={usuario} onBack={goHome} />;
-  }
-
-  if (route.view === "frequencia") {
-    return (
+  } else if (route.view === "frequencia") {
+    page = (
       <FrequenciaApp
         usuario={usuario}
         year={route.year}
@@ -292,21 +291,34 @@ export default function App() {
         }}
       />
     );
+  } else {
+    page = (
+      <WeekSelector
+        usuario={usuario}
+        initialYear={selectedYear}
+        onSelectWeek={handleSelectWeek}
+        onLogout={handleLogout}
+        onOpenConfig={() => navigate({ view: "config" })}
+        onOpenApproval={openApproval}
+        onOpenPendencias={() => navigate({ view: "pendencias" })}
+        onOpenFrequencia={(year) => {
+          setSelectedYear(year);
+          navigate({ view: "frequencia", year });
+        }}
+      />
+    );
   }
 
   return (
-    <WeekSelector
+    <AppShell
       usuario={usuario}
-      initialYear={selectedYear}
-      onSelectWeek={handleSelectWeek}
+      onHome={goHome}
       onLogout={handleLogout}
       onOpenConfig={() => navigate({ view: "config" })}
-      onOpenApproval={openApproval}
       onOpenPendencias={() => navigate({ view: "pendencias" })}
-      onOpenFrequencia={(year) => {
-        setSelectedYear(year);
-        navigate({ view: "frequencia", year });
-      }}
-    />
+      hidePendenciasBtn={route.view === "pendencias"}
+    >
+      {page}
+    </AppShell>
   );
 }

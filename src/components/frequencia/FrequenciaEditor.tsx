@@ -423,8 +423,8 @@ export default function FrequenciaEditor({
       : "bg-white group-hover:bg-slate-50/80 print:group-hover:bg-white";
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16 frequencia-print-root">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-xs print:static print:shadow-none">
+    <div className="flex-1 bg-gray-50 pb-16 frequencia-print-root">
+      <header className="bg-white border-b border-gray-200 sticky top-14 z-20 shadow-xs print:static print:shadow-none">
         <div className="max-w-[1600px] mx-auto px-3 sm:px-4 h-auto py-2 flex flex-wrap items-center gap-2">
           <button
             type="button"

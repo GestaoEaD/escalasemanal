@@ -39,7 +39,6 @@ import {
 } from "../utils/clearWeeklySchedule";
 import { getPreviousWeekRef } from "../utils/dateUtils";
 import {
-  canAccessConfig,
   canCancelApprovalRequest,
   canEditScale,
   canReopenApprovedScale,
@@ -71,7 +70,6 @@ import {
   AlertCircle, 
   CheckCircle,
   HelpCircle,
-  Settings,
   Copy,
   Check,
   Send,
@@ -146,8 +144,8 @@ export default function ScheduleEditor({
   year,
   week,
   onBack,
-  onLogout,
-  onOpenConfig,
+  onLogout: _onLogout,
+  onOpenConfig: _onOpenConfig,
   onOpenApproval,
 }: ScheduleEditorProps) {
   // Document IDs in Firestore
@@ -2086,9 +2084,9 @@ export default function ScheduleEditor({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
+    <div className="flex-1 bg-gray-50 pb-16">
       {/* Top bar header */}
-      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-0 z-20 shadow-md no-print">
+      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-14 z-20 shadow-md no-print">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
             
@@ -2145,41 +2143,6 @@ export default function ScheduleEditor({
               >
                 <Download size={14} />
                 <span className="hidden xs:inline sm:inline">Exportar</span>
-              </button>
-
-              {canAccessConfig(usuario) && onOpenConfig && (
-                <button
-                  id="config-editor-btn"
-                  onClick={() => {
-                    if (isDirty) {
-                      if (confirm("Você possui alterações não salvas neste editor de escalas. Deseja realmente sair para as configurações administrativas?")) {
-                        onOpenConfig();
-                      }
-                    } else {
-                      onOpenConfig();
-                    }
-                  }}
-                  className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-blue-400 bg-gray-800 hover:bg-gray-750 hover:text-blue-300 rounded-md border border-gray-750 transition-colors cursor-pointer"
-                >
-                  <Settings size={14} />
-                  <span className="hidden md:inline">Configurações</span>
-                </button>
-              )}
-
-              <button
-                id="sair-btn"
-                onClick={() => {
-                  if (isDirty) {
-                    if (confirm("Você possui alterações não salvas. Deseja realmente sair do sistema? Suas alterações serão perdidas.")) {
-                      onLogout();
-                    }
-                  } else {
-                    onLogout();
-                  }
-                }}
-                className="inline-flex items-center px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-400 hover:text-red-300 bg-red-950/45 hover:bg-red-950 rounded-md transition-colors border border-red-900/50 cursor-pointer"
-              >
-                Sair
               </button>
             </div>
           </div>

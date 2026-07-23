@@ -1160,9 +1160,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-16">
+    <div className="flex-1 bg-gray-50 pb-16">
       {/* Top Header */}
-      <header className="bg-slate-900 text-white sticky top-0 z-10 shadow-md">
+      <header className="bg-slate-900 text-white sticky top-14 z-10 shadow-md">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
             <div className="flex items-center space-x-3 min-w-0">

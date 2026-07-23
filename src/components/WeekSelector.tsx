@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
 import { EscalaStatus, TipoEscalaDocumento, Usuario } from "../types";
 import { db, collection, getDocs, query, where } from "../firebase";
-import { canAccessConfig, canApproveScales, isGestor } from "../utils/permissions";
+import { canApproveScales, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
 import {
   dismissPendenciasAviso,
@@ -17,13 +17,9 @@ import {
   resolveWeekCardTone,
 } from "../utils/cardBorderTone";
 import {
-  Calendar,
-  LogOut,
   ChevronRight,
-  Settings,
   Link2,
   ClipboardList,
-  Bell,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -181,7 +177,7 @@ export default function WeekSelector({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-12">
+    <div className="bg-gray-50 pb-8 flex-1">
       {showAviso && canApprove && (
         <PendenciasAprovacaoAviso
           summary={pendingSummary}
@@ -190,78 +186,7 @@ export default function WeekSelector({
         />
       )}
 
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-xs">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-          <div className="flex justify-between gap-2 min-h-16 py-2 sm:py-0 sm:h-16 items-center">
-            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
-              <div className="bg-blue-600 p-2 rounded-lg text-white shrink-0">
-                <Calendar size={22} />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-lg font-bold text-gray-900 tracking-tight leading-none truncate">
-                  Sistema de Escala de Serviço
-                </h1>
-                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">
-                  Divisão de Educação a Distância
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 sm:space-x-4 shrink-0">
-              <div className="hidden md:block text-right">
-                <div className="text-sm font-semibold text-gray-800">
-                  {usuario.postoGrad} {usuario.nome}
-                </div>
-                <div className="text-xs text-gray-500">
-                  R.E. {usuario.re} · {usuario.perfil || "Operador"} · {usuario.secao}
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                {canApprove && onOpenPendencias && (
-                  <button
-                    id="aprovacoes-pendentes-btn"
-                    type="button"
-                    onClick={onOpenPendencias}
-                    className="relative inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors cursor-pointer border border-amber-200"
-                    title="Aprovações pendentes"
-                  >
-                    <Bell size={14} />
-                    <span className="hidden sm:inline">Aprovações</span>
-                    {pendingSummary.total > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-amber-600 text-white text-[10px] font-bold tabular-nums">
-                        {pendingSummary.total}
-                      </span>
-                    )}
-                  </button>
-                )}
-
-                {canAccessConfig(usuario) && onOpenConfig && (
-                  <button
-                    id="config-btn"
-                    onClick={onOpenConfig}
-                    className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer border border-blue-100"
-                  >
-                    <Settings size={14} />
-                    <span className="hidden sm:inline">Configurações</span>
-                  </button>
-                )}
-
-                <button
-                  id="logout-btn"
-                  onClick={onLogout}
-                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
-                >
-                  <LogOut size={14} />
-                  <span className="hidden sm:inline">Sair</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 sm:mt-8">
         <div className="md:flex md:items-center md:justify-between mb-6">
           <div className="flex-1 min-w-0">
             <h2 className="text-xl font-bold leading-7 text-gray-900 sm:text-2xl sm:truncate">
