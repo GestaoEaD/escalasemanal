@@ -1,39 +1,104 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
 import { EscalaStatus, TipoEscalaDocumento, Usuario } from "../types";
 import { db, collection, getDocs, query, where } from "../firebase";
-import { canAccessConfig, isGestor } from "../utils/permissions";
+import { canAccessConfig, canApproveScales, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
+import {
+  dismissPendenciasAviso,
+  loadPendingApprovalsForGestor,
+  PendingApprovalsSummary,
+  wasPendenciasAvisoDismissed,
+} from "../utils/pendingApprovalsService";
 import StatusBadge from "./StatusBadge";
-import { Calendar, LogOut, ChevronRight, Settings, Link2, ClipboardList } from "lucide-react";
+import PendenciasAprovacaoAviso from "./PendenciasAprovacaoAviso";
+import {
+  cardBorderStyle,
+  resolveWeekCardTone,
+} from "../utils/cardBorderTone";
+import {
+  Calendar,
+  LogOut,
+  ChevronRight,
+  Settings,
+  Link2,
+  ClipboardList,
+  Bell,
+} from "lucide-react";
 import { motion } from "motion/react";
 
 interface WeekSelectorProps {
   usuario: Usuario;
+  /** Ano inicial (ex.: restaurado da URL / navegação). */
+  initialYear?: number;
   onSelectWeek: (year: number, week: WeekInfo) => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
   onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
   onOpenFrequencia?: (year: number) => void;
+  onOpenPendencias?: () => void;
 }
+
+const EMPTY_SUMMARY: PendingApprovalsSummary = {
+  total: 0,
+  byTipo: { semanal: 0, alteracao: 0, frequencia: 0 },
+  items: [],
+};
 
 export default function WeekSelector({
   usuario,
+  initialYear = 2026,
   onSelectWeek,
   onLogout,
   onOpenConfig,
   onOpenApproval,
   onOpenFrequencia,
+  onOpenPendencias,
 }: WeekSelectorProps) {
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedYear, setSelectedYear] = useState<number>(initialYear);
   const [weeklyStatusByWeek, setWeeklyStatusByWeek] = useState<Record<string, EscalaStatus>>({});
   const [altStatusByWeek, setAltStatusByWeek] = useState<Record<string, EscalaStatus>>({});
+  const [pendingSummary, setPendingSummary] =
+    useState<PendingApprovalsSummary>(EMPTY_SUMMARY);
+  const [showAviso, setShowAviso] = useState(false);
 
   const today = useMemo(() => new Date(), []);
+  const canApprove = canApproveScales(usuario);
 
   const weeks = useMemo(() => {
     return getWeeksForYear(selectedYear);
   }, [selectedYear]);
+
+  const refreshPendencias = useCallback(async () => {
+    if (!canApprove) {
+      setPendingSummary(EMPTY_SUMMARY);
+      setShowAviso(false);
+      return;
+    }
+    try {
+      const summary = await loadPendingApprovalsForGestor(usuario);
+      setPendingSummary(summary);
+      if (summary.total > 0 && !wasPendenciasAvisoDismissed()) {
+        setShowAviso(true);
+      }
+    } catch (err) {
+      console.error("Falha ao carregar pendências de aprovação:", err);
+    }
+  }, [canApprove, usuario]);
+
+  useEffect(() => {
+    void refreshPendencias();
+  }, [refreshPendencias]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshPendencias();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refreshPendencias]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,8 +169,27 @@ export default function WeekSelector({
     return "future";
   };
 
+  const handleAgoraNao = () => {
+    dismissPendenciasAviso();
+    setShowAviso(false);
+  };
+
+  const handleVerPendencias = () => {
+    dismissPendenciasAviso();
+    setShowAviso(false);
+    onOpenPendencias?.();
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
+      {showAviso && canApprove && (
+        <PendenciasAprovacaoAviso
+          summary={pendingSummary}
+          onVerPendencias={handleVerPendencias}
+          onAgoraNao={handleAgoraNao}
+        />
+      )}
+
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
           <div className="flex justify-between gap-2 min-h-16 py-2 sm:py-0 sm:h-16 items-center">
@@ -117,7 +201,9 @@ export default function WeekSelector({
                 <h1 className="text-sm sm:text-lg font-bold text-gray-900 tracking-tight leading-none truncate">
                   Sistema de Escala de Serviço
                 </h1>
-                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">Escalas Semanais Digitais</p>
+                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">
+                  Divisão de Educação a Distância
+                </p>
               </div>
             </div>
 
@@ -132,6 +218,24 @@ export default function WeekSelector({
               </div>
 
               <div className="flex items-center space-x-2">
+                {canApprove && onOpenPendencias && (
+                  <button
+                    id="aprovacoes-pendentes-btn"
+                    type="button"
+                    onClick={onOpenPendencias}
+                    className="relative inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors cursor-pointer border border-amber-200"
+                    title="Aprovações pendentes"
+                  >
+                    <Bell size={14} />
+                    <span className="hidden sm:inline">Aprovações</span>
+                    {pendingSummary.total > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-amber-600 text-white text-[10px] font-bold tabular-nums">
+                        {pendingSummary.total}
+                      </span>
+                    )}
+                  </button>
+                )}
+
                 {canAccessConfig(usuario) && onOpenConfig && (
                   <button
                     id="config-btn"
@@ -204,25 +308,37 @@ export default function WeekSelector({
             const altStatus = altStatusByWeek[week.id] || "em_edicao";
             const hasPending =
               weeklyStatus === "aguardando_aprovacao" || altStatus === "aguardando_aprovacao";
+            const borderTone = resolveWeekCardTone({
+              weeklyStatus,
+              altStatus,
+              temporal: state,
+            });
 
-            let btnClass = "";
             let titleClass = "";
             let periodClass = "";
             let chevronColor = "";
             let badge = null;
 
-            if (state === "current") {
-              btnClass = "border-blue-600 bg-blue-50/70 shadow-md ring-2 ring-blue-500/20 hover:bg-blue-100/50";
+            if (borderTone === "atual" || state === "current") {
               titleClass = "text-blue-900 font-extrabold";
               periodClass = "text-blue-700 font-bold";
               chevronColor = "text-blue-600";
-              badge = (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white uppercase tracking-tight">
-                  Semana Atual
-                </span>
-              );
+              if (state === "current") {
+                badge = (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white uppercase tracking-tight">
+                    Semana Atual
+                  </span>
+                );
+              }
+            } else if (borderTone === "aprovada") {
+              titleClass = "text-emerald-900 font-bold";
+              periodClass = "text-emerald-700 font-semibold";
+              chevronColor = "text-emerald-600";
+            } else if (borderTone === "aguardando") {
+              titleClass = "text-amber-950 font-bold";
+              periodClass = "text-amber-800 font-semibold";
+              chevronColor = "text-amber-700";
             } else if (state === "past") {
-              btnClass = "border-gray-200 bg-gray-100/60 opacity-85 hover:bg-gray-200/40 hover:opacity-100";
               titleClass = "text-gray-500 font-bold";
               periodClass = "text-gray-400 font-medium";
               chevronColor = "text-gray-400";
@@ -232,9 +348,8 @@ export default function WeekSelector({
                 </span>
               );
             } else {
-              btnClass = "border-gray-200 bg-white hover:border-blue-400 hover:shadow-xs";
-              titleClass = "text-gray-900 font-bold";
-              periodClass = "text-gray-600 font-semibold";
+              titleClass = "text-gray-700 font-bold";
+              periodClass = "text-gray-500 font-semibold";
               chevronColor = "text-gray-400";
             }
 
@@ -242,7 +357,8 @@ export default function WeekSelector({
               <motion.div
                 key={week.id}
                 whileHover={{ scale: 1.015, translateY: -2 }}
-                className={`text-left p-4 rounded-lg border flex flex-col justify-between min-h-28 transition-all ${btnClass}`}
+                style={cardBorderStyle(borderTone)}
+                className="text-left p-4 rounded-lg flex flex-col justify-between min-h-28 transition-all shadow-sm hover:shadow-md"
               >
                 <button
                   id={`week-btn-${week.id}`}
@@ -270,7 +386,7 @@ export default function WeekSelector({
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-center w-full mt-2 border-t border-gray-100/50 pt-2">
+                  <div className="flex justify-between items-center w-full mt-2 border-t border-black/5 pt-2">
                     <span className={`text-xs ${periodClass}`}>{week.periodo}</span>
                     <ChevronRight size={16} className={chevronColor} />
                   </div>

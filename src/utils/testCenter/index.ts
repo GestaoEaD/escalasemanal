@@ -35,6 +35,7 @@ import {
 import {
   buildLegendaLookup,
   convertEscalaValorToFrequencia,
+  getValorAfastamentoControleFrequencia,
 } from "../frequenciaCalculo";
 import { displayFrequenciaCelula, isWeekendDay } from "../frequenciaDisplay";
 import { getWeeksOverlappingMonth } from "../frequenciaSync";
@@ -44,6 +45,13 @@ import {
   isEditableWorkflowStatus,
   findUsuarioByRe,
 } from "../approvalService";
+import {
+  clearPendenciasAvisoDismiss,
+  dismissPendenciasAviso,
+  loadPendingApprovalsForGestor,
+  wasPendenciasAvisoDismissed,
+} from "../pendingApprovalsService";
+import { buildAppPath, parseAppPath } from "../appNavigation";
 import { exportToExcelCustom, exportToPDFCustom } from "../exportUtils";
 import { registerAuditOperation, loadAuditOperations } from "../auditService";
 import { db, doc, getDoc, setDoc, deleteDoc } from "../../firebase";
@@ -956,6 +964,72 @@ export function buildAllTestCases(opts: {
     },
   });
 
+  cases.push({
+    id: "apr-004",
+    nome: "Pendências: Operador/Admin não consultam; Gestor pode",
+    categoria: "Aprovação",
+    perfil: "Todos",
+    acao: "loadPendingApprovalsForGestor + canApproveScales",
+    run: async () => {
+      const emptyOp = await loadPendingApprovalsForGestor(operadorUser);
+      const emptyAdm = await loadPendingApprovalsForGestor(adminUser);
+      if (emptyOp.total !== 0 || emptyAdm.total !== 0) {
+        return fail("Não-gestor não deveria receber pendências");
+      }
+      if (canApproveScales(operadorUser) || canApproveScales(adminUser)) {
+        return fail("Só Gestor aprova");
+      }
+      if (!canApproveScales(gestorUser)) return fail("Gestor deveria aprovar");
+      const gest = await loadPendingApprovalsForGestor(gestorUser);
+      if (gest.total < 0 || !gest.byTipo) {
+        return fail("Resumo inválido para Gestor");
+      }
+      const expected =
+        (gest.byTipo.semanal || 0) +
+        (gest.byTipo.alteracao || 0) +
+        (gest.byTipo.frequencia || 0);
+      if (expected !== gest.total) {
+        return fail("Soma por tipo divergiu do total", `${expected} vs ${gest.total}`);
+      }
+      return ok(`Gestor: ${gest.total} pendência(s) aprováveis`);
+    },
+  });
+
+  cases.push({
+    id: "apr-005",
+    nome: "Aviso de pendências: dismiss só na sessão",
+    categoria: "Aprovação",
+    perfil: "Sistema",
+    acao: "dismissPendenciasAviso / wasPendenciasAvisoDismissed",
+    run: async () => {
+      clearPendenciasAvisoDismiss();
+      if (wasPendenciasAvisoDismissed()) return fail("Deveria iniciar sem dismiss");
+      dismissPendenciasAviso();
+      if (!wasPendenciasAvisoDismissed()) return fail("Dismiss não persistiu na sessão");
+      clearPendenciasAvisoDismiss();
+      if (wasPendenciasAvisoDismissed()) return fail("Clear não removeu dismiss");
+      return ok("Dismiss de aviso isolado na sessão (não altera solicitação)");
+    },
+  });
+
+  cases.push({
+    id: "nav-pend-001",
+    nome: "Rota /aprovacoes mapeia lista de pendências",
+    categoria: "Navegação",
+    perfil: "Sistema",
+    acao: "parseAppPath / buildAppPath",
+    run: async () => {
+      const r = parseAppPath("/aprovacoes");
+      if (r.view !== "pendencias") {
+        return fail("parseAppPath(/aprovacoes) deveria ser pendencias", JSON.stringify(r));
+      }
+      if (buildAppPath({ view: "pendencias" }) !== "/aprovacoes") {
+        return fail("buildAppPath(pendencias) incorreto");
+      }
+      return ok("Rota /aprovacoes ↔ view pendencias");
+    },
+  });
+
   // --- Logs / Export ---
   cases.push({
     id: "log-001",
@@ -1102,13 +1176,24 @@ export function buildAllTestCases(opts: {
       if (convertEscalaValorToFrequencia("EN", lookup) !== "1") {
         return fail("EN deveria virar 1");
       }
-      if (convertEscalaValorToFrequencia("LP", lookup) !== "LP") {
-        return fail("Sigla sem consolidada deve permanecer");
+      if (convertEscalaValorToFrequencia("LP", lookup) !== "") {
+        return fail("Sem consolidada não deve exibir sigla original");
+      }
+      const afast = normalizeLegenda({
+        sigla: "A",
+        descricao: "Afastamento",
+        cor: "cinza",
+        ativo: true,
+        ordem: 5,
+        representacoes: { escalaConsolidada: "A" },
+      });
+      if (getValorAfastamentoControleFrequencia([afast]) !== "A") {
+        return fail("Afastamento deve usar escalaConsolidada da legenda A");
       }
       if (getWeeksOverlappingMonth(2026, 1).length < 1) {
         return fail("Deveria haver semanas intersectando janeiro/2026");
       }
-      return ok("IDs, conversão e semanas overlapping OK");
+      return ok("IDs, conversão consolidada e afastamento OK");
     },
   });
 

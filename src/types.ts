@@ -151,7 +151,7 @@ export interface EscalaDocument {
 
 export const TIPO_ESCALA_LABELS: Record<TipoEscalaDocumento, string> = {
   semanal: "Escala Semanal",
-  alteracao: "Escala Alteração",
+  alteracao: "Escala de Alteração",
   frequencia: "Controle de Frequência",
 };
 
@@ -457,6 +457,7 @@ export type FrequenciaCelulaOrigem =
   | "escala_alteracao"
   | "escala_semanal"
   | "edicao_manual"
+  | "padrao_fim_semana"
   | "vazio";
 
 export interface FrequenciaCelula {

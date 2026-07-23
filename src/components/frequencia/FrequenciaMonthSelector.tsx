@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { EscalaStatus, MESES_NOMES, Usuario } from "../../types";
 import { loadFrequenciaMonthStatuses } from "../../utils/frequenciaService";
-import { ArrowLeft, CalendarDays } from "lucide-react";
+import {
+  cardBorderStyle,
+  resolveMonthCardTone,
+} from "../../utils/cardBorderTone";
+import { ArrowLeft, Building2, CalendarDays } from "lucide-react";
 import StatusBadge from "../StatusBadge";
 
 interface Props {
   usuario: Usuario;
   year: number;
+  secao: string;
   onBack: () => void;
   onSelectMonth: (mes: number) => void;
 }
@@ -32,6 +37,7 @@ function monthCardStatus(
 
 export default function FrequenciaMonthSelector({
   year,
+  secao,
   onBack,
   onSelectMonth,
 }: Props) {
@@ -39,13 +45,14 @@ export default function FrequenciaMonthSelector({
     Record<number, { count: number; statuses: EscalaStatus[] }>
   >({});
   const [loading, setLoading] = useState(true);
+  const now = new Date();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const map = await loadFrequenciaMonthStatuses(year);
+        const map = await loadFrequenciaMonthStatuses(year, secao);
         if (!cancelled) setByMonth(map);
       } catch (e) {
         console.error(e);
@@ -56,7 +63,7 @@ export default function FrequenciaMonthSelector({
     return () => {
       cancelled = true;
     };
-  }, [year]);
+  }, [year, secao]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
@@ -68,14 +75,17 @@ export default function FrequenciaMonthSelector({
             className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer"
           >
             <ArrowLeft size={16} />
-            Voltar
+            Seções
           </button>
           <div className="h-5 w-px bg-gray-200" />
           <div className="flex items-center gap-2 min-w-0">
-            <CalendarDays size={18} className="text-blue-600 shrink-0" />
+            <Building2 size={16} className="text-blue-600 shrink-0" />
             <h1 className="text-sm font-bold text-gray-900 truncate">
-              Controle de Frequência · {year}
+              {secao}
             </h1>
+            <span className="text-gray-300">·</span>
+            <CalendarDays size={16} className="text-gray-500 shrink-0" />
+            <span className="text-sm font-semibold text-gray-600">{year}</span>
           </div>
         </div>
       </header>
@@ -83,7 +93,8 @@ export default function FrequenciaMonthSelector({
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione o mês</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Cada card representa o controle mensal. Os status refletem documentos já salvos.
+          Controle de Frequência de{" "}
+          <span className="font-semibold text-gray-700">{secao}</span> · {year}
         </p>
 
         {loading ? (
@@ -93,14 +104,45 @@ export default function FrequenciaMonthSelector({
             {MESES_NOMES.map((nome, idx) => {
               const mes = idx + 1;
               const info = monthCardStatus(byMonth[mes]);
+              const tone = resolveMonthCardTone({
+                status: info.status,
+                year,
+                month: mes,
+                now,
+              });
+              const isCurrent =
+                year === now.getFullYear() && mes === now.getMonth() + 1;
+
               return (
                 <button
                   key={mes}
                   type="button"
                   onClick={() => onSelectMonth(mes)}
-                  className="text-left bg-white border border-gray-200 hover:border-blue-300 hover:shadow-sm rounded-xl p-4 cursor-pointer transition-all"
+                  style={cardBorderStyle(tone)}
+                  className="text-left rounded-xl p-4 cursor-pointer transition-all shadow-sm hover:shadow-md"
                 >
-                  <div className="text-base font-bold text-gray-900">{nome}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div
+                      className={`text-base font-bold ${
+                        tone === "aprovada"
+                          ? "text-emerald-900"
+                          : tone === "aguardando"
+                            ? "text-amber-950"
+                            : tone === "atual"
+                              ? "text-blue-900"
+                              : tone === "futuro"
+                                ? "text-gray-700"
+                                : "text-gray-500"
+                      }`}
+                    >
+                      {nome}
+                    </div>
+                    {isCurrent && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white uppercase tracking-tight shrink-0">
+                        Atual
+                      </span>
+                    )}
+                  </div>
                   <div className="mt-2 flex items-center gap-2 flex-wrap">
                     {info.status ? (
                       <StatusBadge status={info.status} size="sm" />
@@ -109,11 +151,6 @@ export default function FrequenciaMonthSelector({
                         {info.label}
                       </span>
                     )}
-                    {byMonth[mes]?.count ? (
-                      <span className="text-[10px] text-gray-500">
-                        {byMonth[mes].count} seção(ões)
-                      </span>
-                    ) : null}
                   </div>
                 </button>
               );

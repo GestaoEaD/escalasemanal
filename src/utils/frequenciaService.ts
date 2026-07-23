@@ -112,9 +112,11 @@ export async function loadControleFrequencia(
   };
 }
 
-/** Status resumido dos documentos do ano (para cards de mês). */
+/** Status resumido dos documentos do ano (para cards de mês).
+ *  Se `secao` for informada, filtra apenas documentos daquela seção. */
 export async function loadFrequenciaMonthStatuses(
-  ano: number
+  ano: number,
+  secao?: string
 ): Promise<Record<number, { count: number; statuses: EscalaStatus[] }>> {
   const snap = await getDocs(
     query(collection(db, CONTROLE_FREQUENCIA_COLLECTION), where("ano", "==", ano))
@@ -122,6 +124,7 @@ export async function loadFrequenciaMonthStatuses(
   const map: Record<number, { count: number; statuses: EscalaStatus[] }> = {};
   snap.forEach((d) => {
     const data = d.data() as ControleFrequenciaDocument;
+    if (secao && data.secao !== secao) return;
     const mes = Number(data.mes);
     if (!map[mes]) map[mes] = { count: 0, statuses: [] };
     map[mes].count += 1;

@@ -34,6 +34,7 @@ import {
   convertEscalaValorToFrequencia,
   calcMeiaDiariaFromCelulas,
   calcAAFromCelulas,
+  getValorAfastamentoControleFrequencia,
 } from "../src/utils/frequenciaCalculo";
 import {
   displayFrequenciaCelula,
@@ -41,6 +42,8 @@ import {
 } from "../src/utils/frequenciaDisplay";
 import { getWeeksOverlappingMonth } from "../src/utils/frequenciaSync";
 import { canEditFrequencia } from "../src/utils/permissions";
+import { buildAppPath, parseAppPath } from "../src/utils/appNavigation";
+import { toSessionUser } from "../src/utils/sessionService";
 import { COMMAND_INVENTORY } from "../src/utils/testCenter/inventory";
 import { FrequenciaCelula, Usuario } from "../src/types";
 import { WeekInfo } from "../src/utils/dateUtils";
@@ -208,7 +211,24 @@ assert(getWeeksOverlappingMonth(2026, 1).length > 0, "semanas overlapping janeir
 
 const lookup = buildLegendaLookup([enLeg]);
 assert(convertEscalaValorToFrequencia("EN", lookup) === "1", "conversão EN→1");
-assert(convertEscalaValorToFrequencia("LP", lookup) === "LP", "sem consolidada mantém sigla");
+assert(convertEscalaValorToFrequencia("LP", lookup) === "", "sem consolidada não exibe sigla");
+
+const afastLeg = normalizeLegenda({
+  sigla: "A",
+  descricao: "Afastamento",
+  cor: "cinza",
+  ativo: true,
+  ordem: 5,
+  representacoes: { escalaSemanal: "A", escalaConsolidada: "A" },
+});
+assert(
+  getValorAfastamentoControleFrequencia([afastLeg, enLeg]) === "A",
+  "afastamento usa consolidada da legenda A"
+);
+assert(
+  getValorAfastamentoControleFrequencia([enLeg]) === "",
+  "sem legenda A não inventa afastamento"
+);
 
 const dias: Record<string, FrequenciaCelula> = {
   "01": { valor: "1", origem: "escala_semanal", editadoManualmente: false },
@@ -247,11 +267,45 @@ assert(
   "inventário Controle de Frequência"
 );
 
+assert(parseAppPath("/").view === "selector", "rota / = selector");
+assert(parseAppPath("/config").view === "config", "rota /config");
+const ed = parseAppPath("/semana/2026/2026_01");
+assert(ed.view === "editor" && (ed as { weekId: string }).weekId === "2026_01", "rota semana");
+const fr = parseAppPath("/frequencia/2026/Sec%20Gest/01");
+assert(
+  fr.view === "frequencia" &&
+    (fr as { month?: number }).month === 1 &&
+    (fr as { secao?: string }).secao === "Sec Gest",
+  "rota frequencia completa (seção → mês)"
+);
+assert(
+  buildAppPath({ view: "frequencia", year: 2026, secao: "Sec Gest", month: 3 }) ===
+    "/frequencia/2026/Sec%20Gest/03",
+  "build frequencia seção/mês"
+);
+assert(
+  parseAppPath("/frequencia/2026/Secao%20X").view === "frequencia" &&
+    (parseAppPath("/frequencia/2026/Secao%20X") as { secao?: string }).secao ===
+      "Secao X",
+  "rota frequencia só seção"
+);
+assert(
+  toSessionUser({
+    re: "1",
+    nome: "A",
+    postoGrad: "CB",
+    secao: "X",
+    perfil: "Administrador",
+  }).perfil === "Administrador",
+  "toSessionUser preserva perfil"
+);
+
 console.log("\nCentral de Testes smoke: PASSOU");
 console.log("Feature Dados da semana anterior: implementada na Escala Semanal (Alteração não alterada).");
 console.log("Feature Limpar escala: implementada na Escala Semanal; bloqueada se aprovada; sem gravação automática.");
 console.log("Feature Legendas: campos opcionais de representação/regras (preparação Escala Consolidada).");
 console.log("Feature Controle de Frequência: sync Alteração>Semanal, preserve manual, aprovação e print A4 landscape.");
+console.log("Feature Sessão/Navegação: authLoading + revalidação Firestore + URLs para todas as views.");
 console.log(
-  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; CRUD legendas (básico / consolidada / regras); sync/print frequencia."
+  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; CRUD legendas; sync/print frequencia; voltar do navegador em todas as telas."
 );

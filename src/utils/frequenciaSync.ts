@@ -8,6 +8,7 @@ import {
   ControleFrequenciaRow,
   EscalaDocument,
   FrequenciaCelula,
+  FrequenciaCelulaOrigem,
   Legenda,
   ScheduleRow,
   Usuario,
@@ -16,6 +17,7 @@ import { getWeeksForYear, WeekInfo } from "./dateUtils";
 import {
   buildLegendaLookup,
   convertEscalaValorToFrequencia,
+  getValorAfastamentoControleFrequencia,
   recalcRowTotais,
 } from "./frequenciaCalculo";
 import {
@@ -53,7 +55,6 @@ export function getWeeksOverlappingMonth(
   const monthEnd = new Date(ano, mes, 0);
   monthEnd.setHours(23, 59, 59, 999);
 
-  // Inclui ano anterior/seguinte nas bordas (semana pode atravessar ano)
   const weeks: WeekInfo[] = [
     ...getWeeksForYear(ano - 1),
     ...getWeeksForYear(ano),
@@ -91,6 +92,8 @@ export type ScaleDocsByWeek = Record<
 
 /**
  * Monta/atualiza linhas sincronizadas preservando edições manuais.
+ * - Conversão só via representacoes.escalaConsolidada
+ * - Sáb/dom: afastamento configurado (legenda A → representação CF) se não houver valor válido
  */
 export function syncFrequenciaRows(options: {
   ano: number;
@@ -103,6 +106,7 @@ export function syncFrequenciaRows(options: {
 }): { rows: ControleFrequenciaRow[]; sourceWeeks: string[] } {
   const { ano, mes, secao, legendas, scaleDocs } = options;
   const lookup = buildLegendaLookup(legendas);
+  const afastamentoValor = getValorAfastamentoControleFrequencia(legendas);
   const weeks = getWeeksOverlappingMonth(ano, mes);
   const sourceWeeks = weeks.map((w) => w.id);
 
@@ -130,7 +134,9 @@ export function syncFrequenciaRows(options: {
       }
 
       const date = new Date(ano, mes - 1, d);
-      const field = jsDowToEscalaField(date.getDay());
+      const jsDow = date.getDay();
+      const isWeekend = jsDow === 0 || jsDow === 6;
+      const field = jsDowToEscalaField(jsDow);
       const week = weeks.find((w) => {
         const start = new Date(w.startDate);
         start.setHours(0, 0, 0, 0);
@@ -141,34 +147,58 @@ export function syncFrequenciaRows(options: {
         return cur >= start && cur <= end;
       });
 
-      if (!week) {
+      let valor = "";
+      let origem: FrequenciaCelulaOrigem = "vazio";
+      let valorEscalaOriginal: string | undefined;
+
+      if (week) {
+        const pair = scaleDocs[week.id] || {};
+        const altRow = findRowByRe(pair.alteracao?.rows, col.re);
+        const semRow = findRowByRe(pair.semanal?.rows, col.re);
+        const altVal = cellValueFromSchedule(altRow, field);
+        const semVal = cellValueFromSchedule(semRow, field);
+
+        if (altVal) {
+          const converted = convertEscalaValorToFrequencia(altVal, lookup);
+          valorEscalaOriginal = altVal;
+          if (converted) {
+            valor = converted;
+            origem = "escala_alteracao";
+          }
+        } else if (semVal) {
+          const converted = convertEscalaValorToFrequencia(semVal, lookup);
+          valorEscalaOriginal = semVal;
+          if (converted) {
+            valor = converted;
+            origem = "escala_semanal";
+          }
+        }
+      }
+
+      // Fim de semana sem lançamento válido → afastamento configurado
+      if (!valor && isWeekend && afastamentoValor) {
+        dias[key] = {
+          valor: afastamentoValor,
+          origem: "padrao_fim_semana",
+          editadoManualmente: false,
+          ...(valorEscalaOriginal
+            ? { valorEscalaOriginal }
+            : {}),
+        };
+        continue;
+      }
+
+      if (!valor) {
         dias[key] = emptyCelula();
         continue;
       }
 
-      const pair = scaleDocs[week.id] || {};
-      const altRow = findRowByRe(pair.alteracao?.rows, col.re);
-      const semRow = findRowByRe(pair.semanal?.rows, col.re);
-      const altVal = cellValueFromSchedule(altRow, field);
-      const semVal = cellValueFromSchedule(semRow, field);
-
-      if (altVal) {
-        dias[key] = {
-          valor: convertEscalaValorToFrequencia(altVal, lookup),
-          origem: "escala_alteracao",
-          editadoManualmente: false,
-          valorEscalaOriginal: altVal,
-        };
-      } else if (semVal) {
-        dias[key] = {
-          valor: convertEscalaValorToFrequencia(semVal, lookup),
-          origem: "escala_semanal",
-          editadoManualmente: false,
-          valorEscalaOriginal: semVal,
-        };
-      } else {
-        dias[key] = emptyCelula();
-      }
+      dias[key] = {
+        valor,
+        origem,
+        editadoManualmente: false,
+        ...(valorEscalaOriginal ? { valorEscalaOriginal } : {}),
+      };
     }
 
     const base: ControleFrequenciaRow = {

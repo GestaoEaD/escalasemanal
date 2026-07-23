@@ -19,7 +19,7 @@ import {
   submitFrequenciaForApproval,
 } from "../../utils/frequenciaService";
 import { daysInMonth, dayKey } from "../../utils/frequenciaIds";
-import { recalcAllRows, buildLegendaLookup } from "../../utils/frequenciaCalculo";
+import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia } from "../../utils/frequenciaCalculo";
 import {
   displayFrequenciaCelula,
   isWeekendDay,
@@ -381,12 +381,8 @@ export default function FrequenciaEditor({
   const visibleObs = (docData?.observacoes || []).filter((o) => !o.excluido);
   const lookup = useMemo(() => buildLegendaLookup(legendas), [legendas]);
   const optionValues = useMemo(() => {
-    const set = new Set<string>(["", "-", "0", "1", "2", "3", "F", "LP", "FS", "A", "EN"]);
-    legendas.forEach((l) => {
-      set.add(l.sigla);
-      if (l.representacoes?.escalaConsolidada) set.add(l.representacoes.escalaConsolidada);
-    });
-    return Array.from(set);
+    const allowed = listValoresControleFrequencia(legendas);
+    return ["", "-", ...allowed];
   }, [legendas]);
 
   const showSubmit =
@@ -413,6 +409,13 @@ export default function FrequenciaEditor({
     "bg-white print:bg-white group-hover:bg-gray-50 print:group-hover:bg-white";
   const sepId = "border-r-2 border-r-gray-500";
   const sepTotais = "border-l-2 border-l-gray-500";
+  // Sticky offsets alinhados aos min-width das colunas de identificação
+  const stickyPosto = "sticky left-0 z-[1] print:static";
+  const stickyRe = "sticky left-[4.75rem] z-[1] print:static";
+  const stickyNome = "sticky left-[9rem] z-[1] print:static";
+  const stickyPostoHead = "sticky left-0 z-20 bg-gray-100 print:static";
+  const stickyReHead = "sticky left-[4.75rem] z-20 bg-gray-100 print:static";
+  const stickyNomeHead = "sticky left-[9rem] z-20 bg-gray-100 print:static";
 
   return (
     <div className="min-h-screen bg-gray-50 pb-16 frequencia-print-root">
@@ -574,58 +577,58 @@ export default function FrequenciaEditor({
 
         <div className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
           <div className="overflow-x-auto table-scroll">
-            <table className="frequencia-table border-collapse text-[11px] min-w-max w-full">
+            <table className="frequencia-table border-collapse text-[11px] leading-tight min-w-max w-full">
               <thead>
                 <tr className="bg-gray-800 text-white">
                   <th
                     colSpan={3}
-                    className={`px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider ${sepId}`}
+                    className={`px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider ${sepId}`}
                   >
                     Identificação
                   </th>
                   <th
                     colSpan={dayKeys.length}
-                    className="px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider"
+                    className="px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider"
                   >
                     Frequência
                   </th>
                   <th
                     colSpan={2}
-                    className={`px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider ${sepTotais}`}
+                    className={`px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider ${sepTotais}`}
                   >
                     Totais
                   </th>
                 </tr>
                 <tr className="bg-gray-100 text-gray-900 sticky top-0 z-10 print:static">
                   <th
-                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[5.5rem] sticky left-0 z-20 bg-gray-100 print:static`}
+                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.75rem] ${stickyPostoHead}`}
                   >
                     POSTO/GRAD.
                   </th>
                   <th
-                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[4.75rem] sticky left-[5.5rem] z-20 bg-gray-100 print:static`}
+                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.25rem] ${stickyReHead}`}
                   >
                     RE
                   </th>
                   <th
-                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[8rem] sticky left-[10.25rem] z-20 bg-gray-100 print:static ${sepId}`}
+                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[7rem] ${stickyNomeHead} ${sepId}`}
                   >
                     NOME
                   </th>
                   {dayKeys.map((k) => (
                     <th
                       key={k}
-                      className={`border border-gray-300 px-1 py-2 text-center font-bold min-w-[2rem] align-middle ${weekendCellClass(weekendByKey[k])}`}
+                      className={`border border-gray-300 px-0 py-1 text-center font-bold min-w-[1.5rem] w-6 align-middle ${weekendCellClass(weekendByKey[k])}`}
                     >
                       {Number(k)}
                     </th>
                   ))}
                   <th
-                    className={`border border-gray-300 px-2 py-2 text-center font-bold whitespace-nowrap min-w-[3.25rem] align-middle ${sepTotais}`}
+                    className={`border border-gray-300 px-1 py-1 text-center font-bold whitespace-nowrap min-w-[2.75rem] align-middle ${sepTotais}`}
                   >
                     1/2 DIÁRIA
                   </th>
-                  <th className="border border-gray-300 px-2 py-2 text-center font-bold whitespace-nowrap min-w-[2.75rem] align-middle">
+                  <th className="border border-gray-300 px-1 py-1 text-center font-bold whitespace-nowrap min-w-[2.25rem] align-middle">
                     A.A.
                   </th>
                 </tr>
@@ -635,7 +638,7 @@ export default function FrequenciaEditor({
                   <tr>
                     <td
                       colSpan={3 + dayKeys.length + 2}
-                      className="border border-gray-200 px-3 py-8 text-center text-gray-400"
+                      className="border border-gray-200 px-3 py-4 text-center text-gray-400"
                     >
                       Nenhum colaborador ativo nesta seção. Sincronize ou verifique o cadastro.
                     </td>
@@ -644,17 +647,17 @@ export default function FrequenciaEditor({
                   docData.rows.map((row) => (
                     <tr key={row.re} className="group hover:bg-gray-50/80 print:hover:bg-transparent">
                       <td
-                        className={`border border-gray-200 px-2 py-1.5 text-left font-semibold whitespace-nowrap align-middle sticky left-0 z-[1] print:static ${idSticky}`}
+                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-semibold whitespace-nowrap align-middle ${stickyPosto} ${idSticky}`}
                       >
                         {row.postoGrad}
                       </td>
                       <td
-                        className={`border border-gray-200 px-2 py-1.5 text-left font-mono whitespace-nowrap align-middle sticky left-[5.5rem] z-[1] print:static ${idSticky}`}
+                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-mono whitespace-nowrap align-middle ${stickyRe} ${idSticky}`}
                       >
                         {row.re}
                       </td>
                       <td
-                        className={`border border-gray-200 px-2 py-1.5 text-left font-bold whitespace-nowrap align-middle sticky left-[10.25rem] z-[1] print:static ${idSticky} ${sepId}`}
+                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-bold whitespace-nowrap align-middle ${stickyNome} ${idSticky} ${sepId}`}
                       >
                         {row.nome}
                       </td>
@@ -669,7 +672,7 @@ export default function FrequenciaEditor({
                         return (
                           <td
                             key={k}
-                            className={`border border-gray-200 p-0.5 text-center align-middle ${weekendCellClass(weekend)}`}
+                            className={`border border-gray-200 p-0 text-center align-middle ${weekendCellClass(weekend)}`}
                           >
                             {editable ? (
                               <input
@@ -692,13 +695,13 @@ export default function FrequenciaEditor({
                                     : undefined
                                 }
                                 aria-label={`Dia ${Number(k)} — ${row.nome}`}
-                                className={`w-full min-w-[1.75rem] h-8 px-0.5 text-center text-[11px] font-bold border border-transparent rounded-sm bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-300 align-middle ${
+                                className={`w-full min-w-[1.35rem] h-6 px-0 text-center text-[11px] leading-none font-bold border border-transparent rounded-sm bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-300 align-middle ${
                                   cel.editadoManualmente ? "text-blue-800 bg-blue-50/40" : "text-gray-900"
                                 }`}
                               />
                             ) : (
                               <span
-                                className={`inline-flex items-center justify-center w-full min-h-[2rem] font-bold ${
+                                className={`inline-flex items-center justify-center w-full min-h-[1.5rem] font-bold leading-none ${
                                   cel.editadoManualmente ? "text-blue-800" : "text-gray-900"
                                 }`}
                               >
@@ -709,11 +712,11 @@ export default function FrequenciaEditor({
                         );
                       })}
                       <td
-                        className={`border border-gray-200 px-2 py-1.5 text-center font-bold align-middle ${sepTotais}`}
+                        className={`border border-gray-200 px-1 py-0.5 text-center font-bold align-middle ${sepTotais}`}
                       >
                         {row.meiaDiaria}
                       </td>
-                      <td className="border border-gray-200 px-2 py-1.5 text-center font-bold align-middle">
+                      <td className="border border-gray-200 px-1 py-0.5 text-center font-bold align-middle">
                         {row.aa}
                       </td>
                       <datalist id={`freq-opts-${row.re}`}>
@@ -731,26 +734,26 @@ export default function FrequenciaEditor({
 
         {/* Observações — tabela */}
         <section className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
-          <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800">
+          <div className="px-3 py-1.5 border-b border-gray-200 bg-gray-50">
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-800">
               Observações
             </h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[11px] border-collapse min-w-[640px]">
+            <table className="w-full text-[11px] leading-tight border-collapse min-w-[640px]">
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[5.5rem]">
+                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.75rem]">
                     POSTO/GRAD.
                   </th>
-                  <th className="border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[4.75rem]">
+                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.25rem]">
                     RE
                   </th>
-                  <th className="border border-gray-300 px-2 py-2 text-left font-bold min-w-[12rem]">
+                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold min-w-[14rem]">
                     NOME / OBSERVAÇÃO
                   </th>
                   {editable && (
-                    <th className="border border-gray-300 px-2 py-2 text-center font-bold w-24 print:hidden">
+                    <th className="border border-gray-300 px-1 py-1 text-center font-bold w-20 print:hidden">
                       Ações
                     </th>
                   )}
@@ -761,7 +764,7 @@ export default function FrequenciaEditor({
                   <tr>
                     <td
                       colSpan={editable ? 4 : 3}
-                      className="border border-gray-200 px-3 py-5 text-center text-gray-400"
+                      className="border border-gray-200 px-3 py-3 text-center text-gray-400"
                     >
                       Nenhuma observação.
                     </td>
@@ -771,22 +774,22 @@ export default function FrequenciaEditor({
                     const ident = resolveObsIdent(o);
                     return (
                       <tr key={o.id} className="hover:bg-gray-50/80 print:hover:bg-transparent">
-                        <td className="border border-gray-200 px-2 py-2 text-left font-semibold align-middle whitespace-nowrap">
+                        <td className="border border-gray-200 px-1.5 py-1 text-left font-semibold align-middle whitespace-nowrap">
                           {ident.postoGrad}
                         </td>
-                        <td className="border border-gray-200 px-2 py-2 text-left font-mono align-middle whitespace-nowrap">
+                        <td className="border border-gray-200 px-1.5 py-1 text-left font-mono align-middle whitespace-nowrap">
                           {ident.re}
                         </td>
-                        <td className="border border-gray-200 px-2 py-2 text-left align-middle">
+                        <td className="border border-gray-200 px-1.5 py-1 text-left align-middle">
                           {editingObsId === o.id ? (
                             <textarea
                               value={editingObsText}
                               onChange={(e) => setEditingObsText(e.target.value)}
-                              className="w-full border border-gray-300 rounded-md p-2 text-xs min-h-[4rem]"
+                              className="w-full border border-gray-300 rounded-md p-1.5 text-xs min-h-[2.5rem] leading-snug"
                               rows={2}
                             />
                           ) : (
-                            <div>
+                            <div className="leading-snug">
                               <span className="font-bold text-gray-900">{ident.nome}</span>
                               <span className="text-gray-500"> — </span>
                               <span className="text-gray-800 whitespace-pre-wrap">{o.texto}</span>
@@ -794,9 +797,9 @@ export default function FrequenciaEditor({
                           )}
                         </td>
                         {editable && (
-                          <td className="border border-gray-200 px-2 py-2 text-center align-middle print:hidden">
+                          <td className="border border-gray-200 px-1 py-1 text-center align-middle print:hidden">
                             {editingObsId === o.id ? (
-                              <div className="flex flex-col gap-1 items-center">
+                              <div className="flex flex-col gap-0.5 items-center">
                                 <button
                                   type="button"
                                   className="text-[10px] font-bold text-blue-700 cursor-pointer"
@@ -816,7 +819,7 @@ export default function FrequenciaEditor({
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex gap-2 justify-center items-center">
+                              <div className="flex gap-1.5 justify-center items-center">
                                 <button
                                   type="button"
                                   className="text-[10px] font-bold text-blue-700 cursor-pointer"
@@ -830,7 +833,7 @@ export default function FrequenciaEditor({
                                   onClick={() => deleteObs(o.id)}
                                   aria-label="Excluir observação"
                                 >
-                                  <Trash2 size={13} />
+                                  <Trash2 size={12} />
                                 </button>
                               </div>
                             )}
@@ -844,16 +847,16 @@ export default function FrequenciaEditor({
             </table>
           </div>
           {editable && (
-            <div className="border-t border-gray-200 px-3 py-3 print:hidden bg-gray-50/60">
-              <div className="grid gap-2 sm:grid-cols-[minmax(7rem,9rem)_minmax(5rem,7rem)_minmax(7rem,10rem)_1fr_auto] items-end">
+            <div className="border-t border-gray-200 px-2.5 py-2 print:hidden bg-gray-50/60">
+              <div className="grid gap-1.5 sm:grid-cols-[minmax(6.5rem,8rem)_minmax(4.5rem,6rem)_minmax(6rem,9rem)_1fr_auto] items-end">
                 <label className="block">
-                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                  <span className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">
                     Selecionar RE
                   </span>
                   <select
                     value={obsReDraft}
                     onChange={(e) => setObsReDraft(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white cursor-pointer"
+                    className="w-full border border-gray-300 rounded-md px-2 py-1 text-xs bg-white cursor-pointer"
                   >
                     <option value="">—</option>
                     {docData.rows.map((r) => (
@@ -864,43 +867,43 @@ export default function FrequenciaEditor({
                   </select>
                 </label>
                 <label className="block">
-                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                  <span className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">
                     Posto/Grad.
                   </span>
                   <input
                     readOnly
                     value={selectedObsColab?.postoGrad || ""}
                     placeholder="Automático"
-                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-700"
+                    className="w-full border border-gray-200 rounded-md px-2 py-1 text-xs bg-gray-100 text-gray-700"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                  <span className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">
                     Nome
                   </span>
                   <input
                     readOnly
                     value={selectedObsColab?.nome || ""}
                     placeholder="Automático"
-                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-700"
+                    className="w-full border border-gray-200 rounded-md px-2 py-1 text-xs bg-gray-100 text-gray-700"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                  <span className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">
                     Nova observação
                   </span>
                   <input
                     value={obsDraft}
                     onChange={(e) => setObsDraft(e.target.value)}
                     placeholder="Texto da observação…"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white"
+                    className="w-full border border-gray-300 rounded-md px-2 py-1 text-xs bg-white"
                   />
                 </label>
                 <button
                   type="button"
                   onClick={addObs}
                   disabled={!obsReDraft || !obsDraft.trim()}
-                  className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                  className="inline-flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-bold bg-blue-600 text-white rounded-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed h-[30px]"
                 >
                   <Plus size={13} />
                   Adicionar
@@ -1019,13 +1022,19 @@ export default function FrequenciaEditor({
 
       <style>{`
         @media print {
-          @page { size: A4 landscape; margin: 8mm; }
+          @page { size: A4 landscape; margin: 6mm; }
           body * { visibility: hidden; }
           .frequencia-print-root, .frequencia-print-root * { visibility: visible; }
           .frequencia-print-root { position: absolute; left: 0; top: 0; width: 100%; }
-          .frequencia-table { font-size: 7.5px !important; }
-          .frequencia-table th, .frequencia-table td { padding: 2px 3px !important; }
-          .frequencia-table input { border: none !important; background: transparent !important; height: auto !important; min-height: 0 !important; }
+          .frequencia-table { font-size: 7px !important; line-height: 1.1 !important; }
+          .frequencia-table th, .frequencia-table td { padding: 1px 2px !important; }
+          .frequencia-table input {
+            border: none !important;
+            background: transparent !important;
+            height: 12px !important;
+            min-height: 0 !important;
+            font-size: 7px !important;
+          }
           .print\\:hidden { display: none !important; }
         }
       `}</style>
