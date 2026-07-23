@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { db, doc, getDoc, setDoc, deleteDoc, collection, getDocs, Timestamp } from "../firebase";
 import { 
   Usuario, 
@@ -13,7 +13,7 @@ import {
   HistoricoEscalaEvento,
   TipoEscalaDocumento,
 } from "../types";
-import { WeekInfo, formatTimestamp } from "../utils/dateUtils";
+import { WeekInfo, formatTimestamp, getWeekDayColumnHeaders } from "../utils/dateUtils";
 import { exportToExcelCustom, exportToPDFCustom } from "../utils/exportUtils";
 import {
   buildHistoricoEvento,
@@ -152,6 +152,10 @@ export default function ScheduleEditor({
 }: ScheduleEditorProps) {
   // Document IDs in Firestore
   const docId = week.id; // Format: "year_week" e.g., "2026_01"
+  const dayHeaders = useMemo(
+    () => getWeekDayColumnHeaders(week.startDate),
+    [week.startDate]
+  );
 
   // Master lists from Firestore (originally loaded)
   const [dbWeeklyRows, setDbWeeklyRows] = useState<ScheduleRow[]>([]);
@@ -2253,13 +2257,15 @@ export default function ScheduleEditor({
                       <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
                       <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
                       <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
-                      <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
+                      {dayHeaders.map((h) => (
+                        <th
+                          key={h.key}
+                          className="px-1 sm:px-1.5 py-2 text-center text-[9px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-tight leading-tight whitespace-nowrap"
+                          title={h.label}
+                        >
+                          {h.label}
+                        </th>
+                      ))}
                       <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Obs.</th>
                       <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                     </tr>
@@ -2281,18 +2287,18 @@ export default function ScheduleEditor({
                           </td>
                           
                           {/* Days Cells */}
-                          {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
+                          {dayHeaders.map((h) => (
                             <td
-                              key={day}
-                              className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-gray-400" : ""}`}
+                              key={h.key}
+                              className={`p-1 ${h.key === "sab" || h.key === "dom" ? "border-2 border-gray-400" : ""}`}
                             >
                               <select
-                                value={row[day]}
-                                onChange={(e) => handleCellChange("semanal", row.re, day, e.target.value)}
+                                value={row[h.key]}
+                                onChange={(e) => handleCellChange("semanal", row.re, h.key, e.target.value)}
                                 disabled={!isWeeklyEditable}
                                 className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
-                                style={getCellStyle(row[day])}
-                                title={getLegendDescription(row[day])}
+                                style={getCellStyle(row[h.key])}
+                                title={getLegendDescription(row[h.key])}
                               >
                                 {scaleOptions.map((opt) => (
                                   <option key={opt} value={opt} title={getLegendDescription(opt)}>{opt}</option>
@@ -2366,13 +2372,15 @@ export default function ScheduleEditor({
                           <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Posto</th>
                           <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">R.E.</th>
                           <th className="px-2 sm:px-3 py-2 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Nome</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Seg</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ter</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qua</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Qui</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sex</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Sáb</th>
-                          <th className="px-1 sm:px-2 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Dom</th>
+                          {dayHeaders.map((h) => (
+                            <th
+                              key={h.key}
+                              className="px-1 sm:px-1.5 py-2 text-center text-[9px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-tight leading-tight whitespace-nowrap"
+                              title={h.label}
+                            >
+                              {h.label}
+                            </th>
+                          ))}
                           <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Obs.</th>
                           <th className="px-2 sm:px-3 py-2 text-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">Ações</th>
                         </tr>
@@ -2399,18 +2407,18 @@ export default function ScheduleEditor({
                               </td>
                               
                               {/* Days Cells */}
-                              {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((day) => (
+                              {dayHeaders.map((h) => (
                                 <td
-                                  key={day}
-                                  className={`p-1 ${day === "sab" || day === "dom" ? "border-2 border-gray-400" : ""}`}
+                                  key={h.key}
+                                  className={`p-1 ${h.key === "sab" || h.key === "dom" ? "border-2 border-gray-400" : ""}`}
                                 >
                                   <select
-                                    value={row[day]}
-                                    onChange={(e) => handleCellChange("alteracao", row.re, day, e.target.value)}
+                                    value={row[h.key]}
+                                    onChange={(e) => handleCellChange("alteracao", row.re, h.key, e.target.value)}
                                     disabled={!isAltEditable}
                                     className="w-14 sm:w-[68px] mx-auto block border rounded text-[10px] sm:text-[11px] py-1 text-center font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-80"
-                                    style={getCellStyle(row[day])}
-                                    title={getLegendDescription(row[day])}
+                                    style={getCellStyle(row[h.key])}
+                                    title={getLegendDescription(row[h.key])}
                                   >
                                     {scaleOptions.map((opt) => (
                                       <option key={opt} value={opt} title={getLegendDescription(opt)}>{opt}</option>
@@ -3020,7 +3028,8 @@ export default function ScheduleEditor({
                       legendasList,
                       { nome: usuario.nome, re: usuario.re, postoGrad: usuario.postoGrad },
                       formatHomologacaoResumo(weeklyStatus, weeklyAprovacao, weeklyVersao),
-                      formatHomologacaoResumo(altStatus, altAprovacao, altVersao)
+                      formatHomologacaoResumo(altStatus, altAprovacao, altVersao),
+                      week.startDate
                     );
                   } else {
                     exportToExcelCustom(

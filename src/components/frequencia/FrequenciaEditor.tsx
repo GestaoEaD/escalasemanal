@@ -19,6 +19,7 @@ import {
   submitFrequenciaForApproval,
 } from "../../utils/frequenciaService";
 import { daysInMonth, dayKey } from "../../utils/frequenciaIds";
+import { getMonthDayColumnLabel } from "../../utils/dateUtils";
 import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia } from "../../utils/frequenciaCalculo";
 import {
   displayFrequenciaCelula,
@@ -651,13 +652,14 @@ export default function FrequenciaEditor({
                   {dayKeys.map((k) => (
                     <th
                       key={k}
-                      className={`freq-day border border-slate-300 px-0.5 py-1.5 text-center text-[10px] font-bold tabular-nums align-middle ${
+                      className={`freq-day border border-slate-300 px-0.5 py-1 text-center text-[8px] sm:text-[9px] font-bold leading-tight align-middle ${
                         weekendByKey[k]
                           ? "bg-slate-200/90 text-slate-800"
                           : "bg-slate-100"
                       }`}
+                      title={getMonthDayColumnLabel(year, month, Number(k))}
                     >
-                      {Number(k)}
+                      {getMonthDayColumnLabel(year, month, Number(k))}
                     </th>
                   ))}
                   <th

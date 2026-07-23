@@ -1,5 +1,6 @@
 import { ScheduleRow, LastSaved, AuditOperation, Usuario } from "../types";
 import { formatTimestamp } from "./dateUtils";
+import { getWeekDayColumnHeaders } from "./dateUtils";
 import { flattenAuditForExport } from "./auditService";
 import { normalizeEmail } from "./usuarioHelpers";
 
@@ -400,21 +401,24 @@ const LOGS_REPORT_CSS = `
   .btn-secondary { background-color: #374151; }
 `;
 
-function buildScheduleTableHeader(): string {
+function buildScheduleTableHeader(weekStartMonday?: Date | null): string {
+  const labels = weekStartMonday
+    ? getWeekDayColumnHeaders(weekStartMonday).map((h) => h.label)
+    : ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
   return `
     <tr>
       <th style="width: 7%;">Posto</th>
       <th style="width: 7%;">R.E.</th>
       <th class="col-nome" style="width: 8%;">Nome</th>
       <th class="col-secao" style="width: 7%;">Seção</th>
-      <th style="width: 4%;">Seg</th>
-      <th style="width: 4%;">Ter</th>
-      <th style="width: 4%;">Qua</th>
-      <th style="width: 4%;">Qui</th>
-      <th style="width: 4%;">Sex</th>
-      <th style="width: 4%;">Sáb</th>
-      <th style="width: 4%;">Dom</th>
-      <th class="col-obs" style="width: 43%;">Observação</th>
+      <th style="width: 5%;">${escapeHtml(labels[0])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[1])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[2])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[3])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[4])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[5])}</th>
+      <th style="width: 5%;">${escapeHtml(labels[6])}</th>
+      <th class="col-obs" style="width: 36%;">Observação</th>
     </tr>
   `;
 }
@@ -520,7 +524,8 @@ function buildScheduleSectionHtml(
   renderRows: (rows: ScheduleRow[]) => string,
   observacoes?: string,
   savedInfo?: string,
-  homologacaoInfo?: string
+  homologacaoInfo?: string,
+  weekStartMonday?: Date | null
 ): string {
   const obsBlock = observacoes
     ? `<div class="obs-block"><b>Observações da Semana:</b><br/>${escapeHtml(observacoes)}</div>`
@@ -536,7 +541,7 @@ function buildScheduleSectionHtml(
     <div class="print-section">
       <div class="section-title">${escapeHtml(title)}</div>
       <table>
-        <thead>${buildScheduleTableHeader()}</thead>
+        <thead>${buildScheduleTableHeader(weekStartMonday)}</thead>
         <tbody>${renderRows(rows)}</tbody>
       </table>
       ${obsBlock}
@@ -661,7 +666,8 @@ export function exportToPDF(
   alterationRows: ScheduleRow[],
   lastSavedWeekly: LastSaved | null,
   lastSavedAlteration: LastSaved | null,
-  exportedBy?: ExportUser | null
+  exportedBy?: ExportUser | null,
+  weekStartMonday?: Date | null
 ) {
   const weeklySavedInfo = lastSavedWeekly
     ? `Último salvamento por: ${lastSavedWeekly.nome} (R.E. ${lastSavedWeekly.re}) em ${formatTimestamp(lastSavedWeekly.timestamp)}`
@@ -672,8 +678,8 @@ export function exportToPDF(
     : "Não há registros de salvamento.";
 
   const bodyContent =
-    buildScheduleSectionHtml("1. Escala Semanal Principal", weeklyRows, renderPlainTableRows, undefined, weeklySavedInfo) +
-    buildScheduleSectionHtml("2. Escala de Alteração / Substituições", alterationRows, renderPlainTableRows, undefined, alterationSavedInfo);
+    buildScheduleSectionHtml("1. Escala Semanal Principal", weeklyRows, renderPlainTableRows, undefined, weeklySavedInfo, undefined, weekStartMonday) +
+    buildScheduleSectionHtml("2. Escala de Alteração / Substituições", alterationRows, renderPlainTableRows, undefined, alterationSavedInfo, undefined, weekStartMonday);
 
   const html = buildScheduleReportDocument({
     title: `Escala de Serviço - ${weekLabel} (${year})`,
@@ -793,7 +799,8 @@ export function exportToPDFCustom(
   legendasList: { sigla: string; cor: string }[] = [],
   exportedBy?: ExportUser | null,
   weeklyHomologacao?: string,
-  alterationHomologacao?: string
+  alterationHomologacao?: string,
+  weekStartMonday?: Date | null
 ) {
   const getCellStyle = createLegendCellStyleGetter(legendasList);
   const renderRows = (rows: ScheduleRow[]) => renderColoredTableRows(rows, getCellStyle);
@@ -815,7 +822,8 @@ export function exportToPDFCustom(
       renderRows,
       weeklyObservacoes,
       weeklySavedInfo,
-      weeklyHomologacao
+      weeklyHomologacao,
+      weekStartMonday
     );
   }
 
@@ -826,7 +834,8 @@ export function exportToPDFCustom(
       renderRows,
       alterationObservacoes,
       alterationSavedInfo,
-      alterationHomologacao
+      alterationHomologacao,
+      weekStartMonday
     );
   }
 

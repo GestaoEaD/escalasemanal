@@ -13,6 +13,12 @@ import {
 } from "../types";
 import { daysInMonth, dayKey } from "../utils/frequenciaIds";
 import {
+  getMonthDayColumnLabel,
+  getWeekDayColumnHeaders,
+  getWeeksForYear,
+  WeekDayKey,
+} from "../utils/dateUtils";
+import {
   displayFrequenciaCelula,
   isWeekendDay,
   weekendCellClass,
@@ -66,11 +72,24 @@ interface AprovacaoPageProps {
 function ReadOnlyScheduleTable({
   title,
   rows,
+  weekStart,
 }: {
   title: string;
   rows: ScheduleRow[];
+  weekStart?: Date | null;
 }) {
   const rowsWithObs = rows.filter((row) => Boolean(row.observacao?.trim()));
+  const dayHeaders = weekStart
+    ? getWeekDayColumnHeaders(weekStart)
+    : ([
+        { key: "seg" as WeekDayKey, label: "SEG", dayOfMonth: 0 },
+        { key: "ter" as WeekDayKey, label: "TER", dayOfMonth: 0 },
+        { key: "qua" as WeekDayKey, label: "QUA", dayOfMonth: 0 },
+        { key: "qui" as WeekDayKey, label: "QUI", dayOfMonth: 0 },
+        { key: "sex" as WeekDayKey, label: "SEX", dayOfMonth: 0 },
+        { key: "sab" as WeekDayKey, label: "SÁB", dayOfMonth: 0 },
+        { key: "dom" as WeekDayKey, label: "DOM", dayOfMonth: 0 },
+      ]);
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
@@ -84,13 +103,15 @@ function ReadOnlyScheduleTable({
               <th className="px-2 py-2 text-left font-bold">Posto</th>
               <th className="px-2 py-2 text-left font-bold">R.E.</th>
               <th className="px-2 py-2 text-left font-bold">Nome</th>
-              <th className="px-1 py-2 text-center font-bold">Seg</th>
-              <th className="px-1 py-2 text-center font-bold">Ter</th>
-              <th className="px-1 py-2 text-center font-bold">Qua</th>
-              <th className="px-1 py-2 text-center font-bold">Qui</th>
-              <th className="px-1 py-2 text-center font-bold">Sex</th>
-              <th className="px-1 py-2 text-center font-bold">Sáb</th>
-              <th className="px-1 py-2 text-center font-bold">Dom</th>
+              {dayHeaders.map((h) => (
+                <th
+                  key={h.key}
+                  className="px-1 py-2 text-center font-bold text-[10px] leading-tight whitespace-nowrap"
+                  title={h.label}
+                >
+                  {h.label}
+                </th>
+              ))}
               <th className="px-2 py-2 text-center font-bold">Obs.</th>
             </tr>
           </thead>
@@ -109,14 +130,14 @@ function ReadOnlyScheduleTable({
                     <td className="px-2 py-1.5 font-bold text-gray-900">{row.postoGrad}</td>
                     <td className="px-2 py-1.5 font-mono text-gray-600">{row.re}</td>
                     <td className="px-2 py-1.5 font-semibold text-gray-800">{row.nome}</td>
-                    {(["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const).map((d) => (
+                    {dayHeaders.map((h) => (
                       <td
-                        key={d}
+                        key={h.key}
                         className={`px-1 py-1.5 text-center font-bold text-gray-700 ${
-                          d === "sab" || d === "dom" ? "border-2 border-gray-400" : ""
+                          h.key === "sab" || h.key === "dom" ? "border-2 border-gray-400" : ""
                         }`}
                       >
-                        {row[d]}
+                        {row[h.key]}
                       </td>
                     ))}
                     <td className="px-2 py-1.5 text-center">
@@ -205,12 +226,14 @@ function ReadOnlyFrequenciaTable({
               <th className={`px-2 py-2 text-left font-bold ${sepId}`}>NOME</th>
               {dayKeys.map((k) => {
                 const weekend = isWeekendDay(docData.ano, docData.mes, Number(k));
+                const label = getMonthDayColumnLabel(docData.ano, docData.mes, Number(k));
                 return (
                   <th
                     key={k}
-                    className={`px-1 py-2 text-center font-bold min-w-[1.75rem] ${weekendCellClass(weekend)}`}
+                    className={`px-0.5 py-2 text-center font-bold text-[9px] leading-tight min-w-[2.5rem] ${weekendCellClass(weekend)}`}
+                    title={label}
                   >
-                    {Number(k)}
+                    {label}
                   </th>
                 );
               })}
@@ -773,6 +796,10 @@ export default function AprovacaoPage({
                 <ReadOnlyScheduleTable
                   title={docLabel}
                   rows={(escala.rows || []).map(applyWeekendDefault)}
+                  weekStart={
+                    getWeeksForYear(escala.ano).find((w) => w.numero === escala.semana)
+                      ?.startDate ?? null
+                  }
                 />
               )}
             </div>

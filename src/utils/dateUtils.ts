@@ -69,6 +69,84 @@ export function getWeeksForYear(year: number): WeekInfo[] {
   return weeks;
 }
 
+/** Chaves de coluna das escalas semanais (segunda → domingo). */
+export type WeekDayKey = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
+
+export const WEEK_DAY_KEYS: WeekDayKey[] = [
+  "seg",
+  "ter",
+  "qua",
+  "qui",
+  "sex",
+  "sab",
+  "dom",
+];
+
+const WEEKDAY_ABBR_MON_FIRST = [
+  "SEG",
+  "TER",
+  "QUA",
+  "QUI",
+  "SEX",
+  "SÁB",
+  "DOM",
+] as const;
+
+/** Índice JS getDay(): 0=domingo … 6=sábado */
+const WEEKDAY_ABBR_SUN0 = [
+  "DOM",
+  "SEG",
+  "TER",
+  "QUA",
+  "QUI",
+  "SEX",
+  "SÁB",
+] as const;
+
+/** Ex.: SEG (10) */
+export function formatDayColumnLabel(
+  weekdayAbbr: string,
+  dayOfMonth: number
+): string {
+  return `${weekdayAbbr} (${dayOfMonth})`;
+}
+
+/**
+ * Cabeçalhos Seg–Dom com o dia do mês da semana (a partir da segunda).
+ * Ex.: SEG (10), TER (11), …
+ */
+export function getWeekDayColumnHeaders(weekStartMonday: Date): {
+  key: WeekDayKey;
+  label: string;
+  dayOfMonth: number;
+}[] {
+  const y = weekStartMonday.getFullYear();
+  const m = weekStartMonday.getMonth();
+  const base = weekStartMonday.getDate();
+  return WEEK_DAY_KEYS.map((key, i) => {
+    const d = new Date(y, m, base + i);
+    const dayOfMonth = d.getDate();
+    return {
+      key,
+      dayOfMonth,
+      label: formatDayColumnLabel(WEEKDAY_ABBR_MON_FIRST[i], dayOfMonth),
+    };
+  });
+}
+
+/**
+ * Cabeçalho de um dia do mês no Controle de Frequência.
+ * Ex.: dia 10/07/2026 (sexta) → SEX (10)
+ */
+export function getMonthDayColumnLabel(
+  year: number,
+  month: number,
+  day: number
+): string {
+  const d = new Date(year, month - 1, day);
+  return formatDayColumnLabel(WEEKDAY_ABBR_SUN0[d.getDay()], day);
+}
+
 /**
  * Identifica a semana imediatamente anterior no calendário do sistema.
  * - Semana N (N>1) → Semana N-1 do mesmo ano

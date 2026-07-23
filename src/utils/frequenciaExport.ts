@@ -10,6 +10,7 @@ import {
 } from "../types";
 import { dayKey, daysInMonth } from "./frequenciaIds";
 import { displayFrequenciaCelula, isWeekendDay } from "./frequenciaDisplay";
+import { getMonthDayColumnLabel } from "./dateUtils";
 
 export type FrequenciaExportUser = {
   nome: string;
@@ -33,15 +34,6 @@ function formatExportUserLabel(user?: FrequenciaExportUser | null): string {
   return user.re ? `${displayName} (RE ${user.re})` : displayName;
 }
 
-function resolveObsNome(
-  obs: ControleFrequenciaObservacao,
-  doc: ControleFrequenciaDocument
-): string {
-  if (!obs.re) return "—";
-  const row = doc.rows.find((r) => r.re === obs.re);
-  return row?.nome || obs.re;
-}
-
 function resolveObsPosto(
   obs: ControleFrequenciaObservacao,
   doc: ControleFrequenciaDocument
@@ -52,9 +44,10 @@ function resolveObsPosto(
 }
 
 const FREQUENCIA_PRINT_CSS = `
+  /* —— Preview na tela (mesma linguagem visual da impressão) —— */
   @page {
     size: A4 landscape;
-    margin: 5mm 4.5mm;
+    margin: 12mm 10mm;
   }
 
   * {
@@ -67,76 +60,81 @@ const FREQUENCIA_PRINT_CSS = `
     margin: 0;
     padding: 0;
     background: #fff;
-    color: #000;
-    font-family: Arial, Helvetica, "Segoe UI", sans-serif;
-    text-rendering: geometricPrecision;
+    color: #1f2937;
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, Helvetica, sans-serif;
+    text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
 
   body {
-    padding: 8px 10px 12px;
-    font-size: 8px;
-    line-height: 1.2;
+    padding: 14px 16px 18px;
+    font-size: 9.5px;
+    line-height: 1.35;
   }
 
   .no-print { display: block; }
 
   .print-btn-bar {
-    background: #f3f4f6;
-    padding: 8px 12px;
-    border-radius: 6px;
-    margin-bottom: 10px;
+    background: #f8fafc;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 14px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-    border: 1px solid #d1d5db;
+    border: 1px solid #e4e7ec;
   }
-  .print-hint { font-size: 10px; font-weight: 600; color: #374151; }
+  .print-hint { font-size: 11px; font-weight: 600; color: #475569; }
   .print-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .btn {
-    background: #111827;
+    background: #334155;
     color: #fff;
     border: none;
-    padding: 6px 12px;
-    font-weight: 700;
-    font-size: 10px;
-    border-radius: 4px;
+    padding: 7px 14px;
+    font-weight: 650;
+    font-size: 11px;
+    border-radius: 6px;
     cursor: pointer;
   }
-  .btn-secondary { background: #4b5563; }
+  .btn-secondary { background: #64748b; }
 
   .header {
     text-align: center;
-    margin-bottom: 6px;
-    padding-bottom: 4px;
-    border-bottom: 0.75pt solid #000;
+    margin: 0 0 14px;
+    padding: 0 4px 10px;
+    border-bottom: 1px solid #d0d5dd;
   }
   .header-org {
     margin: 0;
-    font-size: 8px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.35px;
     text-transform: uppercase;
+    color: #475569;
   }
   .header-org-main {
-    margin: 1px 0 0;
-    font-size: 10px;
-    font-weight: 800;
+    margin: 3px 0 0;
+    font-size: 11px;
+    font-weight: 700;
     letter-spacing: 0.4px;
     text-transform: uppercase;
+    color: #111827;
   }
   .header-title {
-    margin: 4px 0 1px;
-    font-size: 11px;
-    font-weight: 800;
+    margin: 8px 0 3px;
+    font-size: 13px;
+    font-weight: 750;
     text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #0f172a;
   }
   .header-meta {
     margin: 0;
-    font-size: 8.5px;
+    font-size: 10px;
     font-weight: 600;
+    color: #334155;
   }
 
   .freq-table {
@@ -144,24 +142,25 @@ const FREQUENCIA_PRINT_CSS = `
     border-collapse: collapse;
     border-spacing: 0;
     table-layout: fixed;
-    font-size: 7px;
-    line-height: 1.15;
+    font-size: 9px;
+    line-height: 1.25;
     empty-cells: show;
+    margin: 0 0 16px;
   }
 
   .freq-table thead th {
-    background: #111827;
-    color: #fff;
+    background: #f2f4f7;
+    color: #344054;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.15px;
-    font-size: 6.5px;
+    letter-spacing: 0.2px;
+    font-size: 8px;
   }
 
   .freq-table th,
   .freq-table td {
-    border: 0.4pt solid #000;
-    padding: 1.5px 1px;
+    border: 1px solid #e4e7ec;
+    padding: 4px 3px;
     vertical-align: middle;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -169,115 +168,307 @@ const FREQUENCIA_PRINT_CSS = `
   }
 
   .freq-table .group-head th {
-    background: #111827;
-    color: #fff;
-    font-size: 6.5px;
-    padding: 2px 2px;
-    border: 0.4pt solid #000;
+    background: #eaecf0;
+    color: #1d2939;
+    font-size: 8.5px;
+    font-weight: 750;
+    padding: 6px 4px;
+    border: 1px solid #d0d5dd;
+    letter-spacing: 0.35px;
+  }
+
+  .freq-table thead tr:not(.group-head) th {
+    border: 1px solid #d0d5dd;
+    padding: 5px 3px;
   }
 
   .freq-table .col-posto { width: 7%; text-align: left; }
-  .freq-table .col-re { width: 5.5%; text-align: left; font-family: "Consolas", "Courier New", monospace; }
-  .freq-table .col-nome { width: 12%; text-align: left; font-weight: 700; }
-  .freq-table .col-day { text-align: center; font-family: "Consolas", "Courier New", monospace; font-weight: 700; }
-  .freq-table .col-meia { width: 4.2%; text-align: center; font-weight: 700; font-family: "Consolas", "Courier New", monospace; }
-  .freq-table .col-aa { width: 3.2%; text-align: center; font-weight: 700; font-family: "Consolas", "Courier New", monospace; }
+  .freq-table .col-re {
+    width: 5.5%;
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "Segoe UI", Arial, monospace;
+  }
+  .freq-table .col-nome { width: 12%; text-align: left; font-weight: 650; color: #101828; }
+  .freq-table .col-day {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    font-size: 7.5px;
+    color: #1f2937;
+    white-space: nowrap;
+  }
+  .freq-table .col-meia,
+  .freq-table .col-aa {
+    width: 4%;
+    text-align: center;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #101828;
+  }
+  .freq-table .col-aa { width: 3.2%; }
 
   .freq-table tbody td {
     background: #fff;
-    color: #000;
-    font-size: 7px;
+    color: #1f2937;
+    font-size: 9px;
+    border-color: #e4e7ec;
+  }
+
+  .freq-table tbody tr:nth-child(even) td:not(.weekend) {
+    background: #fcfcfd;
   }
 
   .freq-table .weekend {
-    background: #ececec !important;
+    background: #f2f4f7 !important;
   }
 
   .freq-table .id-cell {
     text-align: left;
-    padding-left: 2px;
-    padding-right: 2px;
+    padding-left: 5px;
+    padding-right: 4px;
+  }
+
+  /* Destaque sóbrio para afastamento / falta (A, F) — sem alterar o texto */
+  .freq-table td.mark-afast {
+    font-weight: 750;
+    color: #344054;
+    letter-spacing: 0.15px;
   }
 
   .section-title {
-    margin: 8px 0 3px;
-    font-size: 8px;
-    font-weight: 800;
+    margin: 18px 0 8px;
+    padding: 0 0 5px;
+    font-size: 10px;
+    font-weight: 750;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
-    border-bottom: 0.5pt solid #000;
-    padding-bottom: 2px;
+    letter-spacing: 0.4px;
+    color: #1d2939;
+    border-bottom: 1px solid #d0d5dd;
   }
 
   .obs-table {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    font-size: 7px;
+    font-size: 9px;
+    margin: 0 0 16px;
   }
   .obs-table th,
   .obs-table td {
-    border: 0.4pt solid #000;
-    padding: 2px 3px;
+    border: 1px solid #e4e7ec;
+    padding: 6px 7px;
     vertical-align: top;
   }
   .obs-table th {
-    background: #111827;
-    color: #fff;
-    font-size: 6.5px;
+    background: #f2f4f7;
+    color: #344054;
+    font-size: 8px;
+    font-weight: 700;
     text-transform: uppercase;
+    border-color: #d0d5dd;
   }
-  .obs-table .col-obs-posto { width: 10%; }
-  .obs-table .col-obs-re { width: 8%; }
-  .obs-table .col-obs-text { width: auto; text-align: left; white-space: pre-wrap; word-break: break-word; }
+  .obs-table .col-obs-posto { width: 12%; text-align: left; }
+  .obs-table .col-obs-re { width: 9%; text-align: left; }
+  .obs-table .col-obs-text {
+    width: auto;
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+    color: #1f2937;
+  }
 
   .meta-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-top: 8px;
+    gap: 12px;
+    margin-top: 4px;
   }
   .meta-box {
-    border: 0.5pt solid #000;
-    padding: 5px 6px;
-    min-height: 42px;
+    border: 1px solid #d0d5dd;
+    background: #f9fafb;
+    padding: 10px 12px;
+    min-height: 52px;
+    border-radius: 2px;
   }
   .meta-box .label {
-    font-size: 6.5px;
-    font-weight: 800;
+    font-size: 8px;
+    font-weight: 750;
     text-transform: uppercase;
-    margin-bottom: 2px;
+    letter-spacing: 0.35px;
+    color: #475569;
+    margin-bottom: 5px;
   }
-  .meta-box .value { font-size: 7.5px; font-weight: 700; }
-  .meta-box .sub { font-size: 7px; }
+  .meta-box .value {
+    font-size: 10px;
+    font-weight: 700;
+    color: #101828;
+  }
+  .meta-box .sub {
+    font-size: 9px;
+    color: #475569;
+    margin-top: 2px;
+  }
 
   .export-footer {
-    margin-top: 8px;
-    padding-top: 4px;
-    border-top: 0.5pt solid #000;
-    font-size: 7px;
-    line-height: 1.4;
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid #d0d5dd;
+    font-size: 8.5px;
+    line-height: 1.45;
+    color: #475569;
   }
 
+  /* —— Impressão / PDF —— */
   @media print {
-    body { padding: 0 !important; }
+    @page {
+      size: A4 landscape;
+      margin: 12mm 10mm;
+    }
+
+    html, body {
+      width: auto;
+      background: #fff !important;
+      color: #1f2937 !important;
+      font-family: system-ui, -apple-system, "Segoe UI", Arial, Helvetica, sans-serif !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    body {
+      padding: 0 !important;
+      margin: 0 !important;
+      font-size: 9.5px !important;
+      line-height: 1.3 !important;
+    }
+
     .no-print { display: none !important; }
-    .freq-table,
-    .obs-table {
-      font-size: 6.8px !important;
+
+    .header {
+      margin-bottom: 12px !important;
+      padding-bottom: 8px !important;
+      border-bottom: 1px solid #d0d5dd !important;
     }
+    .header-org { font-size: 8.5px !important; color: #475569 !important; }
+    .header-org-main { font-size: 10.5px !important; color: #111827 !important; }
+    .header-title { font-size: 12px !important; margin: 6px 0 2px !important; }
+    .header-meta { font-size: 9.5px !important; }
+
+    .freq-table {
+      width: 100% !important;
+      margin: 0 0 14px !important;
+      font-size: 9px !important;
+      table-layout: fixed !important;
+    }
+
+    .freq-table .group-head th {
+      background: #eaecf0 !important;
+      color: #1d2939 !important;
+      border: 1px solid #d0d5dd !important;
+      padding: 5px 3px !important;
+      font-size: 8px !important;
+    }
+
+    .freq-table thead tr:not(.group-head) th {
+      background: #f2f4f7 !important;
+      color: #344054 !important;
+      border: 1px solid #d0d5dd !important;
+      padding: 4px 2px !important;
+      font-size: 7.5px !important;
+    }
+
     .freq-table th,
-    .freq-table td,
-    .obs-table th,
-    .obs-table td {
-      border: 0.35pt solid #000 !important;
-      padding: 1px 1px !important;
+    .freq-table td {
+      border: 1px solid #e4e7ec !important;
+      padding: 3.5px 2.5px !important;
     }
-    .header { border-bottom: 0.75pt solid #000 !important; }
-    .meta-box { border: 0.5pt solid #000 !important; }
-    .weekend { background: #e8e8e8 !important; }
+
+    .freq-table tbody td {
+      background: #fff !important;
+      color: #1f2937 !important;
+      font-size: 9px !important;
+    }
+
+    .freq-table tbody tr:nth-child(even) td:not(.weekend) {
+      background: #fcfcfd !important;
+    }
+
+    .freq-table .weekend {
+      background: #f2f4f7 !important;
+    }
+
+    .freq-table .col-day {
+      text-align: center !important;
+    }
+
+    .freq-table .col-posto,
+    .freq-table .col-re,
+    .freq-table .col-nome,
+    .freq-table .id-cell {
+      text-align: left !important;
+      padding-left: 4px !important;
+      padding-right: 3px !important;
+    }
+
+    .freq-table td.mark-afast {
+      font-weight: 750 !important;
+      color: #344054 !important;
+    }
+
+    .section-title {
+      margin: 16px 0 7px !important;
+      padding-bottom: 4px !important;
+      border-bottom: 1px solid #d0d5dd !important;
+      font-size: 9.5px !important;
+      color: #1d2939 !important;
+    }
+
+    .obs-table {
+      margin: 0 0 14px !important;
+      font-size: 9px !important;
+    }
+    .obs-table th {
+      background: #f2f4f7 !important;
+      color: #344054 !important;
+      border: 1px solid #d0d5dd !important;
+      padding: 5px 6px !important;
+    }
+    .obs-table td {
+      border: 1px solid #e4e7ec !important;
+      padding: 5px 6px !important;
+    }
+    .obs-table .col-obs-text {
+      text-align: left !important;
+      white-space: pre-wrap !important;
+    }
+
+    .meta-grid {
+      gap: 10px !important;
+      margin-top: 2px !important;
+    }
+    .meta-box {
+      border: 1px solid #d0d5dd !important;
+      background: #f9fafb !important;
+      padding: 9px 10px !important;
+      border-radius: 0 !important;
+    }
+
+    .export-footer {
+      margin-top: 14px !important;
+      padding-top: 7px !important;
+      border-top: 1px solid #d0d5dd !important;
+      color: #475569 !important;
+      font-size: 8px !important;
+    }
   }
 `;
+
+function dayCellExtraClass(shown: string): string {
+  const v = String(shown || "").trim().toUpperCase();
+  if (v === "A" || v === "F") return " mark-afast";
+  return "";
+}
 
 /**
  * Abre janela de impressão/PDF do Controle de Frequência (A4 paisagem).
@@ -299,10 +490,10 @@ export function exportFrequenciaToPDF(options: {
   }
 
   const dayHeads = dayKeys
-    .map(
-      (k) =>
-        `<th class="col-day${weekend[k] ? " weekend" : ""}">${Number(k)}</th>`
-    )
+    .map((k) => {
+      const label = getMonthDayColumnLabel(year, month, Number(k));
+      return `<th class="col-day${weekend[k] ? " weekend" : ""}">${escapeHtml(label)}</th>`;
+    })
     .join("");
 
   const bodyRows =
@@ -313,9 +504,11 @@ export function exportFrequenciaToPDF(options: {
             const days = dayKeys
               .map((k) => {
                 const cel = row.dias[k];
-                const shown = escapeHtml(displayFrequenciaCelula(cel));
+                const shownRaw = displayFrequenciaCelula(cel);
+                const shown = escapeHtml(shownRaw);
                 const wk = weekend[k] ? " weekend" : "";
-                return `<td class="col-day${wk}">${shown}</td>`;
+                const mark = dayCellExtraClass(shownRaw);
+                return `<td class="col-day${wk}${mark}">${shown}</td>`;
               })
               .join("");
             return `<tr>
@@ -378,7 +571,7 @@ export function exportFrequenciaToPDF(options: {
 </head>
 <body>
   <div class="print-btn-bar no-print">
-    <span class="print-hint">Documento otimizado para A4 horizontal — linhas finas e texto nítido. Use Imprimir / PDF.</span>
+    <span class="print-hint">Pré-visualização A4 paisagem — bordas suaves e tipografia leve. Use Imprimir / PDF.</span>
     <div class="print-actions">
       <button class="btn btn-secondary" type="button" onclick="window.close()">Fechar</button>
       <button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button>
