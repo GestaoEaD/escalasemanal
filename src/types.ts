@@ -40,6 +40,8 @@ export interface Usuario {
   ultimoLogin?: string | null;
   /** true quando o e-mail foi confirmado pelo Firebase Auth. */
   emailVerificado?: boolean;
+  /** URL da foto da Conta Google (Firebase Auth photoURL). */
+  photoURL?: string | null;
 }
 
 /** Metadados de um ator do fluxo de aprovação. */

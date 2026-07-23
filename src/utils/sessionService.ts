@@ -6,6 +6,7 @@ import { Usuario } from "../types";
 import { findUsuarioByEmail } from "./approvalService";
 import {
   getCurrentAuthEmail,
+  getCurrentAuthPhotoURL,
   signOutGoogle,
   waitForAuthUser,
 } from "./googleAuthService";
@@ -29,6 +30,7 @@ export function readSession(): Usuario | null {
 }
 
 export function toSessionUser(user: Usuario): Usuario {
+  const authPhoto = getCurrentAuthPhotoURL();
   return {
     uid: user.uid || user.re,
     re: user.re,
@@ -40,6 +42,7 @@ export function toSessionUser(user: Usuario): Usuario {
     ativo: user.ativo,
     email: normalizeEmail(user.email) || undefined,
     authProvider: user.authProvider || "google",
+    photoURL: user.photoURL || authPhoto || null,
   };
 }
 
@@ -74,6 +77,8 @@ export async function restoreSession(): Promise<{
     return { phase: "unauthenticated", usuario: null };
   }
 
+  const photoURL = firebaseUser.photoURL || null;
+
   try {
     const fresh = await findUsuarioByEmail(authEmail);
     if (!fresh) {
@@ -81,14 +86,17 @@ export async function restoreSession(): Promise<{
       clearSession();
       return { phase: "unauthenticated", usuario: null };
     }
-    const usuario = toSessionUser(fresh);
+    const usuario = toSessionUser({ ...fresh, photoURL });
     writeSession(usuario);
     return { phase: "authenticated", usuario };
   } catch (err) {
     console.warn("Falha ao revalidar sessão; tentando snapshot local:", err);
     const provisional = readSession();
     if (provisional?.re && normalizeEmail(provisional.email) === authEmail) {
-      return { phase: "authenticated", usuario: toSessionUser(provisional) };
+      return {
+        phase: "authenticated",
+        usuario: toSessionUser({ ...provisional, photoURL: provisional.photoURL || photoURL }),
+      };
     }
     await signOutGoogle();
     clearSession();

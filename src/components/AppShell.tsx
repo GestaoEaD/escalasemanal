@@ -1,10 +1,15 @@
 /**
  * Shell global autenticado: cabeçalho persistente + rodapé institucional.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Usuario } from "../types";
 import { canAccessConfig, canApproveScales } from "../utils/permissions";
 import { loadPendingApprovalsForGestor } from "../utils/pendingApprovalsService";
+import {
+  startPresence,
+  stopPresence,
+  subscribeOnlineCount,
+} from "../utils/presenceService";
 import { Bell, Calendar, LogOut, Settings } from "lucide-react";
 
 export interface AppShellProps {
@@ -18,6 +23,46 @@ export interface AppShellProps {
   hidePendenciasBtn?: boolean;
 }
 
+function avatarInitials(usuario: Usuario): string {
+  const base = (usuario.nome || usuario.nomeCompleto || "?").trim();
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return base.slice(0, 2).toUpperCase() || "?";
+}
+
+function UserAvatar({ usuario }: { usuario: Usuario }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const photo = usuario.photoURL?.trim() || "";
+  const showImg = Boolean(photo) && !imgFailed;
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [photo]);
+
+  if (showImg) {
+    return (
+      <img
+        src={photo}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setImgFailed(true)}
+        className="h-9 w-9 rounded-full object-cover border border-gray-200 bg-gray-100 shrink-0"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="h-9 w-9 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0 border border-blue-700/20"
+      aria-hidden
+    >
+      {avatarInitials(usuario)}
+    </div>
+  );
+}
+
 export default function AppShell({
   usuario,
   children,
@@ -29,6 +74,7 @@ export default function AppShell({
 }: AppShellProps) {
   const canApprove = canApproveScales(usuario);
   const [pendingTotal, setPendingTotal] = useState(0);
+  const [onlineCount, setOnlineCount] = useState(1);
 
   const refreshPendencias = useCallback(async () => {
     if (!canApprove) {
@@ -54,6 +100,28 @@ export default function AppShell({
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refreshPendencias]);
+
+  useEffect(() => {
+    startPresence(usuario);
+    const unsub = subscribeOnlineCount(setOnlineCount);
+    return () => {
+      unsub();
+      void stopPresence(usuario.re);
+    };
+    // Presença amarrada ao RE da sessão; photoURL atualiza no próximo heartbeat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuario.re]);
+
+  const onlineLabel = useMemo(() => {
+    const n = Math.max(0, onlineCount);
+    return n === 1 ? "1 online" : `${n} online`;
+  }, [onlineCount]);
+
+  const handleLogoutClick = () => {
+    void stopPresence(usuario.re).finally(() => {
+      onLogout();
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -81,13 +149,34 @@ export default function AppShell({
             </button>
 
             <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-              <div className="hidden md:block text-right">
-                <div className="text-sm font-semibold text-gray-800">
-                  {usuario.postoGrad} {usuario.nome}
+              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                <UserAvatar usuario={usuario} />
+                <div className="min-w-0 hidden sm:block text-right">
+                  <div className="text-sm font-semibold text-gray-800 truncate">
+                    {usuario.postoGrad} {usuario.nome}
+                  </div>
+                  <div className="text-xs text-gray-500 flex items-center justify-end gap-1.5">
+                    <span
+                      className="inline-flex items-center gap-1 tabular-nums text-emerald-700 font-semibold"
+                      title="Usuários autenticados ativos neste momento"
+                    >
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      {onlineLabel}
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span className="truncate">
+                      R.E. {usuario.re} · {usuario.perfil || "Operador"}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-500">
-                  R.E. {usuario.re} · {usuario.perfil || "Operador"} ·{" "}
-                  {usuario.secao}
+                <div className="sm:hidden flex flex-col items-end">
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] tabular-nums text-emerald-700 font-bold"
+                    title="Usuários online"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {onlineLabel}
+                  </span>
                 </div>
               </div>
 
@@ -125,7 +214,7 @@ export default function AppShell({
                 <button
                   id="logout-btn"
                   type="button"
-                  onClick={onLogout}
+                  onClick={handleLogoutClick}
                   className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
                 >
                   <LogOut size={14} />

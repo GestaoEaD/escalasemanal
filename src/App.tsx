@@ -193,8 +193,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    if (usuario) {
-      void auditAuth("LOGOUT", usuario).catch((err) =>
+    const leaving = usuario;
+    if (leaving) {
+      void auditAuth("LOGOUT", leaving).catch((err) =>
         console.warn("Falha ao registrar logout na auditoria:", err)
       );
     }

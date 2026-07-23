@@ -53,7 +53,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setMessage(null);
 
     try {
-      const { email } = await signInWithGoogle();
+      const { email, photoURL } = await signInWithGoogle();
       let userData: Usuario | null = null;
       try {
         userData = await findUsuarioByEmail(email);
@@ -77,6 +77,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         email,
         authProvider: "google",
         emailVerificado: true,
+        photoURL,
       });
     } catch (err) {
       if (err instanceof GoogleAuthFlowError) {

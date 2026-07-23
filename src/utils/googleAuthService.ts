@@ -154,7 +154,11 @@ export function waitForAuthUser(timeoutMs = 8000): Promise<User | null> {
   });
 }
 
-export async function signInWithGoogle(): Promise<{ email: string; firebaseUid: string }> {
+export async function signInWithGoogle(): Promise<{
+  email: string;
+  firebaseUid: string;
+  photoURL: string | null;
+}> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: "select_account" });
   provider.addScope("email");
@@ -167,7 +171,11 @@ export async function signInWithGoogle(): Promise<{ email: string; firebaseUid: 
       await signOutGoogle();
       throw new GoogleAuthFlowError("temporary");
     }
-    return { email, firebaseUid: result.user.uid };
+    return {
+      email,
+      firebaseUid: result.user.uid,
+      photoURL: result.user.photoURL || null,
+    };
   } catch (err) {
     if (err instanceof GoogleAuthFlowError) throw err;
     console.warn("Falha no login Google:", err);
@@ -186,4 +194,9 @@ export async function signOutGoogle(): Promise<void> {
 export function getCurrentAuthEmail(): string | null {
   const email = normalizeEmail(auth.currentUser?.email);
   return email || null;
+}
+
+/** Foto do perfil Google autenticado (pode ser null). */
+export function getCurrentAuthPhotoURL(): string | null {
+  return auth.currentUser?.photoURL || null;
 }

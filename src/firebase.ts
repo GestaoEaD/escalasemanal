@@ -17,6 +17,7 @@ import {
   Timestamp,
   serverTimestamp,
   runTransaction,
+  onSnapshot,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
@@ -61,4 +62,5 @@ export {
   Timestamp,
   serverTimestamp,
   runTransaction,
+  onSnapshot,
 };
