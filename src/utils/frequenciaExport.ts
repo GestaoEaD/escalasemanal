@@ -154,6 +154,10 @@ const FREQUENCIA_PRINT_CSS = `
     line-height: 1.25;
     empty-cells: show;
     margin: 0 0 16px;
+    /* Larguras compartilhadas com Observações (alinhamento sob Identificação) */
+    --id-posto: 10%;
+    --id-re: 8%;
+    --id-nome: 11%;
   }
 
   .freq-table thead th {
@@ -190,14 +194,14 @@ const FREQUENCIA_PRINT_CSS = `
     padding: 5px 3px;
   }
 
-  .freq-table .col-posto { width: 10%; text-align: left; }
+  .freq-table .col-posto { width: var(--id-posto); text-align: left; }
   .freq-table .col-re {
-    width: 8%;
+    width: var(--id-re);
     text-align: left;
     font-variant-numeric: tabular-nums;
     font-family: ui-monospace, "Segoe UI", Arial, monospace;
   }
-  .freq-table .col-nome { width: 11%; text-align: left; font-weight: 650; color: #101828; }
+  .freq-table .col-nome { width: var(--id-nome); text-align: left; font-weight: 650; color: #101828; }
   .freq-table .col-day {
     text-align: center;
     font-variant-numeric: tabular-nums;
@@ -268,11 +272,15 @@ const FREQUENCIA_PRINT_CSS = `
     table-layout: fixed;
     font-size: 9px;
     margin: 0 0 16px;
+    /* Mesmas larguras da Identificação da grade principal → obs inicia no dia 1 */
+    --id-posto: 10%;
+    --id-re: 8%;
+    --id-nome: 11%;
   }
   .obs-table th,
   .obs-table td {
     border: 1px solid #e4e7ec;
-    padding: 6px 7px;
+    padding: 5px 3px;
     vertical-align: top;
   }
   .obs-table th {
@@ -283,14 +291,28 @@ const FREQUENCIA_PRINT_CSS = `
     text-transform: uppercase;
     border-color: #d0d5dd;
   }
-  .obs-table .col-obs-posto { width: 12%; text-align: left; }
-  .obs-table .col-obs-re { width: 9%; text-align: left; }
+  .obs-table .col-obs-posto {
+    width: var(--id-posto);
+    text-align: left;
+    padding-left: 5px;
+    padding-right: 4px;
+  }
+  .obs-table .col-obs-re {
+    width: var(--id-re);
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "Segoe UI", Arial, monospace;
+    padding-left: 5px;
+    padding-right: 4px;
+  }
   .obs-table .col-obs-nome {
-    width: 12%;
+    width: var(--id-nome);
     text-align: left;
     font-weight: 750;
     color: #101828;
     white-space: nowrap;
+    padding-left: 5px;
+    padding-right: 4px;
   }
   .obs-table .col-obs-text {
     width: auto;
@@ -299,6 +321,8 @@ const FREQUENCIA_PRINT_CSS = `
     word-break: break-word;
     line-height: 1.4;
     color: #1f2937;
+    padding-left: 4px;
+    padding-right: 6px;
   }
 
   .meta-grid {
@@ -467,15 +491,31 @@ const FREQUENCIA_PRINT_CSS = `
       background: #f2f4f7 !important;
       color: #344054 !important;
       border: 1px solid #d0d5dd !important;
-      padding: 5px 6px !important;
     }
     .obs-table td {
       border: 1px solid #e4e7ec !important;
-      padding: 5px 6px !important;
+    }
+    .obs-table .col-obs-posto {
+      width: 10% !important;
+      padding-left: 3px !important;
+      padding-right: 2px !important;
+    }
+    .obs-table .col-obs-re {
+      width: 8% !important;
+      padding-left: 3px !important;
+      padding-right: 2px !important;
+    }
+    .obs-table .col-obs-nome {
+      width: 11% !important;
+      padding-left: 3px !important;
+      padding-right: 2px !important;
+      font-weight: 750 !important;
     }
     .obs-table .col-obs-text {
       text-align: left !important;
       white-space: pre-wrap !important;
+      padding-left: 3px !important;
+      padding-right: 5px !important;
     }
 
     .meta-grid {
@@ -654,9 +694,15 @@ export function exportFrequenciaToPDF(options: {
 
   <h2 class="section-title">Observações</h2>
   <table class="obs-table">
+    <colgroup>
+      <col class="col-obs-posto" />
+      <col class="col-obs-re" />
+      <col class="col-obs-nome" />
+      <col class="col-obs-text" />
+    </colgroup>
     <thead>
       <tr>
-        <th class="col-obs-posto">Posto/Graduação</th>
+        <th class="col-obs-posto">Posto/Grad.</th>
         <th class="col-obs-re">RE</th>
         <th class="col-obs-nome">Nome</th>
         <th class="col-obs-text">Observação</th>
