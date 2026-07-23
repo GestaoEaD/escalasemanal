@@ -20,6 +20,11 @@ import {
 } from "../../utils/frequenciaService";
 import { daysInMonth, dayKey } from "../../utils/frequenciaIds";
 import { recalcAllRows, buildLegendaLookup } from "../../utils/frequenciaCalculo";
+import {
+  displayFrequenciaCelula,
+  isWeekendDay,
+  weekendCellClass,
+} from "../../utils/frequenciaDisplay";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
 import {
@@ -54,6 +59,11 @@ interface Props {
   onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
 }
 
+function stampNow(): string {
+  const now = new Date();
+  return `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
 export default function FrequenciaEditor({
   usuario,
   year,
@@ -71,7 +81,9 @@ export default function FrequenciaEditor({
   const [success, setSuccess] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [obsDraft, setObsDraft] = useState("");
+  const [obsReDraft, setObsReDraft] = useState("");
   const [editingObsId, setEditingObsId] = useState<string | null>(null);
+  const [editingObsText, setEditingObsText] = useState("");
   const [revisaoMotivo, setRevisaoMotivo] = useState("");
   const [revisaoOpen, setRevisaoOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
@@ -82,6 +94,13 @@ export default function FrequenciaEditor({
     () => Array.from({ length: nDays }, (_, i) => dayKey(i + 1)),
     [nDays]
   );
+  const weekendByKey = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    for (let d = 1; d <= nDays; d++) {
+      map[dayKey(d)] = isWeekendDay(year, month, d);
+    }
+    return map;
+  }, [year, month, nDays]);
 
   const status = normalizeEscalaStatus(docData?.status);
   const editable = canEditFrequencia(usuario, year, month, status);
@@ -108,7 +127,6 @@ export default function FrequenciaEditor({
           rows: recalcAllRows(next.rows, legs),
         };
         if (result.created) {
-          // Persistir rascunho inicial após sync
           next = await saveControleFrequencia(next, usuario);
           await auditSyncFrequencia(next, usuario);
           setSuccess("Controle criado e sincronizado com as escalas.");
@@ -129,17 +147,20 @@ export default function FrequenciaEditor({
     void load();
   }, [load]);
 
-  const setCell = (re: string, key: string, valor: string) => {
+  const setCell = (re: string, key: string, valorRaw: string) => {
     if (!docData || !editable) return;
+    // Permite vazio; não reconverte para hífen. Trim só remove espaços laterais.
+    const valor = valorRaw.trim();
     setDocData((prev) => {
       if (!prev) return prev;
       const rows = prev.rows.map((row) => {
         if (row.re !== re) return row;
+        const prevCel = row.dias[key];
         const cel: FrequenciaCelula = {
-          valor: valor.trim(),
+          valor,
           origem: "edicao_manual",
           editadoManualmente: true,
-          valorEscalaOriginal: row.dias[key]?.valorEscalaOriginal,
+          valorEscalaOriginal: prevCel?.valorEscalaOriginal,
         };
         return {
           ...row,
@@ -187,13 +208,11 @@ export default function FrequenciaEditor({
         usuario,
         forceResync: true,
       });
-      // Merge with current manual cells already in result via sync engine
       let next = {
         ...result.doc,
         rows: recalcAllRows(result.doc.rows, legendas),
         observacoes: result.doc.observacoes,
       };
-      // If local dirty manual edits exist beyond last load, prefer current docData manual cells
       if (docData) {
         const mergedRows = result.doc.rows.map((r) => {
           const local = docData.rows.find((x) => x.re === r.re);
@@ -283,48 +302,57 @@ export default function FrequenciaEditor({
     }
   };
 
+  const selectedObsColab = useMemo(() => {
+    if (!docData || !obsReDraft) return null;
+    return docData.rows.find((r) => r.re === obsReDraft) || null;
+  }, [docData, obsReDraft]);
+
   const addObs = () => {
-    if (!docData || !editable || !obsDraft.trim()) return;
-    const now = new Date();
-    const stamp = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    if (!docData || !editable || !obsDraft.trim() || !obsReDraft) return;
+    const colab = docData.rows.find((r) => r.re === obsReDraft);
+    if (!colab) return;
     const obs: ControleFrequenciaObservacao = {
       id: `obs_manual_${Date.now()}`,
       texto: obsDraft.trim(),
       origem: "manual",
+      re: colab.re,
       criadoPor: `${usuario.postoGrad} ${usuario.nome}`,
-      criadoEm: stamp,
+      criadoEm: stampNow(),
     };
     setDocData({ ...docData, observacoes: [...docData.observacoes, obs] });
     setObsDraft("");
+    setObsReDraft("");
     setDirty(true);
   };
 
-  const saveEditObs = (id: string, texto: string) => {
+  const startEditObs = (o: ControleFrequenciaObservacao) => {
+    setEditingObsId(o.id);
+    setEditingObsText(o.texto);
+  };
+
+  const saveEditObs = (id: string) => {
     if (!docData || !editable) return;
-    const now = new Date();
-    const stamp = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     setDocData({
       ...docData,
       observacoes: docData.observacoes.map((o) =>
         o.id === id
           ? {
               ...o,
-              texto,
+              texto: editingObsText,
               editadoPor: `${usuario.postoGrad} ${usuario.nome}`,
-              editadoEm: stamp,
+              editadoEm: stampNow(),
             }
           : o
       ),
     });
     setEditingObsId(null);
+    setEditingObsText("");
     setDirty(true);
   };
 
   const deleteObs = (id: string) => {
     if (!docData || !editable) return;
     if (!confirm("Excluir esta observação?")) return;
-    const now = new Date();
-    const stamp = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     setDocData({
       ...docData,
       observacoes: docData.observacoes.map((o) =>
@@ -333,12 +361,21 @@ export default function FrequenciaEditor({
               ...o,
               excluido: true,
               editadoPor: `${usuario.postoGrad} ${usuario.nome}`,
-              editadoEm: stamp,
+              editadoEm: stampNow(),
             }
           : o
       ),
     });
     setDirty(true);
+  };
+
+  const resolveObsIdent = (o: ControleFrequenciaObservacao) => {
+    const row = o.re ? docData?.rows.find((r) => r.re === o.re) : undefined;
+    return {
+      postoGrad: row?.postoGrad || "—",
+      re: o.re || "—",
+      nome: row?.nome || "—",
+    };
   };
 
   const visibleObs = (docData?.observacoes || []).filter((o) => !o.excluido);
@@ -372,10 +409,15 @@ export default function FrequenciaEditor({
     );
   }
 
+  const idSticky =
+    "bg-white print:bg-white group-hover:bg-gray-50 print:group-hover:bg-white";
+  const sepId = "border-r-2 border-r-gray-500";
+  const sepTotais = "border-l-2 border-l-gray-500";
+
   return (
     <div className="min-h-screen bg-gray-50 pb-16 frequencia-print-root">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-xs print:static print:shadow-none">
-        <div className="max-w-[1400px] mx-auto px-3 sm:px-4 h-auto py-2 flex flex-wrap items-center gap-2">
+        <div className="max-w-[1600px] mx-auto px-3 sm:px-4 h-auto py-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onBack}
@@ -507,7 +549,7 @@ export default function FrequenciaEditor({
         </div>
       </header>
 
-      <main className="max-w-[1400px] mx-auto px-3 sm:px-4 mt-4 space-y-4">
+      <main className="max-w-[1600px] mx-auto px-3 sm:px-4 mt-4 space-y-4">
         {(error || success) && (
           <div
             className={`text-xs font-semibold rounded-lg px-3 py-2 print:hidden ${
@@ -520,7 +562,6 @@ export default function FrequenciaEditor({
           </div>
         )}
 
-        {/* Print header */}
         <div className="hidden print:block text-center mb-2">
           <div className="text-[10px] font-bold uppercase tracking-wide">
             Polícia Militar do Estado de São Paulo
@@ -531,32 +572,60 @@ export default function FrequenciaEditor({
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black">
+        <div className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
           <div className="overflow-x-auto table-scroll">
-            <table className="min-w-full text-[10px] border-collapse frequencia-table">
-              <thead className="bg-gray-100 sticky top-0 z-10 print:static">
-                <tr>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap">
+            <table className="frequencia-table border-collapse text-[11px] min-w-max w-full">
+              <thead>
+                <tr className="bg-gray-800 text-white">
+                  <th
+                    colSpan={3}
+                    className={`px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider ${sepId}`}
+                  >
+                    Identificação
+                  </th>
+                  <th
+                    colSpan={dayKeys.length}
+                    className="px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider"
+                  >
+                    Frequência
+                  </th>
+                  <th
+                    colSpan={2}
+                    className={`px-2 py-1.5 text-center text-[10px] font-bold uppercase tracking-wider ${sepTotais}`}
+                  >
+                    Totais
+                  </th>
+                </tr>
+                <tr className="bg-gray-100 text-gray-900 sticky top-0 z-10 print:static">
+                  <th
+                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[5.5rem] sticky left-0 z-20 bg-gray-100 print:static`}
+                  >
                     POSTO/GRAD.
                   </th>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap">
+                  <th
+                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[4.75rem] sticky left-[5.5rem] z-20 bg-gray-100 print:static`}
+                  >
                     RE
                   </th>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[90px]">
+                  <th
+                    className={`border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[8rem] sticky left-[10.25rem] z-20 bg-gray-100 print:static ${sepId}`}
+                  >
                     NOME
                   </th>
                   {dayKeys.map((k) => (
                     <th
                       key={k}
-                      className="border border-gray-300 px-0.5 py-1 text-center font-bold w-6"
+                      className={`border border-gray-300 px-1 py-2 text-center font-bold min-w-[2rem] align-middle ${weekendCellClass(weekendByKey[k])}`}
                     >
                       {Number(k)}
                     </th>
                   ))}
-                  <th className="border border-gray-300 px-1 py-1 text-center font-bold whitespace-nowrap">
+                  <th
+                    className={`border border-gray-300 px-2 py-2 text-center font-bold whitespace-nowrap min-w-[3.25rem] align-middle ${sepTotais}`}
+                  >
                     1/2 DIÁRIA
                   </th>
-                  <th className="border border-gray-300 px-1 py-1 text-center font-bold">
+                  <th className="border border-gray-300 px-2 py-2 text-center font-bold whitespace-nowrap min-w-[2.75rem] align-middle">
                     A.A.
                   </th>
                 </tr>
@@ -566,21 +635,27 @@ export default function FrequenciaEditor({
                   <tr>
                     <td
                       colSpan={3 + dayKeys.length + 2}
-                      className="border border-gray-200 px-3 py-6 text-center text-gray-400"
+                      className="border border-gray-200 px-3 py-8 text-center text-gray-400"
                     >
                       Nenhum colaborador ativo nesta seção. Sincronize ou verifique o cadastro.
                     </td>
                   </tr>
                 ) : (
                   docData.rows.map((row) => (
-                    <tr key={row.re} className="hover:bg-gray-50 print:hover:bg-transparent">
-                      <td className="border border-gray-200 px-1.5 py-0.5 font-semibold whitespace-nowrap">
+                    <tr key={row.re} className="group hover:bg-gray-50/80 print:hover:bg-transparent">
+                      <td
+                        className={`border border-gray-200 px-2 py-1.5 text-left font-semibold whitespace-nowrap align-middle sticky left-0 z-[1] print:static ${idSticky}`}
+                      >
                         {row.postoGrad}
                       </td>
-                      <td className="border border-gray-200 px-1.5 py-0.5 font-mono whitespace-nowrap">
+                      <td
+                        className={`border border-gray-200 px-2 py-1.5 text-left font-mono whitespace-nowrap align-middle sticky left-[5.5rem] z-[1] print:static ${idSticky}`}
+                      >
                         {row.re}
                       </td>
-                      <td className="border border-gray-200 px-1.5 py-0.5 font-bold whitespace-nowrap">
+                      <td
+                        className={`border border-gray-200 px-2 py-1.5 text-left font-bold whitespace-nowrap align-middle sticky left-[10.25rem] z-[1] print:static ${idSticky} ${sepId}`}
+                      >
                         {row.nome}
                       </td>
                       {dayKeys.map((k) => {
@@ -589,37 +664,61 @@ export default function FrequenciaEditor({
                           origem: "vazio" as const,
                           editadoManualmente: false,
                         };
+                        const shown = displayFrequenciaCelula(cel);
+                        const weekend = weekendByKey[k];
                         return (
-                          <td key={k} className="border border-gray-200 p-0 text-center">
+                          <td
+                            key={k}
+                            className={`border border-gray-200 p-0.5 text-center align-middle ${weekendCellClass(weekend)}`}
+                          >
                             {editable ? (
                               <input
-                                value={cel.valor}
-                                onChange={(e) => setCell(row.re, k, e.target.value)}
+                                value={shown}
+                                onChange={(e) => {
+                                  const next = e.target.value;
+                                  const wasEmptyNonManual =
+                                    !cel.editadoManualmente && !String(cel.valor || "").trim();
+                                  // Evita gravar o hífen visual como edição se o usuário só reexibiu "-"
+                                  if (wasEmptyNonManual && next === "-") return;
+                                  setCell(row.re, k, next);
+                                }}
+                                onFocus={(e) => {
+                                  if (e.target.value === "-") e.target.select();
+                                }}
                                 list={`freq-opts-${row.re}`}
                                 title={
                                   cel.editadoManualmente
-                                    ? "Edição manual"
-                                    : `Origem: ${cel.origem}`
+                                    ? "Edição manual (preservada na sincronização)"
+                                    : undefined
                                 }
-                                className={`w-6 h-6 text-center text-[10px] font-bold border-0 focus:ring-1 focus:ring-blue-400 bg-transparent ${
-                                  cel.editadoManualmente ? "text-blue-800" : ""
+                                aria-label={`Dia ${Number(k)} — ${row.nome}`}
+                                className={`w-full min-w-[1.75rem] h-8 px-0.5 text-center text-[11px] font-bold border border-transparent rounded-sm bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-300 align-middle ${
+                                  cel.editadoManualmente ? "text-blue-800 bg-blue-50/40" : "text-gray-900"
                                 }`}
                               />
                             ) : (
-                              <span className="inline-block w-6 font-bold">{cel.valor}</span>
+                              <span
+                                className={`inline-flex items-center justify-center w-full min-h-[2rem] font-bold ${
+                                  cel.editadoManualmente ? "text-blue-800" : "text-gray-900"
+                                }`}
+                              >
+                                {shown}
+                              </span>
                             )}
                           </td>
                         );
                       })}
-                      <td className="border border-gray-200 px-1 py-0.5 text-center font-bold">
+                      <td
+                        className={`border border-gray-200 px-2 py-1.5 text-center font-bold align-middle ${sepTotais}`}
+                      >
                         {row.meiaDiaria}
                       </td>
-                      <td className="border border-gray-200 px-1 py-0.5 text-center font-bold">
+                      <td className="border border-gray-200 px-2 py-1.5 text-center font-bold align-middle">
                         {row.aa}
                       </td>
                       <datalist id={`freq-opts-${row.re}`}>
                         {optionValues.map((v) => (
-                          <option key={v} value={v} />
+                          <option key={`${row.re}-${v || "empty"}`} value={v} />
                         ))}
                       </datalist>
                     </tr>
@@ -630,110 +729,189 @@ export default function FrequenciaEditor({
           </div>
         </div>
 
-        {/* Observações */}
-        <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-xs print:shadow-none print:border-black">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800 mb-3">
-            Observações
-          </h3>
-          {visibleObs.length === 0 ? (
-            <p className="text-xs text-gray-400 mb-3">Nenhuma observação.</p>
-          ) : (
-            <ul className="space-y-2 mb-3">
-              {visibleObs.map((o, idx) => (
-                <li
-                  key={o.id}
-                  className="border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-800"
-                >
-                  {editingObsId === o.id ? (
-                    <div className="space-y-2">
-                      <textarea
-                        defaultValue={o.texto}
-                        id={`edit-obs-${o.id}`}
-                        className="w-full border border-gray-300 rounded-md p-2 text-xs"
-                        rows={2}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="px-2 py-1 text-[10px] font-bold bg-blue-600 text-white rounded cursor-pointer"
-                          onClick={() => {
-                            const el = document.getElementById(
-                              `edit-obs-${o.id}`
-                            ) as HTMLTextAreaElement | null;
-                            saveEditObs(o.id, el?.value || o.texto);
-                          }}
-                        >
-                          Salvar
-                        </button>
-                        <button
-                          type="button"
-                          className="px-2 py-1 text-[10px] font-bold bg-gray-100 rounded cursor-pointer"
-                          onClick={() => setEditingObsId(null)}
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2 justify-between">
-                      <div>
-                        <span className="font-bold mr-1">{idx + 1}.</span>
-                        {o.re ? (
-                          <span className="text-gray-500 mr-1">[{o.re}]</span>
-                        ) : null}
-                        {o.texto}
-                        <div className="text-[10px] text-gray-400 mt-1">
-                          Origem: {o.origem}
-                          {o.editadoPor ? ` · Editado por ${o.editadoPor}` : ""}
-                        </div>
-                      </div>
-                      {editable && (
-                        <div className="flex gap-1 print:hidden shrink-0">
-                          <button
-                            type="button"
-                            className="text-[10px] font-bold text-blue-700 cursor-pointer"
-                            onClick={() => setEditingObsId(o.id)}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            className="text-[10px] font-bold text-red-600 cursor-pointer"
-                            onClick={() => deleteObs(o.id)}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
+        {/* Observações — tabela */}
+        <section className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
+          <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800">
+              Observações
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse min-w-[640px]">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[5.5rem]">
+                    POSTO/GRAD.
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left font-bold whitespace-nowrap min-w-[4.75rem]">
+                    RE
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left font-bold min-w-[12rem]">
+                    NOME / OBSERVAÇÃO
+                  </th>
+                  {editable && (
+                    <th className="border border-gray-300 px-2 py-2 text-center font-bold w-24 print:hidden">
+                      Ações
+                    </th>
                   )}
-                </li>
-              ))}
-            </ul>
-          )}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleObs.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={editable ? 4 : 3}
+                      className="border border-gray-200 px-3 py-5 text-center text-gray-400"
+                    >
+                      Nenhuma observação.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleObs.map((o) => {
+                    const ident = resolveObsIdent(o);
+                    return (
+                      <tr key={o.id} className="hover:bg-gray-50/80 print:hover:bg-transparent">
+                        <td className="border border-gray-200 px-2 py-2 text-left font-semibold align-middle whitespace-nowrap">
+                          {ident.postoGrad}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-2 text-left font-mono align-middle whitespace-nowrap">
+                          {ident.re}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-2 text-left align-middle">
+                          {editingObsId === o.id ? (
+                            <textarea
+                              value={editingObsText}
+                              onChange={(e) => setEditingObsText(e.target.value)}
+                              className="w-full border border-gray-300 rounded-md p-2 text-xs min-h-[4rem]"
+                              rows={2}
+                            />
+                          ) : (
+                            <div>
+                              <span className="font-bold text-gray-900">{ident.nome}</span>
+                              <span className="text-gray-500"> — </span>
+                              <span className="text-gray-800 whitespace-pre-wrap">{o.texto}</span>
+                            </div>
+                          )}
+                        </td>
+                        {editable && (
+                          <td className="border border-gray-200 px-2 py-2 text-center align-middle print:hidden">
+                            {editingObsId === o.id ? (
+                              <div className="flex flex-col gap-1 items-center">
+                                <button
+                                  type="button"
+                                  className="text-[10px] font-bold text-blue-700 cursor-pointer"
+                                  onClick={() => saveEditObs(o.id)}
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-[10px] font-bold text-gray-500 cursor-pointer"
+                                  onClick={() => {
+                                    setEditingObsId(null);
+                                    setEditingObsText("");
+                                  }}
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-2 justify-center items-center">
+                                <button
+                                  type="button"
+                                  className="text-[10px] font-bold text-blue-700 cursor-pointer"
+                                  onClick={() => startEditObs(o)}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-red-600 cursor-pointer"
+                                  onClick={() => deleteObs(o.id)}
+                                  aria-label="Excluir observação"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
           {editable && (
-            <div className="flex gap-2 print:hidden">
-              <input
-                value={obsDraft}
-                onChange={(e) => setObsDraft(e.target.value)}
-                placeholder="Nova observação…"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-xs"
-              />
-              <button
-                type="button"
-                onClick={addObs}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg cursor-pointer"
-              >
-                <Plus size={13} />
-                Adicionar
-              </button>
+            <div className="border-t border-gray-200 px-3 py-3 print:hidden bg-gray-50/60">
+              <div className="grid gap-2 sm:grid-cols-[minmax(7rem,9rem)_minmax(5rem,7rem)_minmax(7rem,10rem)_1fr_auto] items-end">
+                <label className="block">
+                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                    Selecionar RE
+                  </span>
+                  <select
+                    value={obsReDraft}
+                    onChange={(e) => setObsReDraft(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white cursor-pointer"
+                  >
+                    <option value="">—</option>
+                    {docData.rows.map((r) => (
+                      <option key={r.re} value={r.re}>
+                        {r.re}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                    Posto/Grad.
+                  </span>
+                  <input
+                    readOnly
+                    value={selectedObsColab?.postoGrad || ""}
+                    placeholder="Automático"
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-700"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                    Nome
+                  </span>
+                  <input
+                    readOnly
+                    value={selectedObsColab?.nome || ""}
+                    placeholder="Automático"
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-700"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                    Nova observação
+                  </span>
+                  <input
+                    value={obsDraft}
+                    onChange={(e) => setObsDraft(e.target.value)}
+                    placeholder="Texto da observação…"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={addObs}
+                  disabled={!obsReDraft || !obsDraft.trim()}
+                  className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed h-[34px]"
+                >
+                  <Plus size={13} />
+                  Adicionar
+                </button>
+              </div>
             </div>
           )}
         </section>
 
-        {/* Rodapé responsáveis */}
         <section className="grid sm:grid-cols-2 gap-3 print:grid-cols-2">
-          <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs">
+          <div className="bg-white border border-gray-300 rounded-xl p-4 text-xs print:border-black print:rounded-none">
             <div className="font-bold uppercase text-gray-500 mb-2 tracking-wider">
               Responsável pela edição
             </div>
@@ -751,7 +929,7 @@ export default function FrequenciaEditor({
               <div className="text-gray-400">Ainda sem edição salva</div>
             )}
           </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-4 text-xs">
+          <div className="bg-white border border-gray-300 rounded-xl p-4 text-xs print:border-black print:rounded-none">
             <div className="font-bold uppercase text-gray-500 mb-2 tracking-wider">
               Responsável pela aprovação
             </div>
@@ -845,8 +1023,9 @@ export default function FrequenciaEditor({
           body * { visibility: hidden; }
           .frequencia-print-root, .frequencia-print-root * { visibility: visible; }
           .frequencia-print-root { position: absolute; left: 0; top: 0; width: 100%; }
-          .frequencia-table { font-size: 8px !important; }
-          .frequencia-table th, .frequencia-table td { padding: 1px 2px !important; }
+          .frequencia-table { font-size: 7.5px !important; }
+          .frequencia-table th, .frequencia-table td { padding: 2px 3px !important; }
+          .frequencia-table input { border: none !important; background: transparent !important; height: auto !important; min-height: 0 !important; }
           .print\\:hidden { display: none !important; }
         }
       `}</style>

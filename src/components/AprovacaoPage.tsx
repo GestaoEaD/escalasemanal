@@ -13,6 +13,11 @@ import {
 } from "../types";
 import { daysInMonth, dayKey } from "../utils/frequenciaIds";
 import {
+  displayFrequenciaCelula,
+  isWeekendDay,
+  weekendCellClass,
+} from "../utils/frequenciaDisplay";
+import {
   approveScale,
   getClosedApprovalMessage,
   getEscalaDocumentoLabel,
@@ -163,6 +168,17 @@ function ReadOnlyFrequenciaTable({
     (o) => !o.excluido && o.texto?.trim()
   );
   const mesNome = MESES_NOMES[docData.mes - 1] || `Mês ${docData.mes}`;
+  const sepId = "border-r-2 border-r-gray-500";
+  const sepTotais = "border-l-2 border-l-gray-500";
+
+  const resolveObsIdent = (o: ControleFrequenciaObservacao) => {
+    const row = o.re ? rows.find((r) => r.re === o.re) : undefined;
+    return {
+      postoGrad: row?.postoGrad || "—",
+      re: o.re || "—",
+      nome: row?.nome || "—",
+    };
+  };
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
@@ -170,18 +186,35 @@ function ReadOnlyFrequenciaTable({
         {title} — {docData.secao} · {mesNome}/{docData.ano}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-[10px]">
-          <thead className="bg-gray-900 text-white">
-            <tr>
-              <th className="px-2 py-2 text-left font-bold sticky left-0 bg-gray-900">Posto</th>
-              <th className="px-2 py-2 text-left font-bold">R.E.</th>
-              <th className="px-2 py-2 text-left font-bold">Nome</th>
-              {dayKeys.map((k) => (
-                <th key={k} className="px-0.5 py-2 text-center font-bold">
-                  {Number(k)}
-                </th>
-              ))}
-              <th className="px-1 py-2 text-center font-bold">1/2</th>
+        <table className="w-full min-w-[960px] text-[10px] border-collapse">
+          <thead>
+            <tr className="bg-gray-800 text-white">
+              <th colSpan={3} className={`px-2 py-1.5 text-center font-bold uppercase ${sepId}`}>
+                Identificação
+              </th>
+              <th colSpan={nDays} className="px-2 py-1.5 text-center font-bold uppercase">
+                Frequência
+              </th>
+              <th colSpan={2} className={`px-2 py-1.5 text-center font-bold uppercase ${sepTotais}`}>
+                Totais
+              </th>
+            </tr>
+            <tr className="bg-gray-900 text-white">
+              <th className="px-2 py-2 text-left font-bold">POSTO/GRAD.</th>
+              <th className="px-2 py-2 text-left font-bold">RE</th>
+              <th className={`px-2 py-2 text-left font-bold ${sepId}`}>NOME</th>
+              {dayKeys.map((k) => {
+                const weekend = isWeekendDay(docData.ano, docData.mes, Number(k));
+                return (
+                  <th
+                    key={k}
+                    className={`px-1 py-2 text-center font-bold min-w-[1.75rem] ${weekendCellClass(weekend)}`}
+                  >
+                    {Number(k)}
+                  </th>
+                );
+              })}
+              <th className={`px-1 py-2 text-center font-bold ${sepTotais}`}>1/2</th>
               <th className="px-1 py-2 text-center font-bold">A.A.</th>
             </tr>
           </thead>
@@ -198,20 +231,35 @@ function ReadOnlyFrequenciaTable({
             ) : (
               rows.map((row, idx) => (
                 <tr key={row.re} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                  <td className="px-2 py-1 font-bold text-gray-900 sticky left-0 bg-inherit">
+                  <td className="px-2 py-1.5 font-bold text-gray-900 text-left align-middle">
                     {row.postoGrad}
                   </td>
-                  <td className="px-2 py-1 font-mono text-gray-600">{row.re}</td>
-                  <td className="px-2 py-1 font-semibold text-gray-800 whitespace-nowrap">
+                  <td className="px-2 py-1.5 font-mono text-gray-600 text-left align-middle">
+                    {row.re}
+                  </td>
+                  <td
+                    className={`px-2 py-1.5 font-semibold text-gray-800 whitespace-nowrap text-left align-middle ${sepId}`}
+                  >
                     {row.nome}
                   </td>
-                  {dayKeys.map((k) => (
-                    <td key={k} className="px-0.5 py-1 text-center font-bold text-gray-700">
-                      {row.dias?.[k]?.valor || ""}
-                    </td>
-                  ))}
-                  <td className="px-1 py-1 text-center font-bold">{row.meiaDiaria ?? 0}</td>
-                  <td className="px-1 py-1 text-center font-bold">{row.aa ?? 0}</td>
+                  {dayKeys.map((k) => {
+                    const weekend = isWeekendDay(docData.ano, docData.mes, Number(k));
+                    const cel = row.dias?.[k];
+                    return (
+                      <td
+                        key={k}
+                        className={`px-0.5 py-1.5 text-center font-bold text-gray-700 align-middle ${weekendCellClass(weekend)}`}
+                      >
+                        {displayFrequenciaCelula(cel)}
+                      </td>
+                    );
+                  })}
+                  <td className={`px-1 py-1.5 text-center font-bold align-middle ${sepTotais}`}>
+                    {row.meiaDiaria ?? 0}
+                  </td>
+                  <td className="px-1 py-1.5 text-center font-bold align-middle">
+                    {row.aa ?? 0}
+                  </td>
                 </tr>
               ))
             )}
@@ -219,18 +267,43 @@ function ReadOnlyFrequenciaTable({
         </table>
       </div>
       {observacoes.length > 0 && (
-        <div className="border-t border-gray-200 px-4 py-3 space-y-2 bg-gray-50">
-          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+        <div className="border-t border-gray-200">
+          <div className="px-4 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider bg-gray-50">
             Observações
           </div>
-          {observacoes.map((o) => (
-            <div key={o.id} className="rounded-lg border border-gray-200 bg-white p-2.5">
-              {o.re ? (
-                <div className="text-[11px] font-bold text-gray-900 mb-1">RE {o.re}</div>
-              ) : null}
-              <div className="text-[11px] text-gray-700 whitespace-pre-wrap">{o.texto}</div>
-            </div>
-          ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    POSTO/GRAD.
+                  </th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">RE</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    NOME / OBSERVAÇÃO
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {observacoes.map((o) => {
+                  const ident = resolveObsIdent(o);
+                  return (
+                    <tr key={o.id}>
+                      <td className="border border-gray-200 px-2 py-1.5 font-semibold">
+                        {ident.postoGrad}
+                      </td>
+                      <td className="border border-gray-200 px-2 py-1.5 font-mono">{ident.re}</td>
+                      <td className="border border-gray-200 px-2 py-1.5">
+                        <span className="font-bold">{ident.nome}</span>
+                        <span className="text-gray-500"> — </span>
+                        <span className="whitespace-pre-wrap">{o.texto}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

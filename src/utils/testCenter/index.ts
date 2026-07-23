@@ -36,6 +36,7 @@ import {
   buildLegendaLookup,
   convertEscalaValorToFrequencia,
 } from "../frequenciaCalculo";
+import { displayFrequenciaCelula, isWeekendDay } from "../frequenciaDisplay";
 import { getWeeksOverlappingMonth } from "../frequenciaSync";
 import {
   normalizeEscalaStatus,
@@ -1135,6 +1136,33 @@ export function buildAllTestCases(opts: {
         return fail("Inventário sem Controle de Frequência");
       }
       return ok("RBAC e inventário do Controle de Frequência OK");
+    },
+  });
+
+  cases.push({
+    id: "freq-003",
+    nome: "Exibição hífen vs vazio manual e fim de semana",
+    categoria: "Controle de Frequência",
+    perfil: "Sistema",
+    acao: "displayFrequenciaCelula / isWeekendDay",
+    run: async () => {
+      const empty = displayFrequenciaCelula({
+        valor: "",
+        origem: "vazio",
+        editadoManualmente: false,
+      });
+      const cleared = displayFrequenciaCelula({
+        valor: "",
+        origem: "edicao_manual",
+        editadoManualmente: true,
+      });
+      if (empty !== "-") return fail("Sem lançamento deveria exibir hífen", empty);
+      if (cleared !== "") return fail("Apagado manual deveria exibir vazio", cleared);
+      if (!isWeekendDay(2026, 1, 3) || !isWeekendDay(2026, 1, 4)) {
+        return fail("Sáb/dom de jan/2026 não detectados");
+      }
+      if (isWeekendDay(2026, 1, 5)) return fail("Segunda não é fim de semana");
+      return ok("Hífen/vazio e destaque de calendário corretos");
     },
   });
 

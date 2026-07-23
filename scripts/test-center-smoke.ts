@@ -35,6 +35,10 @@ import {
   calcMeiaDiariaFromCelulas,
   calcAAFromCelulas,
 } from "../src/utils/frequenciaCalculo";
+import {
+  displayFrequenciaCelula,
+  isWeekendDay,
+} from "../src/utils/frequenciaDisplay";
 import { getWeeksOverlappingMonth } from "../src/utils/frequenciaSync";
 import { canEditFrequencia } from "../src/utils/permissions";
 import { COMMAND_INVENTORY } from "../src/utils/testCenter/inventory";
@@ -212,6 +216,22 @@ const dias: Record<string, FrequenciaCelula> = {
 };
 assert(calcMeiaDiariaFromCelulas(dias, lookup) === 2, "soma 1/2 diária");
 assert(calcAAFromCelulas(dias, lookup) === 2, "soma A.A.");
+
+const emptyCel: FrequenciaCelula = {
+  valor: "",
+  origem: "vazio",
+  editadoManualmente: false,
+};
+const clearedCel: FrequenciaCelula = {
+  valor: "",
+  origem: "edicao_manual",
+  editadoManualmente: true,
+};
+assert(displayFrequenciaCelula(emptyCel) === "-", "hífen para sem lançamento");
+assert(displayFrequenciaCelula(clearedCel) === "", "vazio para apagado manual");
+assert(isWeekendDay(2026, 1, 3) === true, "03/01/2026 é sábado");
+assert(isWeekendDay(2026, 1, 4) === true, "04/01/2026 é domingo");
+assert(isWeekendDay(2026, 1, 5) === false, "05/01/2026 é segunda");
 
 assert(canEditFrequencia(admin, 2099, 12, "em_edicao") === true, "admin edita frequencia futura");
 assert(canEditFrequencia(gestor, 2099, 12, "em_edicao") === false, "gestor não edita frequencia");
