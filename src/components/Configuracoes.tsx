@@ -30,6 +30,7 @@ import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { auditConfiguracao, loadAuditOperations } from "../utils/auditService";
 import {
   displayUserEmail,
+  isValidEmailFormat,
   normalizeEmail,
   prepareUsuarioDocument,
   validateUsuarioEmail,
@@ -72,6 +73,7 @@ function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colab
     nome: String(src.nome || ""),
     nomeCompleto: src.nomeCompleto,
     secao: String(src.secao || ""),
+    email: normalizeEmail(src.email),
     observacao: src.observacao || "",
     ativo: normalizeAtivoFlag(src.ativo),
     ordem: typeof src.ordem === "number" ? src.ordem : Number(src.ordem) || 0,
@@ -548,7 +550,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             colLabel, 
             "Todos", 
             "", 
-            `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
+            `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
           );
         } else {
           // Edits
@@ -560,6 +562,16 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
           }
           if (normalized.nomeCompleto !== original.nomeCompleto) {
             createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", normalized.nomeCompleto || "");
+          }
+          if (normalizeEmail(normalized.email) !== normalizeEmail(original.email)) {
+            createAuditLog(
+              "Colaboradores",
+              "Edição",
+              colLabel,
+              "E-mail Google",
+              normalizeEmail(original.email) || "",
+              normalizeEmail(normalized.email) || ""
+            );
           }
           if (normalized.secao !== original.secao) {
             createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
@@ -856,7 +868,22 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     }
 
     const novaRe = String(currentCol.re || "").trim();
-    const normalized = normalizeColaborador({ ...currentCol, re: novaRe });
+    const email = normalizeEmail(currentCol.email);
+    if (email && !isValidEmailFormat(email)) {
+      alert("Informe um e-mail Google válido (ex.: joao.silva@exemplo.com).");
+      return;
+    }
+    if (email) {
+      const emailDuplicado = colaboradores.some(
+        (c) => c.re !== colOriginalRe && normalizeEmail(c.email) === email
+      );
+      if (emailDuplicado) {
+        alert("Este e-mail Google já está vinculado a outro colaborador.");
+        return;
+      }
+    }
+
+    const normalized = normalizeColaborador({ ...currentCol, re: novaRe, email });
 
     const duplicada = colaboradores.some(
       (c) => c.re === novaRe && c.re !== colOriginalRe
@@ -1097,7 +1124,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
           c.re.toLowerCase().includes(query) ||
           (c.nomeCompleto && c.nomeCompleto.toLowerCase().includes(query)) ||
           c.postoGrad.toLowerCase().includes(query) ||
-          c.secao.toLowerCase().includes(query)
+          c.secao.toLowerCase().includes(query) ||
+          normalizeEmail(c.email).includes(query)
       );
     }
     if (colActiveFilter === "ativos") {
@@ -1389,8 +1417,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Colaboradores</h2>
                     <p className="text-xs text-gray-500">
-                      Efetivo policial e ordem de precedência. Inativar um colaborador o remove das escalas,
-                      sem retirar eventual permissão administrativa no módulo Permissão.
+                      Efetivo policial e ordem de precedência. Cadastre o e-mail Google de acesso
+                      quando houver. Inativar remove das escalas, sem retirar eventual permissão no
+                      módulo Permissão.
                     </p>
                   </div>
                   <button
@@ -1401,6 +1430,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         postoGrad: postos[0]?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
+                        email: "",
                         secao: secoes[0]?.nome || "Seç Gest Educ",
                         observacao: "",
                         ativo: true
@@ -1424,7 +1454,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <input
                       id="col-search"
                       type="text"
-                      placeholder="Pesquisar por RE, Nome, Seção..."
+                      placeholder="Pesquisar por RE, Nome, E-mail, Seção..."
                       value={colSearch}
                       onChange={(e) => {
                         setColSearch(e.target.value);
@@ -1482,6 +1512,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         <th className="px-4 py-3">Posto/Grad</th>
                         <th className="px-4 py-3">R.E.</th>
                         <th className="px-4 py-3">Nome de Guerra</th>
+                        <th className="px-4 py-3">E-mail Google</th>
                         <th className="px-4 py-3">Nome Completo</th>
                         <th className="px-4 py-3">Seção</th>
                         <th className="px-4 py-3 text-center">Situação</th>
@@ -1491,7 +1522,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {pagedColaboradores.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum colaborador correspondente encontrado.</td>
+                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum colaborador correspondente encontrado.</td>
                         </tr>
                       ) : (
                         pagedColaboradores.map((col, index) => {
@@ -1522,6 +1553,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <td className="px-4 py-3 text-gray-600 font-semibold">{col.postoGrad}</td>
                               <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{col.re}</td>
                               <td className="px-4 py-3 font-bold text-blue-900">{col.nome}</td>
+                              <td className="px-4 py-3 text-gray-500 text-[11px] lowercase">
+                                {displayUserEmail(col.email) === "Não informado" ? (
+                                  <span className="text-gray-400 normal-case">Não informado</span>
+                                ) : (
+                                  displayUserEmail(col.email)
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{col.nomeCompleto || "Não informado"}</td>
                               <td className="px-4 py-3 text-gray-600 font-medium">{col.secao}</td>
                               <td className="px-4 py-3 text-center">
@@ -2270,6 +2308,35 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    E-mail Google
+                  </label>
+                  <input
+                    type="email"
+                    value={currentCol.email || ""}
+                    onChange={(e) =>
+                      setCurrentCol({
+                        ...currentCol,
+                        email: e.target.value,
+                      })
+                    }
+                    onBlur={(e) => {
+                      const normalized = normalizeEmail(e.target.value);
+                      setCurrentCol((prev) =>
+                        prev ? { ...prev, email: normalized } : prev
+                      );
+                    }}
+                    placeholder="joao.silva@exemplo.com"
+                    autoComplete="email"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    Conta Google de acesso à plataforma. Ao conceder permissão, este e-mail é
+                    aproveitado. Armazenado em minúsculas.
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção de Serviço *</label>
@@ -2384,6 +2451,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                                 nome: col.nome,
                                 nomeCompleto: col.nomeCompleto || "",
                                 secao: col.secao,
+                                email: normalizeEmail(col.email) || prev.email || "",
                               }
                             : prev
                         );
@@ -2391,18 +2459,21 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
                     >
                       <option value="">Escolha alguém da lista de colaboradores…</option>
-                      {colaboradores
-                        .filter((c) => !usuarios.some((u) => u.re === c.re))
-                        .map((c) => (
+                      {colaboradores.map((c) => {
+                        const jaTemPermissao = usuarios.some((u) => u.re === c.re);
+                        return (
                           <option key={c.re} value={c.re}>
                             {c.postoGrad} {c.nome} — R.E. {c.re}
                             {!normalizeAtivoFlag(c.ativo) ? " (inativo na escala)" : ""}
+                            {jaTemPermissao ? " (já tem permissão)" : ""}
+                            {normalizeEmail(c.email) ? "" : " (sem e-mail)"}
                           </option>
-                        ))}
+                        );
+                      })}
                     </select>
                     <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                      Inclui colaboradores inativos na escala. Após selecionar, todos os campos
-                      podem ser ajustados. Informe e-mail e perfil para concluir.
+                      Lista todos os colaboradores cadastrados. Após selecionar, os campos (incluindo
+                      e-mail Google) são preenchidos e podem ser ajustados.
                     </p>
                   </div>
                 )}

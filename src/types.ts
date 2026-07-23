@@ -105,6 +105,8 @@ export interface Colaborador {
   nome: string; // Nome de Guerra
   nomeCompleto?: string;
   secao: string;
+  /** E-mail Google de acesso (minúsculas). Usado ao conceder permissão. */
+  email?: string;
   observacao?: string;
   ativo?: boolean;
   ordem?: number;
