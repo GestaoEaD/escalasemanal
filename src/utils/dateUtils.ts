@@ -69,6 +69,45 @@ export function getWeeksForYear(year: number): WeekInfo[] {
   return weeks;
 }
 
+/**
+ * Identifica a semana imediatamente anterior no calendário do sistema.
+ * - Semana N (N>1) → Semana N-1 do mesmo ano
+ * - Semana 01 → última semana gerada para o ano anterior (via getWeeksForYear)
+ *
+ * Não consulta Firestore, não cria documentos e não busca dados.
+ */
+export function getPreviousWeekRef(
+  year: number,
+  weekNumber: number
+): { year: number; weekNumber: number; id: string; label: string } {
+  if (!Number.isFinite(year) || !Number.isFinite(weekNumber) || weekNumber < 1) {
+    throw new Error("Referência de semana inválida.");
+  }
+
+  if (weekNumber > 1) {
+    const prev = Math.floor(weekNumber) - 1;
+    return {
+      year,
+      weekNumber: prev,
+      id: `${year}_${String(prev).padStart(2, "0")}`,
+      label: `Semana ${String(prev).padStart(2, "0")}/${year}`,
+    };
+  }
+
+  const prevYear = year - 1;
+  const prevYearWeeks = getWeeksForYear(prevYear);
+  if (!prevYearWeeks.length) {
+    throw new Error(`Não há semanas válidas cadastradas para o ano ${prevYear}.`);
+  }
+  const last = prevYearWeeks[prevYearWeeks.length - 1];
+  return {
+    year: prevYear,
+    weekNumber: last.numero,
+    id: last.id,
+    label: `Semana ${String(last.numero).padStart(2, "0")}/${prevYear}`,
+  };
+}
+
 export function formatTimestamp(timestamp: any): string {
   if (!timestamp) return "";
   let date: Date;

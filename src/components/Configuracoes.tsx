@@ -23,6 +23,7 @@ import {
   ChevronRight,
   FileText,
   FileSpreadsheet,
+  FlaskConical,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
@@ -35,13 +36,14 @@ import {
 } from "../utils/usuarioHelpers";
 import { exportUsuariosToExcel } from "../utils/exportUtils";
 import LogsAuditPanel from "./LogsAuditPanel";
+import CentralTestes from "./CentralTestes";
 
 interface ConfiguracoesProps {
   usuario: Usuario;
   onBack: () => void;
 }
 
-type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros";
+type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros" | "testes";
 
 const translateColorToHex = (color: string): string => {
   if (!color) return "#ffffff";
@@ -1137,6 +1139,21 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 </button>
               )}
 
+              {usuario.perfil === "Administrador" && (
+                <button
+                  id="tab-testes"
+                  onClick={() => setActiveTab("testes")}
+                  className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                    activeTab === "testes"
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <FlaskConical size={16} />
+                  <span>Central de Testes</span>
+                </button>
+              )}
+
               <button
                 id="tab-postos"
                 onClick={() => setActiveTab("postos")}
@@ -1953,6 +1970,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 onReload={loadLogs}
                 usuario={usuario}
               />
+            )}
+
+            {/* 8. MODULE: CENTRAL DE TESTES */}
+            {activeTab === "testes" && usuario.perfil === "Administrador" && (
+              <CentralTestes usuario={usuario} />
             )}
           </main>
         </div>

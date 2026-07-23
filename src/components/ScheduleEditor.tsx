@@ -29,6 +29,11 @@ import {
 import { getTokenApprovalUrl } from "../utils/solicitacaoAprovacaoService";
 import { auditExportacao, auditSalvarEscala, statusLabel } from "../utils/auditService";
 import {
+  auditLoadPreviousWeek,
+  fetchPreviousWeeklyScale,
+} from "../utils/previousWeekService";
+import { getPreviousWeekRef } from "../utils/dateUtils";
+import {
   canAccessConfig,
   canCancelApprovalRequest,
   canEditScale,
@@ -204,6 +209,14 @@ export default function ScheduleEditor({
     re: string;
     label: string;
   } | null>(null);
+  const [previousWeekBusy, setPreviousWeekBusy] = useState(false);
+  const [previousWeekConfirm, setPreviousWeekConfirm] = useState<{
+    label: string;
+    year: number;
+    weekNumber: number;
+    rows: ScheduleRow[];
+  } | null>(null);
+  const [previousWeekInfo, setPreviousWeekInfo] = useState<string | null>(null);
 
   // UI Control states
   const [loading, setLoading] = useState(true);
@@ -749,6 +762,94 @@ export default function ScheduleEditor({
       setOpenAltObs((prev) => prev.filter((item) => item !== re));
     }
     setConfirmClearObs(null);
+  };
+
+  const handleRequestPreviousWeekData = async () => {
+    if (!isWeeklyEditable || previousWeekBusy) return;
+    setPreviousWeekInfo(null);
+    setPreviousWeekBusy(true);
+    try {
+      const result = await fetchPreviousWeeklyScale(year, week.numero);
+      if (result.status === "error") {
+        setPreviousWeekInfo(result.message);
+        const ref = result.ref || (() => {
+          try {
+            return getPreviousWeekRef(year, week.numero);
+          } catch {
+            return null;
+          }
+        })();
+        if (ref) {
+          await auditLoadPreviousWeek({
+            usuario,
+            currentYear: year,
+            currentWeek: week.numero,
+            previousYear: ref.year,
+            previousWeek: ref.weekNumber,
+            resultado: "erro",
+            detalhes: result.message,
+          });
+        }
+        return;
+      }
+
+      if (result.status === "empty") {
+        setPreviousWeekInfo("Não foram encontrados dados da semana anterior para carregamento.");
+        await auditLoadPreviousWeek({
+          usuario,
+          currentYear: year,
+          currentWeek: week.numero,
+          previousYear: result.ref.year,
+          previousWeek: result.ref.weekNumber,
+          resultado: "sem_dados",
+        });
+        return;
+      }
+
+      setPreviousWeekConfirm({
+        label: result.ref.label,
+        year: result.ref.year,
+        weekNumber: result.ref.weekNumber,
+        rows: result.rows,
+      });
+    } finally {
+      setPreviousWeekBusy(false);
+    }
+  };
+
+  const handleCancelPreviousWeekData = async () => {
+    if (!previousWeekConfirm) return;
+    const pending = previousWeekConfirm;
+    setPreviousWeekConfirm(null);
+    await auditLoadPreviousWeek({
+      usuario,
+      currentYear: year,
+      currentWeek: week.numero,
+      previousYear: pending.year,
+      previousWeek: pending.weekNumber,
+      resultado: "cancelado",
+    });
+  };
+
+  const handleConfirmPreviousWeekData = async () => {
+    if (!previousWeekConfirm || !isWeeklyEditable) return;
+    const pending = previousWeekConfirm;
+    const rows = pending.rows.map((row) => ({ ...row }));
+    setLocalWeeklyRows(rows);
+    setOpenWeeklyObs(rows.filter((row) => Boolean(row.observacao?.trim())).map((row) => row.re));
+    setPreviousWeekConfirm(null);
+    setPreviousWeekInfo(
+      `Dados da ${pending.label} carregados nesta escala. Revise e clique em Salvar para persistir.`
+    );
+    await auditLoadPreviousWeek({
+      usuario,
+      currentYear: year,
+      currentWeek: week.numero,
+      previousYear: pending.year,
+      previousWeek: pending.weekNumber,
+      resultado: "carregado",
+      detalhes: `${rows.length} colaborador(es) carregado(s) em memória`,
+    });
   };
 
   const renderObservationButton = (
@@ -1799,6 +1900,18 @@ export default function ScheduleEditor({
             <span>{isSavingThis ? "Salvando..." : "Salvar"}</span>
           </button>
         )}
+        {tipo === "semanal" && editable && (
+          <button
+            type="button"
+            onClick={() => void handleRequestPreviousWeekData()}
+            disabled={previousWeekBusy}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-300 cursor-pointer disabled:opacity-50"
+            title="Carregar dados reais da Escala Semanal anterior (sem gravar automaticamente)"
+          >
+            <History size={14} />
+            <span>{previousWeekBusy ? "Buscando..." : "Dados da semana anterior"}</span>
+          </button>
+        )}
         {showSubmit && (
           <button
             type="button"
@@ -2019,6 +2132,11 @@ export default function ScheduleEditor({
                   {renderPanelHeaderMetadata(dbWeeklySaved, "blue")}
                   {renderStatusBanner(weeklyStatus, weeklyAprovacao, "Escala Semanal", showReopenWeekly, () => openReopenModal("semanal"))}
                   {renderPanelActionButtons("semanal")}
+                  {previousWeekInfo && (
+                    <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                      {previousWeekInfo}
+                    </div>
+                  )}
                   {renderHistoricoAccordion(weeklyHistorico, showWeeklyHistorico, setShowWeeklyHistorico, "Histórico — Escala Semanal")}
                 </div>
               </div>
@@ -2231,6 +2349,55 @@ export default function ScheduleEditor({
       </main>
 
       {/* MODALS */}
+      {/* PREVIOUS WEEK CONFIRMATION (ESCALA SEMANAL) */}
+      {previousWeekConfirm && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <History size={18} className="text-slate-300" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Dados da semana anterior
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCancelPreviousWeekData()}
+                className="text-gray-400 hover:text-white cursor-pointer"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                Os dados da <span className="font-bold text-gray-900">{previousWeekConfirm.label}</span>{" "}
+                serão carregados nesta escala. Deseja continuar?
+              </p>
+              <p className="text-[11px] text-gray-500">
+                {previousWeekConfirm.rows.length} colaborador(es). Nada será gravado até você clicar em
+                Salvar. A Escala Alteração não será alterada.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCancelPreviousWeekData()}
+                  className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmPreviousWeekData()}
+                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg cursor-pointer"
+                >
+                  Confirmar carregamento
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CLEAR OBSERVATION CONFIRMATION */}
       {confirmClearObs && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
