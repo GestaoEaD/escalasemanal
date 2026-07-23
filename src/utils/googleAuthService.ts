@@ -17,6 +17,8 @@ export type GoogleAuthErrorKind =
   | "network"
   | "temporary"
   | "not_registered"
+  | "provider_disabled"
+  | "unauthorized_domain"
   | "unknown";
 
 export interface FriendlyAuthMessage {
@@ -41,6 +43,20 @@ export function getGoogleAuthErrorMessage(kind: GoogleAuthErrorKind): FriendlyAu
         kind,
         title: "Problema de conexão",
         body: "Não foi possível verificar seus dados neste momento. Verifique sua conexão com a internet e tente novamente.",
+        actionLabel: "Tentar novamente",
+      };
+    case "provider_disabled":
+      return {
+        kind,
+        title: "Login Google ainda não está disponível",
+        body: "O provedor Google precisa ser habilitado no Firebase Authentication deste projeto. Peça ao administrador para ativar Sign-in method → Google e incluir o domínio do site em Authorized domains.",
+        actionLabel: "Tentar novamente",
+      };
+    case "unauthorized_domain":
+      return {
+        kind,
+        title: "Domínio não autorizado",
+        body: "Este endereço do site ainda não está autorizado no Firebase Authentication. Inclua o domínio (por exemplo, escalasemanal.vercel.app) em Authentication → Settings → Authorized domains.",
         actionLabel: "Tentar novamente",
       };
     case "temporary":
@@ -85,6 +101,12 @@ function mapFirebaseAuthError(err: unknown): GoogleAuthErrorKind {
     code === "auth/timeout"
   ) {
     return "network";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "provider_disabled";
+  }
+  if (code === "auth/unauthorized-domain") {
+    return "unauthorized_domain";
   }
   if (
     code === "auth/popup-blocked" ||
