@@ -1125,7 +1125,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   }, [filteredColaboradores, colPage, totalColPages]);
 
   const filteredUsuarios = useMemo(() => {
-    let list = usuarios;
+    // Login é por e-mail Google: a lista de permissão mostra só quem já tem e-mail.
+    let list = usuarios.filter((u) => Boolean(normalizeEmail(u.email)));
     if (userSearch.trim()) {
       const query = userSearch.toLowerCase();
       list = list.filter(
@@ -1148,6 +1149,12 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   }, [filteredUsuarios, userPage]);
 
   const totalUserPages = Math.ceil(filteredUsuarios.length / userPerPage) || 1;
+
+  useEffect(() => {
+    if (userPage > totalUserPages) {
+      setUserPage(totalUserPages);
+    }
+  }, [userPage, totalUserPages]);
 
   // Render Page Content
   if (loading) {
@@ -1582,14 +1589,19 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Permissão</h2>
                     <p className="text-xs text-gray-500">
-                      Conceda acesso ao sistema (Operador, Administrador ou Gestor). Pode incluir
-                      colaboradores inativos na escala — a permissão administrativa é independente.
+                      Conceda acesso ao sistema (Operador, Administrador ou Gestor). Exibe apenas
+                      cadastros com e-mail Google — vínculo do login. Em seguida, as permissões
+                      poderão ser criadas a partir dos colaboradores já cadastrados.
                     </p>
                   </div>
                   <div className="mt-3 sm:mt-0 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => exportUsuariosToExcel(usuarios)}
+                      onClick={() =>
+                        exportUsuariosToExcel(
+                          usuarios.filter((u) => Boolean(normalizeEmail(u.email)))
+                        )
+                      }
                       className="inline-flex items-center space-x-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                       title="Exportar permissões"
                     >
@@ -1660,7 +1672,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {pagedUsuarios.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma permissão correspondente encontrada.</td>
+                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">
+                            Nenhuma permissão com e-mail Google cadastrado.
+                          </td>
                         </tr>
                       ) : (
                         pagedUsuarios.map((usr) => (
