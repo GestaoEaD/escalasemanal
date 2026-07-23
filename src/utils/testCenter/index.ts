@@ -21,6 +21,13 @@ import {
   auditClearWeeklySchedule,
 } from "../clearWeeklySchedule";
 import {
+  contaParaAA,
+  getValorMeiaDiaria,
+  isDiaTrabalhado,
+  normalizeLegenda,
+  prepareLegendaForFirestore,
+} from "../legendaModel";
+import {
   normalizeEscalaStatus,
   parseApprovalPath,
   isEditableWorkflowStatus,
@@ -780,6 +787,105 @@ export function buildAllTestCases(opts: {
         return fail("Limpeza não deve mutar dados da semana anterior");
       }
       return ok("Somente a escala aberta é limpa em memória");
+    },
+  });
+
+  // --- Legendas (preparação Escala Consolidada) ---
+  cases.push({
+    id: "leg-001",
+    nome: "Legenda legada (só básicos) continua válida",
+    categoria: "Legendas",
+    perfil: "Sistema",
+    acao: "normalizeLegenda + prepareLegendaForFirestore",
+    run: async () => {
+      const n = normalizeLegenda({
+        sigla: "F",
+        descricao: "FOLGA",
+        cor: "amarelo",
+        ativo: true,
+        ordem: 2,
+      });
+      if (n.sigla !== "F" || n.representacoes || n.regras || n.nome) {
+        return fail("Legado não deve inventar campos opcionais", JSON.stringify(n));
+      }
+      const payload = prepareLegendaForFirestore(n);
+      if (payload.representacoes || payload.regras || payload.nome) {
+        return fail("Payload básico não deve incluir opcionais vazios");
+      }
+      if (findUndefinedPaths(payload).length > 0) return fail("undefined no payload");
+      return ok("Documento legado normalizado sem campos inventados");
+    },
+  });
+
+  cases.push({
+    id: "leg-002",
+    nome: "Legenda com consolidada e regras opcionais",
+    categoria: "Legendas",
+    perfil: "Sistema",
+    acao: "normalizeLegenda(EN completo)",
+    run: async () => {
+      const n = normalizeLegenda({
+        sigla: "EN",
+        nome: "Expediente Normal",
+        descricao: "Expediente normal",
+        cor: "verde",
+        ativo: true,
+        ordem: 1,
+        representacoes: { escalaSemanal: "EN", escalaConsolidada: "1" },
+        regras: {
+          diaTrabalhado: true,
+          meiaDiaria: { participa: true, valor: 1 },
+          aa: { contaDia: true },
+        },
+      });
+      if (n.representacoes?.escalaConsolidada !== "1") return fail("Consolidada ausente");
+      if (!isDiaTrabalhado(n) || !contaParaAA(n) || getValorMeiaDiaria(n) !== 1) {
+        return fail("Helpers de regras incorretos");
+      }
+      const payload = prepareLegendaForFirestore(n);
+      if (findUndefinedPaths(payload).length > 0) return fail("undefined no payload completo");
+      return ok("EN com representações e regras persistíveis");
+    },
+  });
+
+  cases.push({
+    id: "leg-003",
+    nome: "Legenda sem escalaConsolidada é válida",
+    categoria: "Legendas",
+    perfil: "Sistema",
+    acao: "representacoes só semanal",
+    run: async () => {
+      const n = normalizeLegenda({
+        sigla: "F",
+        descricao: "Férias",
+        cor: "verde-escuro",
+        ativo: true,
+        ordem: 8,
+        representacoes: { escalaSemanal: "F" },
+        regras: { diaTrabalhado: false, meiaDiaria: { participa: false, valor: 0 }, aa: { contaDia: false } },
+      });
+      if (n.representacoes?.escalaConsolidada !== undefined) {
+        return fail("Não deve exigir escalaConsolidada");
+      }
+      if (isDiaTrabalhado(n) || getValorMeiaDiaria(n) !== 0) {
+        return fail("Férias não deve contar como trabalhado/meia diária");
+      }
+      return ok("Sem consolidada e com regras explícitas OK");
+    },
+  });
+
+  cases.push({
+    id: "leg-004",
+    nome: "Ausência de regras = não configurado (não soma)",
+    categoria: "Legendas",
+    perfil: "Sistema",
+    acao: "helpers com legenda sem regras",
+    run: async () => {
+      const n = normalizeLegenda({ sigla: "OBS", descricao: "OBS", cor: "cinza", ativo: true, ordem: 14 });
+      if (isDiaTrabalhado(n) || contaParaAA(n) || getValorMeiaDiaria(n) !== 0) {
+        return fail("Sem regras não deve contar");
+      }
+      return ok("Não configurado tratado com segurança");
     },
   });
 

@@ -343,6 +343,61 @@ export const ESCALA_STATUS_EMOJI: Record<EscalaStatus, string> = {
 
 export type DayOfWeek = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
 
+/**
+ * Representações opcionais da legenda em diferentes contextos.
+ * Ausência de chave = não configurado (não quebra o sistema).
+ */
+export interface LegendaRepresentacoes {
+  /** Código exibido / usado na Escala Semanal (se omitido, usa-se `sigla`). */
+  escalaSemanal?: string;
+  /** Código/valor na futura Escala Consolidada (opcional). */
+  escalaConsolidada?: string;
+}
+
+export interface LegendaMeiaDiaria {
+  /** Se true, o valor entra na soma da 1/2 Diária (somente valores > 0). */
+  participa?: boolean;
+  /** Valor numérico da 1/2 Diária (ex.: 1, 2, 3). */
+  valor?: number;
+}
+
+export interface LegendaAA {
+  /** Se true, o dia conta para A.A. (quando não definido, usa-se diaTrabalhado). */
+  contaDia?: boolean;
+}
+
+/**
+ * Regras opcionais de cálculo (preparação para Escala Consolidada).
+ * Todos os campos são opcionais — ausência = não configurado.
+ */
+export interface LegendaRegras {
+  /** Dia trabalhado (base futura do A.A.). */
+  diaTrabalhado?: boolean;
+  meiaDiaria?: LegendaMeiaDiaria;
+  aa?: LegendaAA;
+}
+
+/**
+ * Legenda cadastrada em Firestore `legendas/{sigla}`.
+ * Campos legados (sigla, descricao, cor, ativo, ordem) são preservados.
+ * `nome`, `representacoes` e `regras` são opcionais e retrocompatíveis.
+ */
+export interface Legenda {
+  /** Código da legenda (campo legado; equivalente conceitual a "codigo"). */
+  sigla: string;
+  /** Nome amigável opcional (ex.: "Expediente Normal"). */
+  nome?: string;
+  /** Descrição completa (campo legado). */
+  descricao: string;
+  /** Cor visual (nome ou hex). */
+  cor: string;
+  ativo: boolean;
+  ordem: number;
+  representacoes?: LegendaRepresentacoes;
+  regras?: LegendaRegras;
+  createdAt?: unknown;
+}
+
 export const OPCOES_ESCALA = [
   "-", // Sem escala
   "EN", // Escala Normal

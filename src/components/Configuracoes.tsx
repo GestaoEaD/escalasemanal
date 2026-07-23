@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp } from "../firebase";
-import { Usuario, Colaborador, AuditAlteracao, AuditOperation } from "../types";
+import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda } from "../types";
 import {
   Users,
   Shield,
@@ -34,6 +34,13 @@ import {
   prepareUsuarioDocument,
   validateUsuarioEmail,
 } from "../utils/usuarioHelpers";
+import {
+  createEmptyLegendaForm,
+  legendaDocId,
+  normalizeLegenda,
+  prepareLegendaForFirestore,
+  toLegendaFormState,
+} from "../utils/legendaModel";
 import { exportUsuariosToExcel } from "../utils/exportUtils";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
@@ -44,6 +51,69 @@ interface ConfiguracoesProps {
 }
 
 type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros" | "testes";
+type LegendaModalSection = "basicas" | "representacoes" | "regras";
+
+/**
+ * Normaliza o flag ativo/inativo.
+ * Ausência ou valores ambíguos = ativo (compatível com cadastros legados).
+ * Somente false / 0 / "false" / "0" = inativo.
+ */
+function normalizeAtivoFlag(value: unknown): boolean {
+  if (value === false || value === 0 || value === "false" || value === "0") return false;
+  return true;
+}
+
+function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colaborador {
+  const src = raw as Colaborador;
+  return {
+    ...src,
+    re: String(src.re || "").trim(),
+    postoGrad: String(src.postoGrad || ""),
+    nome: String(src.nome || ""),
+    nomeCompleto: src.nomeCompleto,
+    secao: String(src.secao || ""),
+    observacao: src.observacao || "",
+    ativo: normalizeAtivoFlag(src.ativo),
+    ordem: typeof src.ordem === "number" ? src.ordem : Number(src.ordem) || 0,
+    createdAt: src.createdAt,
+    updatedAt: src.updatedAt,
+  };
+}
+
+/** Select tri-estado para campos booleanos opcionais (não configurado / sim / não). */
+function OptionalBoolSelect({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: boolean | undefined;
+  onChange: (v: boolean | undefined) => void;
+  hint?: string;
+}) {
+  const selectValue = value === true ? "true" : value === false ? "false" : "";
+  return (
+    <div>
+      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+        {label}
+      </label>
+      <select
+        value={selectValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === "" ? undefined : v === "true");
+        }}
+        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+      >
+        <option value="">Não configurado</option>
+        <option value="true">Sim</option>
+        <option value="false">Não</option>
+      </select>
+      {hint && <p className="mt-1 text-[10px] text-gray-400">{hint}</p>}
+    </div>
+  );
+}
 
 const translateColorToHex = (color: string): string => {
   if (!color) return "#ffffff";
@@ -95,7 +165,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   const [origUsuarios, setOrigUsuarios] = useState<Usuario[]>([]);
   const [origPostos, setOrigPostos] = useState<any[]>([]);
   const [origSecoes, setOrigSecoes] = useState<any[]>([]);
-  const [origLegendas, setOrigLegendas] = useState<any[]>([]);
+  const [origLegendas, setOrigLegendas] = useState<Legenda[]>([]);
   const [origGerais, setOrigGerais] = useState<any>({
     nomeOrganizacao: "Polícia Militar do Estado de São Paulo",
     unidade: "CPI-1 / 1º BPM/I",
@@ -110,7 +180,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [postos, setPostos] = useState<any[]>([]);
   const [secoes, setSecoes] = useState<any[]>([]);
-  const [legendas, setLegendas] = useState<any[]>([]);
+  const [legendas, setLegendas] = useState<Legenda[]>([]);
   const [gerais, setGerais] = useState<any>({
     nomeOrganizacao: "",
     unidade: "",
@@ -140,9 +210,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   // Modals visibility
   const [colModalOpen, setColModalOpen] = useState(false);
   const [currentCol, setCurrentCol] = useState<Colaborador | null>(null);
+  /** RE original na edição de colaborador (null = inclusão). Permite alterar o RE. */
+  const [colOriginalRe, setColOriginalRe] = useState<string | null>(null);
 
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
+  /** RE original na edição de permissão (null = inclusão). Permite alterar o RE. */
+  const [userOriginalRe, setUserOriginalRe] = useState<string | null>(null);
 
   const [postoModalOpen, setPostoModalOpen] = useState(false);
   const [currentPosto, setCurrentPosto] = useState<any | null>(null);
@@ -153,9 +227,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   const [currentSecao, setCurrentSecao] = useState<any | null>(null);
 
   const [legendaModalOpen, setLegendaModalOpen] = useState(false);
-  const [currentLegenda, setCurrentLegenda] = useState<any | null>(null);
+  const [currentLegenda, setCurrentLegenda] = useState<Legenda | null>(null);
   // Sigla original da legenda em edição (null = inclusão de nova legenda)
   const [legendaOriginalSigla, setLegendaOriginalSigla] = useState<string | null>(null);
+  const [legendaModalSection, setLegendaModalSection] = useState<LegendaModalSection>("basicas");
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -168,8 +243,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       // 1. Fetch Collaborators
       const colSnap = await getDocs(collection(db, "colaboradores"));
       const colList: Colaborador[] = [];
-      colSnap.forEach((doc) => {
-        colList.push(doc.data() as Colaborador);
+      colSnap.forEach((docSnap) => {
+        colList.push(normalizeColaborador(docSnap.data() as Colaborador));
       });
       // Sort by order or name
       colList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
@@ -205,11 +280,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       });
       secoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 5. Fetch Legendas
+      // 5. Fetch Legendas (normaliza documentos legados sem novos campos)
       const legendasSnap = await getDocs(collection(db, "legendas"));
-      const legendasList: any[] = [];
-      legendasSnap.forEach((doc) => {
-        legendasList.push(doc.data());
+      const legendasList: Legenda[] = [];
+      legendasSnap.forEach((docSnap) => {
+        legendasList.push(normalizeLegenda(docSnap.data()));
       });
       legendasList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
@@ -455,13 +530,15 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       for (const col of colaboradores) {
         const original = origColaboradores.find((c) => c.re === col.re);
         const docRef = doc(db, "colaboradores", col.re);
+        const normalized = normalizeColaborador(col);
         batch.set(docRef, prepareFirestoreWrite(`colaboradores/${col.re}`, {
-          ...col,
+          ...normalized,
+          ativo: normalized.ativo, // boolean explícito (false deve persistir)
           updatedAt: timestamp,
           createdAt: col.createdAt || timestamp
         }));
 
-        const colLabel = `${col.postoGrad} ${col.nome}`;
+        const colLabel = `${normalized.postoGrad} ${normalized.nome}`;
 
         if (!original) {
           // Inclusion
@@ -471,30 +548,37 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             colLabel, 
             "Todos", 
             "", 
-            `RE: ${col.re}, Posto: ${col.postoGrad}, Nome Completo: ${col.nomeCompleto || ""}, Guerra: ${col.nome}, Seção: ${col.secao}, Ordem: ${col.ordem}, Ativo: ${col.ativo ? "Sim" : "Não"}`
+            `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
           );
         } else {
           // Edits
-          if (col.postoGrad !== original.postoGrad) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, col.postoGrad);
+          if (normalized.postoGrad !== original.postoGrad) {
+            createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, normalized.postoGrad);
           }
-          if (col.nome !== original.nome) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, col.nome);
+          if (normalized.nome !== original.nome) {
+            createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, normalized.nome);
           }
-          if (col.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", col.nomeCompleto || "");
+          if (normalized.nomeCompleto !== original.nomeCompleto) {
+            createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", normalized.nomeCompleto || "");
           }
-          if (col.secao !== original.secao) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, col.secao);
+          if (normalized.secao !== original.secao) {
+            createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
           }
-          if (col.ativo !== original.ativo) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", col.ativo ? "Ativo" : "Inativo");
+          if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
+            createAuditLog(
+              "Colaboradores",
+              "Edição",
+              colLabel,
+              "Situação (Ativo)",
+              normalizeAtivoFlag(original.ativo) ? "Ativo" : "Inativo",
+              normalizeAtivoFlag(normalized.ativo) ? "Ativo" : "Inativo"
+            );
           }
-          if (col.ordem !== original.ordem) {
-            createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(col.ordem || 0));
+          if (normalized.ordem !== original.ordem) {
+            createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(normalized.ordem || 0));
           }
-          if (col.observacao !== original.observacao) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", col.observacao || "");
+          if (normalized.observacao !== original.observacao) {
+            createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", normalized.observacao || "");
           }
         }
       }
@@ -505,7 +589,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origUsuarios.find((u) => u.re === reDel);
         const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
         batch.delete(doc(db, "usuarios", reDel));
-        createAuditLog("Usuários", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
+        createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
       }
       // B. Creations and edits
       for (const usr of usuarios) {
@@ -534,7 +618,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
         if (!original) {
           createAuditLog(
-            "Usuários",
+            "Permissão",
             "Inclusão",
             userLabel,
             "Todos",
@@ -542,21 +626,21 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
           );
           if (emailDepois) {
-            createAuditLog("Usuários", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
+            createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
           }
         } else {
           if (prepared.postoGrad !== original.postoGrad) {
-            createAuditLog("Usuários", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
+            createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
           }
           if (prepared.nome !== original.nome) {
-            createAuditLog("Usuários", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
+            createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
           }
           if (prepared.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Usuários", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
+            createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
           }
           if (emailAntes !== emailDepois) {
             createAuditLog(
-              "Usuários",
+              "Permissão",
               emailAntes ? "Edição" : "Inclusão",
               userLabel,
               "E-mail Google",
@@ -565,13 +649,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             );
           }
           if (prepared.secao !== original.secao) {
-            createAuditLog("Usuários", "Edição", userLabel, "Seção", original.secao, prepared.secao);
+            createAuditLog("Permissão", "Edição", userLabel, "Seção", original.secao, prepared.secao);
           }
           if (prepared.perfil !== original.perfil) {
-            createAuditLog("Usuários", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
+            createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
           }
           if (prepared.ativo !== original.ativo) {
-            createAuditLog("Usuários", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
+            createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
           }
         }
       }
@@ -631,20 +715,30 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       // --- 5. AUDIT & SAVE: LEGENDAS ---
       // A. Deletes
       for (const siglaDel of removedLegendas) {
-        const docId = siglaDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+        const docId = legendaDocId(siglaDel);
         batch.delete(doc(db, "legendas", docId));
         createAuditLog("Legendas da Escala", "Exclusão", siglaDel, "Todos", siglaDel, "");
       }
       // B. Creations and edits
       for (const l of legendas) {
         const original = origLegendas.find((ol) => ol.sigla === l.sigla);
-        const docId = l.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+        const docId = legendaDocId(l.sigla);
         const docRef = doc(db, "legendas", docId);
-        batch.set(docRef, prepareFirestoreWrite(`legendas/${docId}`, l as unknown as Record<string, unknown>));
+        batch.set(docRef, prepareLegendaForFirestore(l));
 
         if (!original) {
-          createAuditLog("Legendas da Escala", "Inclusão", l.sigla, "Todos", "", `Sigla: ${l.sigla}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`);
+          createAuditLog(
+            "Legendas da Escala",
+            "Inclusão",
+            l.sigla,
+            "Todos",
+            "",
+            `Sigla: ${l.sigla}, Nome: ${l.nome || "—"}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`
+          );
         } else {
+          if ((l.nome || "") !== (original.nome || "")) {
+            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Nome", original.nome || "", l.nome || "");
+          }
           if (l.descricao !== original.descricao) {
             createAuditLog("Legendas da Escala", "Edição", l.sigla, "Descrição", original.descricao, l.descricao);
           }
@@ -656,6 +750,26 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
           }
           if (l.ativo !== original.ativo) {
             createAuditLog("Legendas da Escala", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não");
+          }
+          if (JSON.stringify(l.representacoes || null) !== JSON.stringify(original.representacoes || null)) {
+            createAuditLog(
+              "Legendas da Escala",
+              "Edição",
+              l.sigla,
+              "Representações",
+              JSON.stringify(original.representacoes || {}),
+              JSON.stringify(l.representacoes || {})
+            );
+          }
+          if (JSON.stringify(l.regras || null) !== JSON.stringify(original.regras || null)) {
+            createAuditLog(
+              "Legendas da Escala",
+              "Edição",
+              l.sigla,
+              "Regras",
+              JSON.stringify(original.regras || {}),
+              JSON.stringify(l.regras || {})
+            );
           }
         }
       }
@@ -741,29 +855,47 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       return;
     }
 
-    // Check if adding and RE already exists in working list
-    const isNew = !colaboradores.some((c) => c.re === currentCol.re);
-    const existingIndex = colaboradores.findIndex((c) => c.re === currentCol.re);
+    const novaRe = String(currentCol.re || "").trim();
+    const normalized = normalizeColaborador({ ...currentCol, re: novaRe });
+
+    const duplicada = colaboradores.some(
+      (c) => c.re === novaRe && c.re !== colOriginalRe
+    );
+    if (duplicada) {
+      alert("Já existe um colaborador com este R.E.");
+      return;
+    }
 
     let updatedList = [...colaboradores];
 
-    if (existingIndex > -1) {
-      // Edit mode
-      updatedList[existingIndex] = { ...currentCol };
-    } else {
-      // Add mode
-      const maxOrdem = colaboradores.reduce((max, c) => (c.ordem && c.ordem > max ? c.ordem : max), 0);
-      const newCol: Colaborador = {
-        ...currentCol,
-        ordem: maxOrdem + 1,
-        ativo: currentCol.ativo !== undefined ? currentCol.ativo : true
+    if (colOriginalRe !== null) {
+      const editIndex = colaboradores.findIndex((c) => c.re === colOriginalRe);
+      if (editIndex < 0) {
+        alert("Colaborador original não encontrado.");
+        return;
+      }
+      updatedList[editIndex] = {
+        ...normalized,
+        ordem: colaboradores[editIndex].ordem ?? normalized.ordem,
       };
-      updatedList.push(newCol);
+      if (colOriginalRe !== novaRe) {
+        setRemovedColaboradores((prev) =>
+          prev.includes(colOriginalRe) ? prev : [...prev, colOriginalRe]
+        );
+      }
+    } else {
+      const maxOrdem = colaboradores.reduce((max, c) => (c.ordem && c.ordem > max ? c.ordem : max), 0);
+      updatedList.push({
+        ...normalized,
+        ordem: maxOrdem + 1,
+      });
     }
 
     setColaboradores(updatedList);
     setColModalOpen(false);
     setCurrentCol(null);
+    setColOriginalRe(null);
+    setColPage(1);
   };
 
   const handleUserSubmit = (e: React.FormEvent) => {
@@ -775,13 +907,20 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       return;
     }
 
-    const existingIndex = usuarios.findIndex((u) => u.re === currentUser.re);
-    const isNew = existingIndex < 0;
+    const novaRe = String(currentUser.re || "").trim();
+    const isNew = userOriginalRe === null;
+
+    const duplicada = usuarios.some((u) => u.re === novaRe && u.re !== userOriginalRe);
+    if (duplicada) {
+      alert("Já existe uma permissão cadastrada para este R.E.");
+      return;
+    }
+
     const emailCheck = validateUsuarioEmail({
       email: currentUser.email,
-      re: currentUser.re,
+      re: novaRe,
       isNew,
-      existingUsers: usuarios,
+      existingUsers: usuarios.filter((u) => u.re !== userOriginalRe),
     });
     if (emailCheck.ok === false) {
       alert(emailCheck.message);
@@ -790,6 +929,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
     const prepared = prepareUsuarioDocument({
       ...currentUser,
+      re: novaRe,
       email: emailCheck.email,
       perfil: currentUser.perfil || "Operador",
       ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
@@ -799,8 +939,18 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     });
 
     let updatedList = [...usuarios];
-    if (existingIndex > -1) {
-      updatedList[existingIndex] = prepared;
+    if (userOriginalRe !== null) {
+      const editIndex = usuarios.findIndex((u) => u.re === userOriginalRe);
+      if (editIndex < 0) {
+        alert("Permissão original não encontrada.");
+        return;
+      }
+      updatedList[editIndex] = prepared;
+      if (userOriginalRe !== novaRe) {
+        setRemovedUsuarios((prev) =>
+          prev.includes(userOriginalRe) ? prev : [...prev, userOriginalRe]
+        );
+      }
     } else {
       updatedList.push(prepared);
     }
@@ -808,6 +958,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     setUsuarios(updatedList);
     setUserModalOpen(false);
     setCurrentUser(null);
+    setUserOriginalRe(null);
+    setUserPage(1);
   };
 
   const handlePostoSubmit = (e: React.FormEvent) => {
@@ -888,7 +1040,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     if (!currentLegenda) return;
 
     const novaSigla = String(currentLegenda.sigla || "").trim();
-    if (!novaSigla || !currentLegenda.descricao.trim()) {
+    if (!novaSigla || !String(currentLegenda.descricao || "").trim()) {
       alert("Por favor, preencha os campos obrigatórios (*).");
       return;
     }
@@ -902,14 +1054,17 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       return;
     }
 
+    // Normaliza: omite campos opcionais vazios (compatível com documentos legados)
+    const cleaned = normalizeLegenda({ ...currentLegenda, sigla: novaSigla });
+
     let updatedList = [...legendas];
-    const editIndex = legendaOriginalSigla !== null
-      ? legendas.findIndex((l) => l.sigla === legendaOriginalSigla)
-      : -1;
+    const editIndex =
+      legendaOriginalSigla !== null
+        ? legendas.findIndex((l) => l.sigla === legendaOriginalSigla)
+        : -1;
 
     if (editIndex > -1) {
-      updatedList[editIndex] = { ...currentLegenda, sigla: novaSigla };
-      // Sigla renomeada: o documento antigo precisa ser removido no salvamento
+      updatedList[editIndex] = { ...cleaned, ordem: legendas[editIndex].ordem };
       if (legendaOriginalSigla !== null && legendaOriginalSigla !== novaSigla) {
         setRemovedLegendas((prev) =>
           prev.includes(legendaOriginalSigla) ? prev : [...prev, legendaOriginalSigla]
@@ -918,10 +1073,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     } else {
       const maxOrdem = legendas.reduce((max, l) => (l.ordem && l.ordem > max ? l.ordem : max), 0);
       updatedList.push({
-        ...currentLegenda,
-        sigla: novaSigla,
+        ...cleaned,
         ordem: maxOrdem + 1,
-        ativo: true
+        ativo: cleaned.ativo !== false,
       });
     }
 
@@ -929,6 +1083,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     setLegendaModalOpen(false);
     setCurrentLegenda(null);
     setLegendaOriginalSigla(null);
+    setLegendaModalSection("basicas");
   };
 
   // --- LIST COMPUTATIONS (SEARCH, FILTER & PAGINATION) ---
@@ -946,19 +1101,28 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       );
     }
     if (colActiveFilter === "ativos") {
-      list = list.filter((c) => c.ativo !== false);
+      list = list.filter((c) => normalizeAtivoFlag(c.ativo));
     } else if (colActiveFilter === "inativos") {
-      list = list.filter((c) => c.ativo === false);
+      list = list.filter((c) => !normalizeAtivoFlag(c.ativo));
     }
+    // "todos" = sem filtro de situação (ativos + inativos)
     return list;
   }, [colaboradores, colSearch, colActiveFilter]);
 
-  const pagedColaboradores = useMemo(() => {
-    const startIndex = (colPage - 1) * colPerPage;
-    return filteredColaboradores.slice(startIndex, startIndex + colPerPage);
-  }, [filteredColaboradores, colPage]);
-
   const totalColPages = Math.ceil(filteredColaboradores.length / colPerPage) || 1;
+
+  // Corrige página inválida (ex.: Inativos com 1 item enquanto colPage ainda era 2)
+  useEffect(() => {
+    if (colPage > totalColPages) {
+      setColPage(totalColPages);
+    }
+  }, [colPage, totalColPages]);
+
+  const pagedColaboradores = useMemo(() => {
+    const safePage = Math.min(Math.max(colPage, 1), totalColPages);
+    const startIndex = (safePage - 1) * colPerPage;
+    return filteredColaboradores.slice(startIndex, startIndex + colPerPage);
+  }, [filteredColaboradores, colPage, totalColPages]);
 
   const filteredUsuarios = useMemo(() => {
     let list = usuarios;
@@ -1120,7 +1284,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   }`}
                 >
                   <Shield size={16} />
-                  <span>Usuários</span>
+                  <span>Permissão</span>
                 </button>
               )}
 
@@ -1217,7 +1381,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Colaboradores</h2>
-                    <p className="text-xs text-gray-500">Gerenciamento da lista de efetivo policial e ordem de precedência.</p>
+                    <p className="text-xs text-gray-500">
+                      Efetivo policial e ordem de precedência. Inativar um colaborador o remove das escalas,
+                      sem retirar eventual permissão administrativa no módulo Permissão.
+                    </p>
                   </div>
                   <button
                     id="new-col-btn"
@@ -1231,6 +1398,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         observacao: "",
                         ativo: true
                       });
+                      setColOriginalRe(null);
                       setColModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -1261,7 +1429,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <div className="flex items-center space-x-1 border border-gray-300 rounded-lg p-1 bg-gray-50">
                     <button
                       id="col-filter-todos"
-                      onClick={() => setColActiveFilter("todos")}
+                      onClick={() => {
+                        setColActiveFilter("todos");
+                        setColPage(1);
+                      }}
                       className={`px-2 py-1 text-[11px] font-bold rounded-md transition-colors cursor-pointer ${
                         colActiveFilter === "todos" ? "bg-white text-blue-700 shadow-xs" : "text-gray-500 hover:text-gray-900"
                       }`}
@@ -1270,7 +1441,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     </button>
                     <button
                       id="col-filter-ativos"
-                      onClick={() => setColActiveFilter("ativos")}
+                      onClick={() => {
+                        setColActiveFilter("ativos");
+                        setColPage(1);
+                      }}
                       className={`px-2 py-1 text-[11px] font-bold rounded-md transition-colors cursor-pointer ${
                         colActiveFilter === "ativos" ? "bg-white text-blue-700 shadow-xs" : "text-gray-500 hover:text-gray-900"
                       }`}
@@ -1279,7 +1453,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     </button>
                     <button
                       id="col-filter-inativos"
-                      onClick={() => setColActiveFilter("inativos")}
+                      onClick={() => {
+                        setColActiveFilter("inativos");
+                        setColPage(1);
+                      }}
                       className={`px-2 py-1 text-[11px] font-bold rounded-md transition-colors cursor-pointer ${
                         colActiveFilter === "inativos" ? "bg-white text-blue-700 shadow-xs" : "text-gray-500 hover:text-gray-900"
                       }`}
@@ -1342,15 +1519,16 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               <td className="px-4 py-3 text-gray-600 font-medium">{col.secao}</td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  col.ativo !== false ? "bg-green-150 text-green-800" : "bg-red-150 text-red-800"
+                                  normalizeAtivoFlag(col.ativo) ? "bg-green-150 text-green-800" : "bg-red-150 text-red-800"
                                 }`}>
-                                  {col.ativo !== false ? "ATIVO" : "INATIVO"}
+                                  {normalizeAtivoFlag(col.ativo) ? "ATIVO" : "INATIVO"}
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right space-x-1">
                                 <button
                                   onClick={() => {
                                     setCurrentCol({ ...col });
+                                    setColOriginalRe(col.re);
                                     setColModalOpen(true);
                                   }}
                                   className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -1397,20 +1575,23 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
               </div>
             )}
 
-            {/* 2. MODULE: USUÁRIOS */}
+            {/* 2. MODULE: PERMISSÃO */}
             {activeTab === "usuarios" && (
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
-                    <h2 className="text-base font-bold text-gray-900">Módulo Usuários</h2>
-                    <p className="text-xs text-gray-500">Gerencie contas de usuários com permissões de Operador, Administrador ou Gestor.</p>
+                    <h2 className="text-base font-bold text-gray-900">Módulo Permissão</h2>
+                    <p className="text-xs text-gray-500">
+                      Conceda acesso ao sistema (Operador, Administrador ou Gestor). Pode incluir
+                      colaboradores inativos na escala — a permissão administrativa é independente.
+                    </p>
                   </div>
                   <div className="mt-3 sm:mt-0 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => exportUsuariosToExcel(usuarios)}
                       className="inline-flex items-center space-x-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-                      title="Exportar usuários"
+                      title="Exportar permissões"
                     >
                       <FileSpreadsheet size={14} />
                       <span>Exportar</span>
@@ -1431,12 +1612,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         ultimoLogin: null,
                         emailVerificado: false,
                       });
+                      setUserOriginalRe(null);
                       setUserModalOpen(true);
                     }}
                     className="inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                   >
                     <Plus size={14} />
-                    <span>Novo Usuário</span>
+                    <span>Nova Permissão</span>
                   </button>
                   </div>
                 </div>
@@ -1478,7 +1660,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {pagedUsuarios.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum usuário correspondente encontrado.</td>
+                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma permissão correspondente encontrada.</td>
                         </tr>
                       ) : (
                         pagedUsuarios.map((usr) => (
@@ -1523,6 +1705,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                                       ultimoLogin: usr.ultimoLogin ?? null,
                                       emailVerificado: usr.emailVerificado === true,
                                     });
+                                    setUserOriginalRe(usr.re);
                                     setUserModalOpen(true);
                                   }}
                                   className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -1762,13 +1945,17 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Legendas da Escala</h2>
-                    <p className="text-xs text-gray-500">Configure as opções de turnos de trabalho, folgas e licenças exibidas nos dropdowns das escalas.</p>
+                    <p className="text-xs text-gray-500">
+                      Configure códigos, representações e regras operacionais. A Escala Consolidada será
+                      preparada nesta configuração (sem geração automática nesta etapa).
+                    </p>
                   </div>
                   <button
                     id="new-legenda-btn"
                     onClick={() => {
-                      setCurrentLegenda({ sigla: "", descricao: "", cor: "verde", ativo: true });
+                      setCurrentLegenda(createEmptyLegendaForm());
                       setLegendaOriginalSigla(null);
+                      setLegendaModalSection("basicas");
                       setLegendaModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -1784,7 +1971,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       <tr>
                         <th className="px-4 py-3 text-center w-24">Ordem</th>
                         <th className="px-4 py-3">Sigla</th>
-                        <th className="px-4 py-3">Descrição Completa</th>
+                        <th className="px-4 py-3">Nome</th>
+                        <th className="px-4 py-3">Descrição</th>
+                        <th className="px-4 py-3">Consolidada</th>
                         <th className="px-4 py-3">Visual/Cor</th>
                         <th className="px-4 py-3 text-center">Situação</th>
                         <th className="px-4 py-3 text-right">Ações</th>
@@ -1793,7 +1982,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {legendas.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma legenda cadastrada.</td>
+                          <td colSpan={8} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma legenda cadastrada.</td>
                         </tr>
                       ) : (
                         legendas.map((l, idx) => (
@@ -1820,7 +2009,13 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               </div>
                             </td>
                             <td className="px-4 py-3 font-bold text-gray-800">{l.sigla}</td>
+                            <td className="px-4 py-3 text-gray-600">{l.nome || "—"}</td>
                             <td className="px-4 py-3 text-gray-600">{l.descricao}</td>
+                            <td className="px-4 py-3 font-mono text-gray-700">
+                              {l.representacoes?.escalaConsolidada?.trim() || (
+                                <span className="text-gray-400 font-sans">Não config.</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3">
                               <span
                                 className="inline-flex items-center px-3 py-1 rounded text-[11px] font-bold border border-gray-300"
@@ -1845,8 +2040,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                             <td className="px-4 py-3 text-right space-x-1">
                               <button
                                 onClick={() => {
-                                  setCurrentLegenda({ ...l });
+                                  setCurrentLegenda(toLegendaFormState(l));
                                   setLegendaOriginalSigla(l.sigla);
+                                  setLegendaModalSection("basicas");
                                   setLegendaModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -1993,9 +2189,16 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             >
               <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {colaboradores.some((c) => c.re === currentCol.re) ? "Editar Colaborador" : "Adicionar Colaborador"}
+                  {colOriginalRe !== null ? "Editar Colaborador" : "Adicionar Colaborador"}
                 </h3>
-                <button onClick={() => setColModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColModalOpen(false);
+                    setColOriginalRe(null);
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
                   <X size={18} />
                 </button>
               </div>
@@ -2007,10 +2210,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <input
                       type="text"
                       value={currentCol.re}
-                      disabled={colaboradores.some((c) => c.re === currentCol.re)}
                       onChange={(e) => setCurrentCol({ ...currentCol, re: e.target.value })}
                       placeholder="Ex: 999888-0"
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       required
                     />
                   </div>
@@ -2069,16 +2271,19 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     </select>
                   </div>
 
-                  <div className="flex items-center h-full pt-6">
+                  <div className="flex flex-col justify-end h-full pt-4">
                     <label className="inline-flex items-center cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={currentCol.ativo !== false}
+                        checked={normalizeAtivoFlag(currentCol.ativo)}
                         onChange={(e) => setCurrentCol({ ...currentCol, ativo: e.target.checked })}
                         className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Colaborador Ativo</span>
                     </label>
+                    <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+                      Inativo = fora das escalas. Não remove permissão no módulo Permissão.
+                    </p>
                   </div>
                 </div>
 
@@ -2096,7 +2301,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
                   <button
                     type="button"
-                    onClick={() => setColModalOpen(false)}
+                    onClick={() => {
+                      setColModalOpen(false);
+                      setColOriginalRe(null);
+                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar
@@ -2113,7 +2321,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
           </div>
         )}
 
-        {/* USUARIO ADD/EDIT MODAL */}
+        {/* PERMISSÃO ADD/EDIT MODAL */}
         {userModalOpen && currentUser && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
             <motion.div
@@ -2124,14 +2332,67 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             >
               <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {usuarios.some((u) => u.re === currentUser.re) ? "Editar Usuário" : "Adicionar Usuário"}
+                  {userOriginalRe !== null ? "Editar Permissão" : "Nova Permissão"}
                 </h3>
-                <button onClick={() => setUserModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserModalOpen(false);
+                    setUserOriginalRe(null);
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
                   <X size={18} />
                 </button>
               </div>
 
               <form onSubmit={handleUserSubmit} className="p-6 space-y-4">
+                {userOriginalRe === null && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Selecionar colaborador
+                    </label>
+                    <select
+                      value={
+                        colaboradores.some((c) => c.re === currentUser.re) ? currentUser.re : ""
+                      }
+                      onChange={(e) => {
+                        const re = e.target.value;
+                        if (!re) return;
+                        const col = colaboradores.find((c) => c.re === re);
+                        if (!col) return;
+                        setCurrentUser((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                re: col.re,
+                                postoGrad: col.postoGrad,
+                                nome: col.nome,
+                                nomeCompleto: col.nomeCompleto || "",
+                                secao: col.secao,
+                              }
+                            : prev
+                        );
+                      }}
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                    >
+                      <option value="">Escolha alguém da lista de colaboradores…</option>
+                      {colaboradores
+                        .filter((c) => !usuarios.some((u) => u.re === c.re))
+                        .map((c) => (
+                          <option key={c.re} value={c.re}>
+                            {c.postoGrad} {c.nome} — R.E. {c.re}
+                            {!normalizeAtivoFlag(c.ativo) ? " (inativo na escala)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                    <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+                      Inclui colaboradores inativos na escala. Após selecionar, todos os campos
+                      podem ser ajustados. Informe e-mail e perfil para concluir.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Posto/Graduação *</label>
@@ -2152,10 +2413,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <input
                       type="text"
                       value={currentUser.re}
-                      disabled={usuarios.some((u) => u.re === currentUser.re)}
                       onChange={(e) => setCurrentUser({ ...currentUser, re: e.target.value })}
                       placeholder="Ex: 999888-0"
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       required
                     />
                   </div>
@@ -2187,7 +2447,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
                 <div>
                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                    E-mail Google {usuarios.some((u) => u.re === currentUser.re) ? "" : "*"}
+                    E-mail Google {userOriginalRe === null ? "*" : ""}
                   </label>
                   <input
                     type="email"
@@ -2207,7 +2467,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     placeholder="joao.silva@exemplo.com"
                     autoComplete="email"
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
-                    required={!usuarios.some((u) => u.re === currentUser.re)}
+                    required={userOriginalRe === null}
                   />
                   <p className="mt-1 text-[10px] text-gray-400">
                     Usado futuramente para autenticação Google. Armazenado em minúsculas.
@@ -2244,7 +2504,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   </div>
                 </div>
 
-                <div className="pt-2">
+                <div className="pt-1">
                   <label className="inline-flex items-center cursor-pointer">
                     <input
                       type="checkbox"
@@ -2252,14 +2512,20 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       onChange={(e) => setCurrentUser({ ...currentUser, ativo: e.target.checked })}
                       className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Usuário Ativo (Acesso Liberado)</span>
+                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Permissão Ativa (Acesso Liberado)</span>
                   </label>
+                  <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+                    Independente de estar ativo como colaborador na escala.
+                  </p>
                 </div>
 
                 <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
                   <button
                     type="button"
-                    onClick={() => setUserModalOpen(false)}
+                    onClick={() => {
+                      setUserModalOpen(false);
+                      setUserOriginalRe(null);
+                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar
@@ -2410,86 +2676,279 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-sm w-full overflow-hidden"
+              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
+              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
                   {legendaOriginalSigla !== null ? "Editar Legenda" : "Adicionar Legenda"}
                 </h3>
-                <button onClick={() => setLegendaModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLegendaModalOpen(false);
+                    setLegendaModalSection("basicas");
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
                   <X size={18} />
                 </button>
               </div>
 
-              <form onSubmit={handleLegendaSubmit} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Sigla *</label>
-                  <input
-                    type="text"
-                    value={currentLegenda.sigla}
-                    onChange={(e) => setCurrentLegenda({ ...currentLegenda, sigla: e.target.value })}
-                    placeholder="Ex: FX"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
-                    required
-                  />
-                </div>
+              <div className="flex border-b border-gray-200 bg-gray-50 shrink-0">
+                {(
+                  [
+                    ["basicas", "Informações básicas"],
+                    ["representacoes", "Representações"],
+                    ["regras", "Regras de cálculo"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setLegendaModalSection(id)}
+                    className={`flex-1 px-2 py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wide cursor-pointer border-b-2 transition-colors ${
+                      legendaModalSection === id
+                        ? "border-blue-600 text-blue-700 bg-white"
+                        : "border-transparent text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Descrição Completa *</label>
-                  <input
-                    type="text"
-                    value={currentLegenda.descricao}
-                    onChange={(e) => setCurrentLegenda({ ...currentLegenda, descricao: e.target.value })}
-                    placeholder="Ex: FOLGA EXEMPLO"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
-                    required
-                  />
-                </div>
+              <form onSubmit={handleLegendaSubmit} className="p-6 space-y-4 overflow-y-auto">
+                {legendaModalSection === "basicas" && (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Código / Sigla *
+                      </label>
+                      <input
+                        type="text"
+                        value={currentLegenda.sigla}
+                        onChange={(e) => setCurrentLegenda({ ...currentLegenda, sigla: e.target.value })}
+                        placeholder="Ex: EN"
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                        required
+                      />
+                      <p className="mt-1 text-[10px] text-gray-400">
+                        Campo legado `sigla` — usado nos dropdowns da Escala Semanal.
+                      </p>
+                    </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Cor da Legenda</label>
-                  <div className="flex items-center space-x-3 mt-1">
-                    <input
-                      type="color"
-                      value={translateColorToHex(currentLegenda.cor) || "#ffffff"}
-                      onChange={(e) => setCurrentLegenda({ ...currentLegenda, cor: e.target.value })}
-                      className="h-8 w-12 rounded border border-gray-300 cursor-pointer p-0 bg-transparent"
-                    />
-                    <input
-                      type="text"
-                      value={currentLegenda.cor || ""}
-                      onChange={(e) => setCurrentLegenda({ ...currentLegenda, cor: e.target.value })}
-                      placeholder="Ex: #3B82F6"
-                      className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-semibold font-mono"
-                    />
-                    {currentLegenda.cor && (
-                      <button
-                        type="button"
-                        onClick={() => setCurrentLegenda({ ...currentLegenda, cor: "" })}
-                        className="px-2 py-1.5 text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors border border-red-200 cursor-pointer whitespace-nowrap"
-                      >
-                        Limpar
-                      </button>
-                    )}
-                  </div>
-                </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Nome
+                      </label>
+                      <input
+                        type="text"
+                        value={currentLegenda.nome || ""}
+                        onChange={(e) => setCurrentLegenda({ ...currentLegenda, nome: e.target.value })}
+                        placeholder="Ex: Expediente Normal (opcional)"
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                      />
+                    </div>
 
-                <div className="pt-2">
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={currentLegenda.ativo !== false}
-                      onChange={(e) => setCurrentLegenda({ ...currentLegenda, ativo: e.target.checked })}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Descrição *
+                      </label>
+                      <input
+                        type="text"
+                        value={currentLegenda.descricao}
+                        onChange={(e) => setCurrentLegenda({ ...currentLegenda, descricao: e.target.value })}
+                        placeholder="Ex: Expediente normal de trabalho"
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Cor da Legenda
+                      </label>
+                      <div className="flex items-center space-x-3 mt-1">
+                        <input
+                          type="color"
+                          value={translateColorToHex(currentLegenda.cor) || "#ffffff"}
+                          onChange={(e) => setCurrentLegenda({ ...currentLegenda, cor: e.target.value })}
+                          className="h-8 w-12 rounded border border-gray-300 cursor-pointer p-0 bg-transparent"
+                        />
+                        <input
+                          type="text"
+                          value={currentLegenda.cor || ""}
+                          onChange={(e) => setCurrentLegenda({ ...currentLegenda, cor: e.target.value })}
+                          placeholder="Ex: #3B82F6"
+                          className="block w-full border border-gray-300 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-950 font-semibold font-mono"
+                        />
+                        {currentLegenda.cor && (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentLegenda({ ...currentLegenda, cor: "" })}
+                            className="px-2 py-1.5 text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors border border-red-200 cursor-pointer whitespace-nowrap"
+                          >
+                            Limpar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <label className="inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={currentLegenda.ativo !== false}
+                          onChange={(e) => setCurrentLegenda({ ...currentLegenda, ativo: e.target.checked })}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Legenda Ativa</span>
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                {legendaModalSection === "representacoes" && (
+                  <>
+                    <p className="text-[11px] text-gray-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      Preparação para a futura Escala Consolidada. Nenhum campo desta seção é
+                      obrigatório. Se vazio, permanece como &quot;não configurado&quot;.
+                    </p>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Representação na Escala Semanal
+                      </label>
+                      <input
+                        type="text"
+                        value={currentLegenda.representacoes?.escalaSemanal || ""}
+                        onChange={(e) =>
+                          setCurrentLegenda({
+                            ...currentLegenda,
+                            representacoes: {
+                              ...currentLegenda.representacoes,
+                              escalaSemanal: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder={`Padrão implícito: ${currentLegenda.sigla || "sigla"}`}
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Representação na Escala Consolidada
+                      </label>
+                      <input
+                        type="text"
+                        value={currentLegenda.representacoes?.escalaConsolidada || ""}
+                        onChange={(e) =>
+                          setCurrentLegenda({
+                            ...currentLegenda,
+                            representacoes: {
+                              ...currentLegenda.representacoes,
+                              escalaConsolidada: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder="Ex: 1 (opcional)"
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                      />
+                      <p className="mt-1 text-[10px] text-gray-400">
+                        Opcional. Nem toda legenda precisa de valor consolidado.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {legendaModalSection === "regras" && (
+                  <>
+                    <p className="text-[11px] text-gray-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      Regras futuras de cálculo. Todos os campos são opcionais. A.A. usará
+                      &quot;É dia trabalhado?&quot; quando configurado; 1/2 Diária soma apenas
+                      valores positivos com participação ativa.
+                    </p>
+                    <OptionalBoolSelect
+                      label="É dia trabalhado?"
+                      value={currentLegenda.regras?.diaTrabalhado}
+                      onChange={(v) =>
+                        setCurrentLegenda({
+                          ...currentLegenda,
+                          regras: { ...currentLegenda.regras, diaTrabalhado: v },
+                        })
+                      }
+                      hint="Base futura do A.A. (dias trabalhados)."
                     />
-                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Legenda Ativa</span>
-                  </label>
-                </div>
+                    <OptionalBoolSelect
+                      label="Participa da 1/2 Diária?"
+                      value={currentLegenda.regras?.meiaDiaria?.participa}
+                      onChange={(v) =>
+                        setCurrentLegenda({
+                          ...currentLegenda,
+                          regras: {
+                            ...currentLegenda.regras,
+                            meiaDiaria: {
+                              ...currentLegenda.regras?.meiaDiaria,
+                              participa: v,
+                            },
+                          },
+                        })
+                      }
+                    />
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Valor da 1/2 Diária
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={
+                          currentLegenda.regras?.meiaDiaria?.valor !== undefined &&
+                          currentLegenda.regras?.meiaDiaria?.valor !== null
+                            ? currentLegenda.regras.meiaDiaria.valor
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setCurrentLegenda({
+                            ...currentLegenda,
+                            regras: {
+                              ...currentLegenda.regras,
+                              meiaDiaria: {
+                                ...currentLegenda.regras?.meiaDiaria,
+                                valor: raw === "" ? undefined : Number(raw),
+                              },
+                            },
+                          });
+                        }}
+                        placeholder="Ex: 1 (opcional; 0 não soma)"
+                        className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                      />
+                    </div>
+                    <OptionalBoolSelect
+                      label="Conta para A.A.?"
+                      value={currentLegenda.regras?.aa?.contaDia}
+                      onChange={(v) =>
+                        setCurrentLegenda({
+                          ...currentLegenda,
+                          regras: {
+                            ...currentLegenda.regras,
+                            aa: { ...currentLegenda.regras?.aa, contaDia: v },
+                          },
+                        })
+                      }
+                      hint="Se não configurado, o futuro cálculo usará 'É dia trabalhado?'."
+                    />
+                  </>
+                )}
 
                 <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
                   <button
                     type="button"
-                    onClick={() => setLegendaModalOpen(false)}
+                    onClick={() => {
+                      setLegendaModalOpen(false);
+                      setLegendaModalSection("basicas");
+                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar

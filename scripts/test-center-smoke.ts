@@ -18,6 +18,12 @@ import {
   getInitialWeeklyEditableFields,
   resetWeeklyRowsToInitialState,
 } from "../src/utils/clearWeeklySchedule";
+import {
+  getValorMeiaDiaria,
+  isDiaTrabalhado,
+  normalizeLegenda,
+  prepareLegendaForFirestore,
+} from "../src/utils/legendaModel";
 import { COMMAND_INVENTORY } from "../src/utils/testCenter/inventory";
 import { Usuario } from "../src/types";
 import { WeekInfo } from "../src/utils/dateUtils";
@@ -154,9 +160,33 @@ const allowed = clearWeeklySchedule({
 });
 assert(allowed.ok === true, "em_edicao permite limpeza");
 
+const legacyLeg = normalizeLegenda({
+  sigla: "F",
+  descricao: "FOLGA",
+  cor: "amarelo",
+  ativo: true,
+  ordem: 2,
+});
+assert(!legacyLeg.representacoes && !legacyLeg.regras, "legado sem opcionais");
+assert(findUndefinedPaths(prepareLegendaForFirestore(legacyLeg)).length === 0, "legado sem undefined");
+
+const enLeg = normalizeLegenda({
+  sigla: "EN",
+  nome: "Expediente Normal",
+  descricao: "Expediente normal",
+  cor: "verde",
+  ativo: true,
+  ordem: 1,
+  representacoes: { escalaSemanal: "EN", escalaConsolidada: "1" },
+  regras: { diaTrabalhado: true, meiaDiaria: { participa: true, valor: 1 }, aa: { contaDia: true } },
+});
+assert(enLeg.representacoes?.escalaConsolidada === "1", "EN consolidada");
+assert(isDiaTrabalhado(enLeg) && getValorMeiaDiaria(enLeg) === 1, "EN regras");
+
 console.log("\nCentral de Testes smoke: PASSOU");
 console.log("Feature Dados da semana anterior: implementada na Escala Semanal (Alteração não alterada).");
 console.log("Feature Limpar escala: implementada na Escala Semanal; bloqueada se aprovada; sem gravação automática.");
+console.log("Feature Legendas: campos opcionais de representação/regras (preparação Escala Consolidada).");
 console.log(
-  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; logout/login após salvar limpeza."
+  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; CRUD legendas (básico / consolidada / regras)."
 );

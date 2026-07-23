@@ -165,8 +165,17 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
   },
   {
     tela: "Configurações",
+    botao: "Legendas (CRUD expandido)",
+    funcaoEsperada:
+      "Cadastro com sigla/nome/descrição + representações e regras opcionais (preparação Consolidada)",
+    perfilPermitido: "Administrador",
+    acaoFirestore: "writeBatch legendas (campos novos opcionais; legados preservados)",
+    geraLog: "Sim (ALTERAR_CONFIGURACAO / Legendas)",
+  },
+  {
+    tela: "Configurações",
     botao: "Salvar Configurações",
-    funcaoEsperada: "Persistir CRUDs (colaboradores, usuários, postos, seções, legendas, gerais)",
+    funcaoEsperada: "Persistir CRUDs (colaboradores, permissão, postos, seções, legendas, gerais)",
     perfilPermitido: "Administrador",
     acaoFirestore: "writeBatch nas coleções",
     geraLog: "Sim (ALTERAR_CONFIGURACAO)",
