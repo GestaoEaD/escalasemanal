@@ -1,10 +1,16 @@
 /**
- * Sessão local (localStorage) + restauração com revalidação no Firestore.
- * Não altera regras de RBAC — apenas garante perfil atualizado antes dos guards.
+ * Sessão local (localStorage) + restauração via Firebase Auth + Firestore.
+ * Firebase Auth é a fonte de “está autenticado”; localStorage cacheia o perfil.
  */
 import { Usuario } from "../types";
-import { findUsuarioByRe } from "./approvalService";
+import { findUsuarioByEmail } from "./approvalService";
+import {
+  getCurrentAuthEmail,
+  signOutGoogle,
+  waitForAuthUser,
+} from "./googleAuthService";
 import { clearPendenciasAvisoDismiss } from "./pendingApprovalsService";
+import { normalizeEmail } from "./usuarioHelpers";
 
 export const SESSION_STORAGE_KEY = "escala_sessao_usuario";
 
@@ -32,6 +38,8 @@ export function toSessionUser(user: Usuario): Usuario {
     secao: user.secao,
     perfil: user.perfil || "Operador",
     ativo: user.ativo,
+    email: normalizeEmail(user.email) || undefined,
+    authProvider: user.authProvider || "google",
   };
 }
 
@@ -45,22 +53,31 @@ export function clearSession(): void {
 }
 
 /**
- * Revalida o usuário no Firestore a partir da sessão local.
- * Em falha de rede, mantém a sessão provisória (não força logout).
+ * Revalida a sessão: exige usuário Firebase Auth + cadastro por e-mail no Firestore.
+ * Inativos com e-mail cadastrado permanecem autenticados (status é independente do login).
+ * Em falha de rede após Auth OK, mantém snapshot local se o e-mail bater.
  */
 export async function restoreSession(): Promise<{
   phase: AuthPhase;
   usuario: Usuario | null;
 }> {
-  const provisional = readSession();
-  if (!provisional?.re) {
+  const firebaseUser = await waitForAuthUser();
+  if (!firebaseUser) {
+    clearSession();
+    return { phase: "unauthenticated", usuario: null };
+  }
+
+  const authEmail = normalizeEmail(firebaseUser.email) || getCurrentAuthEmail();
+  if (!authEmail) {
+    await signOutGoogle();
     clearSession();
     return { phase: "unauthenticated", usuario: null };
   }
 
   try {
-    const fresh = await findUsuarioByRe(provisional.re);
-    if (!fresh || fresh.ativo === false) {
+    const fresh = await findUsuarioByEmail(authEmail);
+    if (!fresh) {
+      await signOutGoogle();
       clearSession();
       return { phase: "unauthenticated", usuario: null };
     }
@@ -68,7 +85,13 @@ export async function restoreSession(): Promise<{
     writeSession(usuario);
     return { phase: "authenticated", usuario };
   } catch (err) {
-    console.warn("Falha ao revalidar sessão; mantendo snapshot local:", err);
-    return { phase: "authenticated", usuario: toSessionUser(provisional) };
+    console.warn("Falha ao revalidar sessão; tentando snapshot local:", err);
+    const provisional = readSession();
+    if (provisional?.re && normalizeEmail(provisional.email) === authEmail) {
+      return { phase: "authenticated", usuario: toSessionUser(provisional) };
+    }
+    await signOutGoogle();
+    clearSession();
+    return { phase: "unauthenticated", usuario: null };
   }
 }

@@ -933,9 +933,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       email: emailCheck.email,
       perfil: currentUser.perfil || "Operador",
       ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
-      authProvider: "local",
-      ultimoLogin: null,
-      emailVerificado: false,
+      authProvider: currentUser.authProvider || (emailCheck.email ? "google" : "local"),
+      ultimoLogin: currentUser.ultimoLogin ?? null,
+      emailVerificado: currentUser.emailVerificado === true,
     });
 
     let updatedList = [...usuarios];
@@ -1608,7 +1608,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         secao: secoes[0]?.nome || "Seç Gest Educ",
                         perfil: "Operador",
                         ativo: true,
-                        authProvider: "local",
+                        authProvider: "google",
                         ultimoLogin: null,
                         emailVerificado: false,
                       });
@@ -2470,7 +2470,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     required={userOriginalRe === null}
                   />
                   <p className="mt-1 text-[10px] text-gray-400">
-                    Usado futuramente para autenticação Google. Armazenado em minúsculas.
+                    Vínculo de acesso: o usuário entra somente com esta Conta Google. Armazenado em
+                    minúsculas.
                   </p>
                 </div>
 

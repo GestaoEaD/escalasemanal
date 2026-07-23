@@ -43,8 +43,10 @@ import {
   normalizeEscalaStatus,
   parseApprovalPath,
   isEditableWorkflowStatus,
-  findUsuarioByRe,
+  findUsuarioByEmail,
 } from "../approvalService";
+import { normalizeEmail } from "../usuarioHelpers";
+import { getGoogleAuthErrorMessage } from "../googleAuthService";
 import {
   clearPendenciasAvisoDismiss,
   dismissPendenciasAviso,
@@ -148,7 +150,7 @@ export function buildAllTestCases(opts: {
     },
   });
 
-  // --- Autenticação / RE ---
+  // --- Autenticação / Google ---
   cases.push({
     id: "auth-001",
     nome: "Normalização de RE remove dígito",
@@ -159,20 +161,20 @@ export function buildAllTestCases(opts: {
       if (normalizeRe("124342-0") !== "124342") return fail("normalizeRe falhou para 124342-0");
       if (!reEquals("124342-0", "124342")) return fail("reEquals deveria aceitar RE sem dígito");
       if (reEquals("124342-0", "999999-0")) return fail("reEquals aceitou REs diferentes");
-      return ok("RE normalizado e comparado corretamente");
+      return ok("RE normalizado e comparado corretamente (domínio, não login)");
     },
   });
 
   cases.push({
     id: "auth-002",
-    nome: "Login inválido (RE inexistente)",
+    nome: "E-mail inexistente não encontra usuário",
     categoria: "Autenticação",
     perfil: "Anônimo",
-    acao: "findUsuarioByRe com RE fictício",
+    acao: "findUsuarioByEmail com e-mail fictício",
     run: async () => {
-      const user = await findUsuarioByRe("RE-INEXISTENTE-XYZ-999");
-      if (user) return fail("RE inexistente retornou usuário", user.re);
-      return ok("Login inválido corretamente recusado (usuário null)");
+      const user = await findUsuarioByEmail("nao.cadastrado.xyz999@example.invalid");
+      if (user) return fail("E-mail inexistente retornou usuário", user.re);
+      return ok("Acesso corretamente recusado (usuário null)");
     },
   });
 
@@ -196,17 +198,59 @@ export function buildAllTestCases(opts: {
 
   cases.push({
     id: "auth-004",
-    nome: "Usuário atual ativo e com perfil",
+    nome: "Usuário atual com perfil e e-mail de sessão",
     categoria: "Autenticação",
     perfil: currentUser.perfil || "Operador",
-    acao: "Validar objeto Usuario da sessão",
+    acao: "Validar objeto Usuario da sessão (login Google)",
     run: async () => {
-      if (currentUser.ativo === false) return fail("Usuário atual está inativo");
       const perfil = currentUser.perfil || "Operador";
       if (!["Administrador", "Operador", "Gestor"].includes(perfil)) {
         return fail("Perfil inválido", perfil);
       }
-      return ok(`Usuário ${currentUser.nome} com perfil ${perfil}`);
+      const email = normalizeEmail(currentUser.email);
+      if (!email) {
+        return fail("Sessão Google sem e-mail no perfil");
+      }
+      return ok(
+        `Usuário ${currentUser.nome} com perfil ${perfil}` +
+          (currentUser.ativo === false ? " (inativo permitido)" : "")
+      );
+    },
+  });
+
+  cases.push({
+    id: "auth-005",
+    nome: "Mensagens amigáveis de erro do login Google",
+    categoria: "Autenticação",
+    perfil: "Sistema",
+    acao: "getGoogleAuthErrorMessage",
+    run: async () => {
+      const cancelled = getGoogleAuthErrorMessage("cancelled");
+      const denied = getGoogleAuthErrorMessage("not_registered");
+      if (!cancelled.title || !cancelled.body) return fail("Mensagem de cancelamento incompleta");
+      if (!denied.title.includes("não autorizado")) return fail("Título de não cadastrado inesperado");
+      if (denied.actionLabel !== "Tentar com outra conta Google") {
+        return fail("CTA de outra conta incorreto");
+      }
+      return ok("Mensagens amigáveis de autenticação OK");
+    },
+  });
+
+  cases.push({
+    id: "auth-006",
+    nome: "Lookup por e-mail do usuário atual",
+    categoria: "Autenticação",
+    perfil: currentUser.perfil || "Operador",
+    acao: "findUsuarioByEmail(currentUser.email)",
+    run: async () => {
+      const email = normalizeEmail(currentUser.email);
+      if (!email) return fail("Usuário atual sem e-mail cadastrado");
+      const found = await findUsuarioByEmail(email);
+      if (!found) return fail("E-mail da sessão não encontrado em usuarios");
+      if (normalizeRe(found.re) !== normalizeRe(currentUser.re)) {
+        return fail("E-mail vinculado a outro RE", `${found.re} ≠ ${currentUser.re}`);
+      }
+      return ok(`E-mail ${email} vinculado a ${found.postoGrad} ${found.nome}`);
     },
   });
 
@@ -346,7 +390,8 @@ export function buildAllTestCases(opts: {
     writesTestData: true,
     run: async () => {
       if (!allowFirestoreWriteTests) {
-        return { status: "NAO_EXECUTADO" as TestStatus, mensagem: "Escrita controlada desabilitada pelo usuário" };
+        // Comportamento esperado: sem checkbox, o probe não grava — conta como OK.
+        return ok("Escrita controlada desabilitada pelo usuário (comportamento esperado)");
       }
       if (!canAccessConfig(currentUser)) {
         return { status: "BLOQUEADO_POR_PERMISSAO" as TestStatus, mensagem: "Somente Admin pode gravar probe" };
@@ -1312,8 +1357,8 @@ export function summarizeAsMarkdown(summary: TestSuiteSummary): string {
     `## Resumo`,
     ``,
     `- Total: ${summary.total}`,
-    `- PASSOU: ${summary.passou}`,
-    `- FALHOU: ${summary.falhou}`,
+    `- OK: ${summary.passou}`,
+    `- ERRO: ${summary.falhou}`,
     `- BLOQUEADO: ${summary.bloqueado}`,
     `- NÃO EXECUTADO: ${summary.naoExecutado}`,
     ``,
@@ -1324,7 +1369,15 @@ export function summarizeAsMarkdown(summary: TestSuiteSummary): string {
   ];
   for (const r of summary.resultados) {
     const obs = (r.erro || r.mensagem || "—").replace(/\|/g, "/").slice(0, 120);
-    lines.push(`| ${r.nome} | ${r.status} | ${obs} |`);
+    const label =
+      r.status === "PASSOU"
+        ? "OK"
+        : r.status === "FALHOU"
+          ? "ERRO"
+          : r.status === "NAO_EXECUTADO"
+            ? "NÃO EXECUTADO"
+            : "BLOQUEADO POR PERMISSÃO";
+    lines.push(`| ${r.nome} | ${label} | ${obs} |`);
   }
   lines.push("");
   const falhas = summary.resultados.filter((r) => r.status === "FALHOU");

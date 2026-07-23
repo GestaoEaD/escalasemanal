@@ -14,11 +14,12 @@ import {
 import {
   AuthPhase,
   clearSession,
-  readSession,
   restoreSession,
   toSessionUser,
   writeSession,
 } from "./utils/sessionService";
+import { signOutGoogle } from "./utils/googleAuthService";
+import { markUsuarioGoogleLogin } from "./utils/usuarioHelpers";
 import Login from "./components/Login";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
@@ -48,10 +49,8 @@ function SessionLoadingScreen() {
 }
 
 export default function App() {
-  const [authPhase, setAuthPhase] = useState<AuthPhase>(() =>
-    readSession() ? "loading" : "unauthenticated"
-  );
-  const [usuario, setUsuario] = useState<Usuario | null>(() => readSession());
+  const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
+  const [usuario, setUsuario] = useState<Usuario | null>(null);
 
   const [route, setRoute] = useState<AppRoute>(() => routeFromLocation());
   const [selectedYear, setSelectedYear] = useState<number>(() => {
@@ -176,10 +175,17 @@ export default function App() {
   };
 
   const handleLoginSuccess = (user: Usuario) => {
-    const sessionUser = toSessionUser(user);
+    const sessionUser = toSessionUser({
+      ...user,
+      authProvider: "google",
+      emailVerificado: true,
+    });
     writeSession(sessionUser);
     setUsuario(sessionUser);
     setAuthPhase("authenticated");
+    void markUsuarioGoogleLogin(sessionUser).catch((err) =>
+      console.warn("Falha ao atualizar metadados de login Google:", err)
+    );
     void auditAuth("LOGIN", sessionUser).catch((err) =>
       console.warn("Falha ao registrar login na auditoria:", err)
     );
@@ -195,6 +201,7 @@ export default function App() {
     clearSession();
     setUsuario(null);
     setAuthPhase("unauthenticated");
+    void signOutGoogle();
     const pending = routeFromLocation();
     if (pending.view !== "aprovacao") {
       commitAppPath({ view: "selector" }, "replace");

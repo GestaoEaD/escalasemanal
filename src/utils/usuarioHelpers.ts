@@ -1,4 +1,6 @@
 import { Usuario } from "../types";
+import { db, doc, updateDoc } from "../firebase";
+import { prepareFirestoreWrite } from "./firestoreSanitize";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,18 +23,32 @@ export function displayUserEmail(email?: string | null): string {
 
 /**
  * Prepara documento de usuário para gravação no Firestore.
- * Garante campos de futura autenticação Google sem alterar o login atual.
- * Nesta fase: authProvider=local, ultimoLogin=null, emailVerificado=false.
+ * Normaliza e-mail e preserva authProvider / emailVerificado / ultimoLogin existentes.
  */
 export function prepareUsuarioDocument(user: Usuario): Usuario {
   const email = normalizeEmail(user.email);
   return {
     ...user,
     email,
-    authProvider: "local",
-    ultimoLogin: null,
-    emailVerificado: false,
+    authProvider: user.authProvider || (email ? "google" : "local"),
+    ultimoLogin: user.ultimoLogin ?? null,
+    emailVerificado: user.emailVerificado === true,
   };
+}
+
+/**
+ * Após login Google bem-sucedido, atualiza metadados no cadastro (sem alterar perfil/RBAC).
+ */
+export async function markUsuarioGoogleLogin(user: Usuario): Promise<void> {
+  const id = user.uid || user.re;
+  if (!id) return;
+  const payload = prepareFirestoreWrite(`usuarios/${id}`, {
+    authProvider: "google",
+    emailVerificado: true,
+    ultimoLogin: new Date().toISOString(),
+    email: normalizeEmail(user.email),
+  });
+  await updateDoc(doc(db, "usuarios", id), payload);
 }
 
 /**
@@ -49,7 +65,7 @@ export function validateUsuarioEmail(options: {
   const email = normalizeEmail(options.email);
 
   if (options.isNew && !email) {
-    return { ok: false, message: "Informe o E-mail Google (*)." };
+    return { ok: false, message: "Informe o E-mail Google (*). É o vínculo de acesso à plataforma." };
   }
 
   if (email && !isValidEmailFormat(email)) {

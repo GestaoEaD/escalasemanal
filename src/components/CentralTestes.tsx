@@ -22,6 +22,13 @@ interface CentralTestesProps {
   usuario: Usuario;
 }
 
+function statusLabel(status: TestResult["status"]) {
+  if (status === "PASSOU") return "OK";
+  if (status === "FALHOU") return "ERRO";
+  if (status === "NAO_EXECUTADO") return "NÃO EXECUTADO";
+  return "BLOQUEADO POR PERMISSÃO";
+}
+
 function statusBadge(status: TestResult["status"]) {
   const map: Record<TestResult["status"], string> = {
     PASSOU: "bg-emerald-50 text-emerald-800 border-emerald-200",
@@ -31,7 +38,7 @@ function statusBadge(status: TestResult["status"]) {
   };
   return (
     <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${map[status]}`}>
-      {status === "NAO_EXECUTADO" ? "NÃO EXECUTADO" : status.split("_").join(" ")}
+      {statusLabel(status)}
     </span>
   );
 }
@@ -181,13 +188,13 @@ export default function CentralTestes({ usuario }: CentralTestesProps) {
             </div>
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <div className="text-[10px] uppercase text-emerald-700 font-bold flex items-center gap-1">
-                <CheckCircle size={12} /> Passou
+                <CheckCircle size={12} /> OK
               </div>
               <div className="text-lg font-extrabold text-emerald-900">{summary.passou}</div>
             </div>
             <div className="rounded-lg border border-red-200 bg-red-50 p-3">
               <div className="text-[10px] uppercase text-red-700 font-bold flex items-center gap-1">
-                <XCircle size={12} /> Falhou
+                <XCircle size={12} /> Erro
               </div>
               <div className="text-lg font-extrabold text-red-900">{summary.falhou}</div>
             </div>
@@ -219,7 +226,7 @@ export default function CentralTestes({ usuario }: CentralTestesProps) {
                         : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
                     }`}
                   >
-                    {f === "NAO_EXECUTADO" ? "NÃO EXECUTADO" : f.split("_").join(" ")}
+                    {f === "TODOS" ? "TODOS" : statusLabel(f)}
                   </button>
                 )
               )}

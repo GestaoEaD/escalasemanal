@@ -37,7 +37,7 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firestore with custom database ID
 const db = getFirestore(app, "ai-studio-27d48337-faf8-4a27-a402-a865ec6f3b72");
 
-// Initialize Auth and Storage (ready for future use)
+// Initialize Auth (Google Sign-In) and Storage
 const auth = getAuth(app);
 const storage = getStorage(app);
 

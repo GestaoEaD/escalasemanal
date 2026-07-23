@@ -4,16 +4,16 @@ import { CommandInventoryItem } from "./types";
 export const COMMAND_INVENTORY: CommandInventoryItem[] = [
   {
     tela: "Login",
-    botao: "Entrar",
-    funcaoEsperada: "Autenticar por R.E. e abrir seletor de semanas",
-    perfilPermitido: "Qualquer RE ativo cadastrado",
-    acaoFirestore: "Leitura em usuarios",
+    botao: "Entrar com Google",
+    funcaoEsperada: "Autenticar via Google e vincular e-mail ao cadastro em usuarios",
+    perfilPermitido: "Qualquer e-mail cadastrado em usuarios",
+    acaoFirestore: "Leitura em usuarios (por e-mail)",
     geraLog: "Sim (LOGIN)",
   },
   {
     tela: "App / Header",
     botao: "Sair",
-    funcaoEsperada: "Encerrar sessão e voltar ao login",
+    funcaoEsperada: "Encerrar Firebase Auth + sessão local e voltar ao login",
     perfilPermitido: "Todos logados",
     acaoFirestore: "Nenhuma",
     geraLog: "Sim (LOGOUT)",

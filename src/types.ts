@@ -15,7 +15,7 @@ export type EscalaStatus =
 /** Documento oficial com ciclo de aprovação próprio. */
 export type TipoEscalaDocumento = "semanal" | "alteracao" | "frequencia";
 
-/** Provedor de autenticação — preparado para futura migração Google. */
+/** Provedor de autenticação (Google Auth + cadastro em usuarios). */
 export type AuthProvider = "local" | "google";
 
 export interface Usuario {
@@ -30,15 +30,15 @@ export interface Usuario {
   perfil?: PerfilUsuario;
   ativo?: boolean;
   /**
-   * E-mail Google (minúsculas). Usado futuramente para Firebase Auth.
-   * Usuários legados podem estar sem valor.
+   * E-mail Google (minúsculas). Vínculo com a Conta Google autenticada.
+   * Usuários legados podem estar sem valor e não conseguem entrar.
    */
   email?: string;
-  /** Nesta fase permanece sempre "local". */
+  /** Preferencialmente "google" após autenticação Firebase. */
   authProvider?: AuthProvider;
-  /** Preenchido no futuro ao autenticar via Google. */
+  /** Último login via Google (ISO). */
   ultimoLogin?: string | null;
-  /** Preenchido no futuro pela verificação do Firebase Auth. */
+  /** true quando o e-mail foi confirmado pelo Firebase Auth. */
   emailVerificado?: boolean;
 }
 
