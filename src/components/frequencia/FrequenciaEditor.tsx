@@ -24,6 +24,7 @@ import {
   displayFrequenciaCelula,
   isWeekendDay,
 } from "../../utils/frequenciaDisplay";
+import { exportFrequenciaToPDF } from "../../utils/frequenciaExport";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
 import {
@@ -546,11 +547,21 @@ export default function FrequenciaEditor({
             )}
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => {
+                if (!docData) return;
+                exportFrequenciaToPDF({
+                  doc: docData,
+                  exportedBy: {
+                    nome: usuario.nome,
+                    re: usuario.re,
+                    postoGrad: usuario.postoGrad,
+                  },
+                });
+              }}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-md border border-gray-300 bg-white text-gray-800 cursor-pointer"
             >
               <Printer size={13} />
-              Imprimir
+              Imprimir / PDF
             </button>
           </div>
         </div>
@@ -1057,99 +1068,7 @@ export default function FrequenciaEditor({
         </div>
       )}
 
-      <style>{`
-        @media print {
-          /* Reforço A4 paisagem (além de @page frequencia em index.css) */
-          @page { size: A4 landscape; margin: 5mm; }
-
-          body * { visibility: hidden; }
-          .frequencia-print-root,
-          .frequencia-print-root * { visibility: visible; }
-
-          .frequencia-print-root {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 287mm; /* A4 landscape útil ≈ 297mm − margens */
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-            background: #fff;
-          }
-
-          .frequencia-print-root header,
-          .frequencia-print-root .print\\:hidden {
-            display: none !important;
-          }
-
-          .frequencia-scroll {
-            overflow: visible !important;
-            border: none !important;
-          }
-
-          .frequencia-table {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            table-layout: fixed !important;
-            font-size: 6.5px !important;
-            line-height: 1.15 !important;
-          }
-
-          .frequencia-table col.freq-id-posto,
-          .frequencia-table .freq-id-posto {
-            width: 7% !important;
-            min-width: 0 !important;
-          }
-          .frequencia-table col.freq-id-re,
-          .frequencia-table .freq-id-re {
-            width: 6% !important;
-            min-width: 0 !important;
-          }
-          .frequencia-table col.freq-id-nome,
-          .frequencia-table .freq-id-nome {
-            width: 12% !important;
-            min-width: 0 !important;
-          }
-          .frequencia-table col.freq-day,
-          .frequencia-table .freq-day {
-            width: auto !important;
-            min-width: 0 !important;
-            max-width: none !important;
-          }
-          .frequencia-table col.freq-total-meia,
-          .frequencia-table .freq-total-meia {
-            width: 4.5% !important;
-            min-width: 0 !important;
-          }
-          .frequencia-table col.freq-total-aa,
-          .frequencia-table .freq-total-aa {
-            width: 3.5% !important;
-            min-width: 0 !important;
-          }
-
-          .frequencia-table th,
-          .frequencia-table td {
-            padding: 1px 1px !important;
-          }
-
-          .frequencia-table .freq-day-input,
-          .frequencia-table .freq-day-value {
-            border: none !important;
-            background: transparent !important;
-            box-shadow: none !important;
-            height: auto !important;
-            min-height: 0 !important;
-            font-size: 6.5px !important;
-            padding: 0 !important;
-          }
-
-          .frequencia-print-root [class*="sticky"] {
-            position: static !important;
-            left: auto !important;
-          }
-        }
-      `}</style>
+      {/* Impressão via exportFrequenciaToPDF (janela dedicada A4 paisagem). */}
     </div>
   );
 }
