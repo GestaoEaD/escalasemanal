@@ -147,6 +147,45 @@ body {
   letter-spacing: 0;
 }
 
+/**
+ * Observações na tela: mesmas larguras de Identificação da grade
+ * (Posto/RE/Nome) para o texto começar alinhado ao dia 1.
+ */
+.frequencia-obs-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  min-width: max(100%, 48rem);
+}
+
+.frequencia-obs-table .freq-id-posto {
+  width: 6rem;
+  min-width: 6rem;
+  max-width: 6rem;
+}
+
+.frequencia-obs-table .freq-id-re {
+  width: 5rem;
+  min-width: 5rem;
+  max-width: 5rem;
+}
+
+.frequencia-obs-table .freq-id-nome {
+  width: 10.5rem;
+  min-width: 10.5rem;
+  max-width: 10.5rem;
+}
+
+.frequencia-obs-table .freq-obs-text {
+  width: auto;
+}
+
+.frequencia-obs-table .freq-obs-acoes {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  max-width: 5.5rem;
+}
+
 /* Impressão direta da tela (Ctrl+P) — padrão A4 retrato (escalas) */
 @media print {
   @page {

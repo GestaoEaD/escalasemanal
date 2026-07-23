@@ -649,7 +649,7 @@ export function exportFrequenciaToPDF(options: {
 </head>
 <body>
   <div class="print-btn-bar no-print">
-    <span class="print-hint">Pré-visualização A4 paisagem — bordas suaves e tipografia leve. Use Imprimir / PDF.</span>
+    <span class="print-hint">Pré-visualização A4 paisagem. Use Imprimir / PDF.</span>
     <div class="print-actions">
       <button class="btn btn-secondary" type="button" onclick="window.close()">Fechar</button>
       <button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button>

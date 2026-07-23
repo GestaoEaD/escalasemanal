@@ -292,16 +292,26 @@ function ReadOnlyFrequenciaTable({
             Observações
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[11px] border-collapse">
+            <table className="frequencia-obs-table w-full text-[11px] border-collapse">
+              <colgroup>
+                <col className="freq-id-posto" />
+                <col className="freq-id-re" />
+                <col className="freq-id-nome" />
+                <col className="freq-obs-text" />
+              </colgroup>
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">
-                    POSTO/GRAD.
+                  <th className="freq-id-posto border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    Posto/Grad.
                   </th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">RE</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">NOME</th>
-                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">
-                    OBSERVAÇÃO
+                  <th className="freq-id-re border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    RE
+                  </th>
+                  <th className="freq-id-nome border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    Nome
+                  </th>
+                  <th className="freq-obs-text border border-gray-200 px-2 py-1.5 text-left font-bold">
+                    Observação
                   </th>
                 </tr>
               </thead>
@@ -310,14 +320,16 @@ function ReadOnlyFrequenciaTable({
                   const ident = resolveObsIdent(o);
                   return (
                     <tr key={o.id}>
-                      <td className="border border-gray-200 px-2 py-1.5 font-semibold">
+                      <td className="freq-id-posto border border-gray-200 px-2 py-1.5 font-semibold truncate">
                         {ident.postoGrad}
                       </td>
-                      <td className="border border-gray-200 px-2 py-1.5 font-mono">{ident.re}</td>
-                      <td className="border border-gray-200 px-2 py-1.5 font-bold whitespace-nowrap">
+                      <td className="freq-id-re border border-gray-200 px-2 py-1.5 font-mono">
+                        {ident.re}
+                      </td>
+                      <td className="freq-id-nome border border-gray-200 px-2 py-1.5 font-bold truncate">
                         {ident.nome}
                       </td>
-                      <td className="border border-gray-200 px-2 py-1.5 whitespace-pre-wrap">
+                      <td className="freq-obs-text border border-gray-200 px-2 py-1.5 whitespace-pre-wrap">
                         {o.texto}
                       </td>
                     </tr>

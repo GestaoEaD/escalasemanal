@@ -780,31 +780,42 @@ export default function FrequenciaEditor({
           </div>
         </div>
 
-        {/* Observações — tabela */}
-        <section className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
-          <div className="px-3 py-1.5 border-b border-gray-200 bg-gray-50">
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-800">
+        {/* Observações — alinhadas à Identificação da grade (Posto/RE/Nome → dia 1) */}
+        <section className="bg-white border border-slate-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
+          <div className="px-3 py-1.5 border-b border-slate-200 bg-slate-50">
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-800">
               Observações
             </h3>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[11px] leading-tight border-collapse min-w-[720px]">
-              <thead className="bg-gray-100">
+          <div className="frequencia-scroll">
+            <table className="frequencia-obs-table text-[11px] leading-tight">
+              <colgroup>
+                <col className="freq-id-posto" />
+                <col className="freq-id-re" />
+                <col className="freq-id-nome" />
+                <col className="freq-obs-text" />
+                {editable && <col className="freq-obs-acoes" />}
+              </colgroup>
+              <thead className="bg-slate-100">
                 <tr>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.75rem]">
-                    POSTO/GRAD.
+                  <th
+                    className={`freq-id-posto border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap`}
+                  >
+                    Posto/Grad.
                   </th>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.25rem]">
+                  <th className="freq-id-re border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">
                     RE
                   </th>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[7rem]">
-                    NOME
+                  <th
+                    className={`freq-id-nome border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${sepId}`}
+                  >
+                    Nome
                   </th>
-                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold min-w-[14rem]">
-                    OBSERVAÇÃO
+                  <th className="freq-obs-text border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide">
+                    Observação
                   </th>
                   {editable && (
-                    <th className="border border-gray-300 px-1 py-1 text-center font-bold w-20 print:hidden">
+                    <th className="freq-obs-acoes border border-slate-300 px-1 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide print:hidden">
                       Ações
                     </th>
                   )}
@@ -815,7 +826,7 @@ export default function FrequenciaEditor({
                   <tr>
                     <td
                       colSpan={editable ? 5 : 4}
-                      className="border border-gray-200 px-3 py-3 text-center text-gray-400"
+                      className="border border-slate-200 px-3 py-3 text-center text-slate-400"
                     >
                       Nenhuma observação.
                     </td>
@@ -824,32 +835,38 @@ export default function FrequenciaEditor({
                   visibleObs.map((o) => {
                     const ident = resolveObsIdent(o);
                     return (
-                      <tr key={o.id} className="hover:bg-gray-50/80 print:hover:bg-transparent">
-                        <td className="border border-gray-200 px-1.5 py-1 text-left font-semibold align-middle whitespace-nowrap">
+                      <tr
+                        key={o.id}
+                        className="hover:bg-slate-50/80 print:hover:bg-transparent"
+                      >
+                        <td className="freq-id-posto border border-slate-200 px-2 py-1 text-left font-semibold text-slate-700 align-middle whitespace-nowrap truncate">
                           {ident.postoGrad}
                         </td>
-                        <td className="border border-gray-200 px-1.5 py-1 text-left font-mono align-middle whitespace-nowrap">
+                        <td className="freq-id-re border border-slate-200 px-2 py-1 text-left font-mono text-slate-800 align-middle whitespace-nowrap">
                           {ident.re}
                         </td>
-                        <td className="border border-gray-200 px-1.5 py-1 text-left font-bold text-gray-900 align-middle whitespace-nowrap">
+                        <td
+                          className={`freq-id-nome border border-slate-200 px-2 py-1 text-left font-bold text-slate-900 align-middle whitespace-nowrap truncate ${sepId}`}
+                          title={ident.nome}
+                        >
                           {ident.nome}
                         </td>
-                        <td className="border border-gray-200 px-1.5 py-1 text-left align-middle">
+                        <td className="freq-obs-text border border-slate-200 px-2 py-1 text-left align-middle">
                           {editingObsId === o.id ? (
                             <textarea
                               value={editingObsText}
                               onChange={(e) => setEditingObsText(e.target.value)}
-                              className="w-full border border-gray-300 rounded-md p-1.5 text-xs min-h-[2.5rem] leading-snug"
+                              className="w-full border border-slate-300 rounded-md p-1.5 text-xs min-h-[2.5rem] leading-snug"
                               rows={2}
                             />
                           ) : (
-                            <span className="text-gray-800 whitespace-pre-wrap leading-snug">
+                            <span className="text-slate-800 whitespace-pre-wrap leading-snug">
                               {o.texto}
                             </span>
                           )}
                         </td>
                         {editable && (
-                          <td className="border border-gray-200 px-1 py-1 text-center align-middle print:hidden">
+                          <td className="freq-obs-acoes border border-slate-200 px-1 py-1 text-center align-middle print:hidden">
                             {editingObsId === o.id ? (
                               <div className="flex flex-col gap-0.5 items-center">
                                 <button
