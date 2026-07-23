@@ -10,7 +10,6 @@ import {
 } from "../types";
 import { dayKey, daysInMonth } from "./frequenciaIds";
 import { displayFrequenciaCelula, isWeekendDay } from "./frequenciaDisplay";
-import { getMonthDayColumnLabel } from "./dateUtils";
 
 export type FrequenciaExportUser = {
   nome: string;
@@ -182,31 +181,38 @@ const FREQUENCIA_PRINT_CSS = `
     padding: 5px 3px;
   }
 
-  .freq-table .col-posto { width: 7%; text-align: left; }
+  .freq-table .col-posto { width: 10%; text-align: left; }
   .freq-table .col-re {
-    width: 5.5%;
+    width: 8%;
     text-align: left;
     font-variant-numeric: tabular-nums;
     font-family: ui-monospace, "Segoe UI", Arial, monospace;
   }
-  .freq-table .col-nome { width: 12%; text-align: left; font-weight: 650; color: #101828; }
+  .freq-table .col-nome { width: 11%; text-align: left; font-weight: 650; color: #101828; }
   .freq-table .col-day {
     text-align: center;
     font-variant-numeric: tabular-nums;
-    font-weight: 650;
-    font-size: 7.5px;
+    font-weight: 700;
+    font-size: 8px;
     color: #1f2937;
     white-space: nowrap;
+    padding: 2px 0 !important;
   }
   .freq-table .col-meia,
   .freq-table .col-aa {
-    width: 4%;
+    width: 4.5%;
     text-align: center;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: #101828;
   }
-  .freq-table .col-aa { width: 3.2%; }
+  .freq-table .col-aa { width: 3.5%; }
+
+  .freq-table thead th.col-day {
+    font-size: 7.5px;
+    font-weight: 750;
+    padding: 3px 0 !important;
+  }
 
   .freq-table tbody td {
     background: #fff;
@@ -400,15 +406,28 @@ const FREQUENCIA_PRINT_CSS = `
 
     .freq-table .col-day {
       text-align: center !important;
+      font-size: 8px !important;
+      padding: 2px 0 !important;
     }
+
+    .freq-table thead th.col-day {
+      font-size: 7.5px !important;
+      padding: 2.5px 0 !important;
+    }
+
+    .freq-table .col-posto { width: 10% !important; }
+    .freq-table .col-re { width: 8% !important; }
+    .freq-table .col-nome { width: 11% !important; }
+    .freq-table .col-meia { width: 4.5% !important; }
+    .freq-table .col-aa { width: 3.5% !important; }
 
     .freq-table .col-posto,
     .freq-table .col-re,
     .freq-table .col-nome,
     .freq-table .id-cell {
       text-align: left !important;
-      padding-left: 4px !important;
-      padding-right: 3px !important;
+      padding-left: 3px !important;
+      padding-right: 2px !important;
     }
 
     .freq-table td.mark-afast {
@@ -490,11 +509,13 @@ export function exportFrequenciaToPDF(options: {
   }
 
   const dayHeads = dayKeys
-    .map((k) => {
-      const label = getMonthDayColumnLabel(year, month, Number(k));
-      return `<th class="col-day${weekend[k] ? " weekend" : ""}">${escapeHtml(label)}</th>`;
-    })
+    .map(
+      (k) =>
+        `<th class="col-day${weekend[k] ? " weekend" : ""}">${Number(k)}</th>`
+    )
     .join("");
+
+  const dayCols = dayKeys.map(() => `<col class="col-day" />`).join("");
 
   const bodyRows =
     doc.rows.length === 0
@@ -586,6 +607,14 @@ export function exportFrequenciaToPDF(options: {
   </header>
 
   <table class="freq-table">
+    <colgroup>
+      <col class="col-posto" />
+      <col class="col-re" />
+      <col class="col-nome" />
+      ${dayCols}
+      <col class="col-meia" />
+      <col class="col-aa" />
+    </colgroup>
     <thead>
       <tr class="group-head">
         <th colspan="3">Identificação</th>

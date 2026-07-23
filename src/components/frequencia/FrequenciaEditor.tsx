@@ -19,7 +19,6 @@ import {
   submitFrequenciaForApproval,
 } from "../../utils/frequenciaService";
 import { daysInMonth, dayKey } from "../../utils/frequenciaIds";
-import { getMonthDayColumnLabel } from "../../utils/dateUtils";
 import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia } from "../../utils/frequenciaCalculo";
 import {
   displayFrequenciaCelula,
@@ -410,13 +409,13 @@ export default function FrequenciaEditor({
     "bg-white print:bg-white group-hover:bg-slate-50 print:group-hover:bg-white";
   const sepId = "border-r-2 border-r-slate-400";
   const sepTotais = "border-l-2 border-l-slate-400";
-  // Sticky offsets = freq-id-posto (5.75) + freq-id-re (4.75) = 10.5rem
+  // Sticky offsets = freq-id-posto (5.5) + freq-id-re (4.5) = 10rem
   const stickyPosto = "sticky left-0 z-[1] print:static";
-  const stickyRe = "sticky left-[5.75rem] z-[1] print:static";
-  const stickyNome = "sticky left-[10.5rem] z-[1] print:static";
+  const stickyRe = "sticky left-[5.5rem] z-[1] print:static";
+  const stickyNome = "sticky left-[10rem] z-[1] print:static";
   const stickyPostoHead = "sticky left-0 z-20 bg-slate-100 print:static";
-  const stickyReHead = "sticky left-[5.75rem] z-20 bg-slate-100 print:static";
-  const stickyNomeHead = "sticky left-[10.5rem] z-20 bg-slate-100 print:static";
+  const stickyReHead = "sticky left-[5.5rem] z-20 bg-slate-100 print:static";
+  const stickyNomeHead = "sticky left-[10rem] z-20 bg-slate-100 print:static";
 
   const dayCellTone = (weekend: boolean) =>
     weekend
@@ -652,14 +651,13 @@ export default function FrequenciaEditor({
                   {dayKeys.map((k) => (
                     <th
                       key={k}
-                      className={`freq-day border border-slate-300 px-0.5 py-1 text-center text-[8px] sm:text-[9px] font-bold leading-tight align-middle ${
+                      className={`freq-day border border-slate-300 px-0 py-1 text-center text-[10px] font-bold tabular-nums align-middle ${
                         weekendByKey[k]
                           ? "bg-slate-200/90 text-slate-800"
                           : "bg-slate-100"
                       }`}
-                      title={getMonthDayColumnLabel(year, month, Number(k))}
                     >
-                      {getMonthDayColumnLabel(year, month, Number(k))}
+                      {Number(k)}
                     </th>
                   ))}
                   <th

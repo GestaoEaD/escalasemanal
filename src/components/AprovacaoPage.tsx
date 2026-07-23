@@ -13,7 +13,6 @@ import {
 } from "../types";
 import { daysInMonth, dayKey } from "../utils/frequenciaIds";
 import {
-  getMonthDayColumnLabel,
   getWeekDayColumnHeaders,
   getWeeksForYear,
   WeekDayKey,
@@ -226,14 +225,12 @@ function ReadOnlyFrequenciaTable({
               <th className={`px-2 py-2 text-left font-bold ${sepId}`}>NOME</th>
               {dayKeys.map((k) => {
                 const weekend = isWeekendDay(docData.ano, docData.mes, Number(k));
-                const label = getMonthDayColumnLabel(docData.ano, docData.mes, Number(k));
                 return (
                   <th
                     key={k}
-                    className={`px-0.5 py-2 text-center font-bold text-[9px] leading-tight min-w-[2.5rem] ${weekendCellClass(weekend)}`}
-                    title={label}
+                    className={`px-0.5 py-2 text-center font-bold tabular-nums min-w-[1.6rem] ${weekendCellClass(weekend)}`}
                   >
-                    {label}
+                    {Number(k)}
                   </th>
                 );
               })}
