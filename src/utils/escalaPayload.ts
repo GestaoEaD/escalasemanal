@@ -1,21 +1,49 @@
 import { ScheduleRow, EscalaAprovacao, HistoricoEscalaEvento, LastSaved, AprovacaoAtor } from "../types";
 
+/** Sigla oficial que substitui o hífen ("sem escala" / afastamento). */
+export const SIGLA_AFASTAMENTO = "A";
+
+/** Converte hífen legado para a legenda A (Afastamento). */
+export function normalizeHyphenToAfastamento(value: unknown): string {
+  const v = String(value ?? "");
+  return v.trim() === "-" ? SIGLA_AFASTAMENTO : v;
+}
+
+const DAY_FIELDS = ["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const;
+
+/** Normaliza hífens em todos os dias da linha. */
+export function normalizeScheduleRowAfastamento<T extends Partial<ScheduleRow>>(row: T): T {
+  const next = { ...row };
+  for (const day of DAY_FIELDS) {
+    if (day in next) {
+      (next as Record<string, unknown>)[day] = normalizeHyphenToAfastamento(
+        (next as Record<string, unknown>)[day]
+      );
+    }
+  }
+  return next;
+}
+
 /**
- * Fim de semana sem escala: converte o antigo padrão "EN" de sábado/domingo para "-".
+ * Fim de semana sem escala: EN legado e hífen → A (Afastamento).
  * Aplica-se ao carregar escalas gravadas antes da mudança do valor padrão.
  */
 export function applyWeekendDefault<T extends Pick<ScheduleRow, "sab" | "dom">>(row: T): T {
-  return {
-    ...row,
-    sab: row.sab === "EN" ? "-" : row.sab,
-    dom: row.dom === "EN" ? "-" : row.dom,
+  const normalizeWeekend = (v: string) => {
+    if (v === "EN" || v.trim() === "-") return SIGLA_AFASTAMENTO;
+    return normalizeHyphenToAfastamento(v);
   };
+  return normalizeScheduleRowAfastamento({
+    ...row,
+    sab: normalizeWeekend(String(row.sab ?? "")),
+    dom: normalizeWeekend(String(row.dom ?? "")),
+  });
 }
 
 /** Monta uma linha da escala só com campos válidos (sem spread de props extras/undefined). */
 export function cleanScheduleRow(row: ScheduleRow | Record<string, unknown>): ScheduleRow {
   const r = row as ScheduleRow;
-  return {
+  return normalizeScheduleRowAfastamento({
     re: String(r.re ?? ""),
     postoGrad: String(r.postoGrad ?? ""),
     nome: String(r.nome ?? ""),
@@ -28,7 +56,7 @@ export function cleanScheduleRow(row: ScheduleRow | Record<string, unknown>): Sc
     sab: String(r.sab ?? ""),
     dom: String(r.dom ?? ""),
     observacao: String(r.observacao ?? ""),
-  };
+  });
 }
 
 export function cleanAprovacaoAtor(ator: AprovacaoAtor | null | undefined): AprovacaoAtor | null {

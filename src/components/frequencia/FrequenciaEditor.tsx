@@ -382,7 +382,7 @@ export default function FrequenciaEditor({
   const lookup = useMemo(() => buildLegendaLookup(legendas), [legendas]);
   const optionValues = useMemo(() => {
     const allowed = listValoresControleFrequencia(legendas);
-    return ["", "-", ...allowed];
+    return ["", "A", ...allowed.filter((v) => v !== "A" && v !== "-")];
   }, [legendas]);
 
   const showSubmit =
@@ -728,11 +728,11 @@ export default function FrequenciaEditor({
                                   const wasEmptyNonManual =
                                     !cel.editadoManualmente &&
                                     !String(cel.valor || "").trim();
-                                  if (wasEmptyNonManual && next === "-") return;
+                                  if (wasEmptyNonManual && next === "A") return;
                                   setCell(row.re, k, next);
                                 }}
                                 onFocus={(e) => {
-                                  if (e.target.value === "-") e.target.select();
+                                  if (e.target.value === "A") e.target.select();
                                 }}
                                 list={`freq-opts-${row.re}`}
                                 title={

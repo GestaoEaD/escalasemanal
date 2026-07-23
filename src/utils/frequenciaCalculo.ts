@@ -29,8 +29,9 @@ export function findLegendaForValor(
   valor: string,
   lookup: Map<string, Legenda>
 ): Legenda | undefined {
-  const key = String(valor || "").trim();
-  if (!key || key === "-") return undefined;
+  let key = String(valor || "").trim();
+  if (!key) return undefined;
+  if (key === "-") key = "A";
   return lookup.get(key.toUpperCase()) || lookup.get(key);
 }
 
@@ -50,8 +51,9 @@ export function convertEscalaValorToFrequencia(
   escalaValor: string,
   lookup: Map<string, Legenda>
 ): string {
-  const raw = String(escalaValor || "").trim();
-  if (!raw || raw === "-") return "";
+  let raw = String(escalaValor || "").trim();
+  if (!raw) return "";
+  if (raw === "-") raw = "A";
   const legenda = findLegendaForValor(raw, lookup);
   if (!legenda) return "";
   return getRepresentacaoConsolidada(legenda) || "";
@@ -96,8 +98,9 @@ export function findLegendaParaCalculoFrequencia(
   valorCelula: string,
   lookup: Map<string, Legenda>
 ): Legenda | undefined {
-  const raw = String(valorCelula || "").trim();
-  if (!raw || raw === "-") return undefined;
+  let raw = String(valorCelula || "").trim();
+  if (!raw) return undefined;
+  if (raw === "-") raw = "A";
   const legenda = findLegendaForValor(raw, lookup);
   if (!legenda) return undefined;
   const cons = getRepresentacaoConsolidada(legenda);

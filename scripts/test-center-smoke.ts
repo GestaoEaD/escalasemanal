@@ -122,7 +122,7 @@ const prepared = preparePreviousWeeklyRowsForEditor([
   },
 ]);
 assert(prepared[0].seg === "F", "não inventa EN sobre legenda existente");
-assert(prepared[0].sab === "-" && prepared[0].dom === "-", "weekend default no prepare");
+assert(prepared[0].sab === "A" && prepared[0].dom === "A", "weekend default no prepare");
 
 const row = applyWeekendDefault(
   cleanScheduleRow({
@@ -140,7 +140,7 @@ const row = applyWeekendDefault(
     observacao: "",
   })
 );
-assert(row.sab === "-" && row.dom === "-", "weekend default");
+assert(row.sab === "A" && row.dom === "A", "weekend default");
 
 const filled = [
   cleanScheduleRow({
@@ -247,7 +247,7 @@ const clearedCel: FrequenciaCelula = {
   origem: "edicao_manual",
   editadoManualmente: true,
 };
-assert(displayFrequenciaCelula(emptyCel) === "-", "hífen para sem lançamento");
+assert(displayFrequenciaCelula(emptyCel) === "A", "A para sem lançamento");
 assert(displayFrequenciaCelula(clearedCel) === "", "vazio para apagado manual");
 assert(isWeekendDay(2026, 1, 3) === true, "03/01/2026 é sábado");
 assert(isWeekendDay(2026, 1, 4) === true, "04/01/2026 é domingo");

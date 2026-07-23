@@ -11,15 +11,18 @@ export function isWeekendDay(ano: number, mes: number, day: number): boolean {
 
 /**
  * Valor exibido na célula.
- * - Sem lançamento inicial (não manual, valor vazio) → "-"
+ * - Sem lançamento inicial (não manual, valor vazio) → "A" (Afastamento)
  * - Apagado manualmente (manual, valor vazio) → ""
+ * - Hífen legado → "A"
  * - Demais → valor armazenado
  */
 export function displayFrequenciaCelula(cel: FrequenciaCelula | undefined | null): string {
-  if (!cel) return "-";
+  if (!cel) return "A";
   const raw = String(cel.valor ?? "");
-  if (cel.editadoManualmente) return raw;
-  if (!raw.trim()) return "-";
+  if (cel.editadoManualmente) {
+    return raw.trim() === "-" ? "A" : raw;
+  }
+  if (!raw.trim() || raw.trim() === "-") return "A";
   return raw;
 }
 

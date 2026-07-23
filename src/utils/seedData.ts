@@ -64,6 +64,37 @@ async function ensureInitialGestores() {
   );
 }
 
+/** Garante a legenda A (Afastamento) no Firestore — substitui o hífen nas escalas. */
+async function ensureLegendaAfastamento() {
+  const statusDocRef = doc(db, "configuracoes", "status");
+  const legendaRef = doc(db, "legendas", "A");
+  const snap = await getDoc(legendaRef);
+  const payload = {
+    sigla: "A",
+    nome: "Afastamento",
+    descricao: "AFASTAMENTO",
+    cor: "cinza",
+    ativo: true,
+    ordem: 2,
+    representacoes: {
+      escalaSemanal: "A",
+      escalaConsolidada: "A",
+    },
+    updatedAt: Timestamp.now(),
+  };
+  if (!snap.exists()) {
+    await setDoc(legendaRef, { ...payload, createdAt: Timestamp.now() });
+    console.log("Legenda A (Afastamento) criada.");
+  } else {
+    await setDoc(legendaRef, payload, { merge: true });
+  }
+  await setDoc(
+    statusDocRef,
+    { legenda_afastamento_a_seeded: true },
+    { merge: true }
+  );
+}
+
 export const OFFICIAL_POSTOS = [
   { sigla: "SD PM", descricao: "SOLDADO", ordem: 1 },
   { sigla: "CB PM", descricao: "CABO", ordem: 2 },
@@ -81,19 +112,28 @@ export const OFFICIAL_POSTOS = [
 
 export const OFFICIAL_LEGENDAS = [
   { ordem: 1, sigla: "EN", descricao: "EXPEDIENTE NORMAL", cor: "verde", ativo: true },
-  { ordem: 2, sigla: "F", descricao: "FOLGA", cor: "amarelo", ativo: true },
-  { ordem: 3, sigla: "FC", descricao: "FOLGA COMPENSAÇÃO", cor: "laranja", ativo: true },
-  { ordem: 4, sigla: "M", descricao: "FOLGA MANHÃ", cor: "azul-claro", ativo: true },
-  { ordem: 5, sigla: "T", descricao: "FOLGA TARDE", cor: "azul-medio", ativo: true },
-  { ordem: 6, sigla: "MC", descricao: "MANHÃ COMPENSAÇÃO", cor: "roxo-claro", ativo: true },
-  { ordem: 7, sigla: "TC", descricao: "TARDE COMPENSAÇÃO", cor: "roxo-escuro", ativo: true },
-  { ordem: 8, sigla: "FÉRIAS", descricao: "FÉRIAS", cor: "verde-escuro", ativo: true },
-  { ordem: 9, sigla: "LP", descricao: "LICENÇA-PRÊMIO", cor: "cinza", ativo: true },
-  { ordem: 10, sigla: "DS", descricao: "DISPENSA", cor: "vermelho-claro", ativo: true },
-  { ordem: 11, sigla: "LT", descricao: "LICENÇA PARA TRATAMENTO", cor: "vermelho", ativo: true },
-  { ordem: 12, sigla: "CONVAL", descricao: "CONVALESCENÇA", cor: "bordo", ativo: true },
-  { ordem: 13, sigla: "EX", descricao: "ESCALA EXTRA", cor: "azul-escuro", ativo: true },
-  { ordem: 14, sigla: "OBS", descricao: "OBSERVAÇÃO", cor: "cinza-escuro", ativo: true },
+  {
+    ordem: 2,
+    sigla: "A",
+    nome: "Afastamento",
+    descricao: "AFASTAMENTO",
+    cor: "cinza",
+    ativo: true,
+    representacoes: { escalaSemanal: "A", escalaConsolidada: "A" },
+  },
+  { ordem: 3, sigla: "F", descricao: "FOLGA", cor: "amarelo", ativo: true },
+  { ordem: 4, sigla: "FC", descricao: "FOLGA COMPENSAÇÃO", cor: "laranja", ativo: true },
+  { ordem: 5, sigla: "M", descricao: "FOLGA MANHÃ", cor: "azul-claro", ativo: true },
+  { ordem: 6, sigla: "T", descricao: "FOLGA TARDE", cor: "azul-medio", ativo: true },
+  { ordem: 7, sigla: "MC", descricao: "MANHÃ COMPENSAÇÃO", cor: "roxo-claro", ativo: true },
+  { ordem: 8, sigla: "TC", descricao: "TARDE COMPENSAÇÃO", cor: "roxo-escuro", ativo: true },
+  { ordem: 9, sigla: "FÉRIAS", descricao: "FÉRIAS", cor: "verde-escuro", ativo: true },
+  { ordem: 10, sigla: "LP", descricao: "LICENÇA-PRÊMIO", cor: "cinza", ativo: true },
+  { ordem: 11, sigla: "DS", descricao: "DISPENSA", cor: "vermelho-claro", ativo: true },
+  { ordem: 12, sigla: "LT", descricao: "LICENÇA PARA TRATAMENTO", cor: "vermelho", ativo: true },
+  { ordem: 13, sigla: "CONVAL", descricao: "CONVALESCENÇA", cor: "bordo", ativo: true },
+  { ordem: 14, sigla: "EX", descricao: "ESCALA EXTRA", cor: "azul-escuro", ativo: true },
+  { ordem: 15, sigla: "OBS", descricao: "OBSERVAÇÃO", cor: "cinza-escuro", ativo: true },
 ];
 
 export const OFFICIAL_SECOES = [
@@ -119,6 +159,7 @@ export async function seedDatabaseIfEmpty() {
 
     // Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
     await ensureInitialGestores();
+    await ensureLegendaAfastamento();
 
     if (needsSeeding) {
       console.log("Semeadura oficial necessária. Iniciando limpeza e cadastro de dados oficiais...");
@@ -177,6 +218,8 @@ export async function seedDatabaseIfEmpty() {
           cor: l.cor,
           ativo: l.ativo,
           ordem: l.ordem,
+          ...(("nome" in l && l.nome) ? { nome: l.nome } : {}),
+          ...(("representacoes" in l && l.representacoes) ? { representacoes: l.representacoes } : {}),
           createdAt: Timestamp.now()
         });
       });

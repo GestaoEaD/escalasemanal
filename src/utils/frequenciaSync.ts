@@ -81,7 +81,8 @@ function cellValueFromSchedule(
 ): string {
   if (!row) return "";
   const v = String((row as unknown as Record<string, string>)[field] || "").trim();
-  if (!v || v === "-") return "";
+  if (!v) return "";
+  if (v === "-") return "A";
   return v;
 }
 

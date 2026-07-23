@@ -16,8 +16,8 @@ export function getInitialWeeklyEditableFields(): Pick<
     qua: "EN",
     qui: "EN",
     sex: "EN",
-    sab: "-",
-    dom: "-",
+    sab: "A",
+    dom: "A",
     observacao: "",
   };
 }

@@ -428,7 +428,7 @@ export interface Legenda {
 }
 
 export const OPCOES_ESCALA = [
-  "-", // Sem escala
+  "A", // Afastamento (substitui o hífen)
   "EN", // Escala Normal
   "F", // Folga
   "FC", // Folga Complementar

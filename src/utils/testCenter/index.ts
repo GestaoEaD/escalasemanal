@@ -374,10 +374,10 @@ export function buildAllTestCases(opts: {
       const weekend = applyWeekendDefault(row);
       const paths = findUndefinedPaths(weekend);
       if (paths.length > 0) return fail("Linha ainda contém undefined", paths.join(", "));
-      if (weekend.sab !== "-" || weekend.dom !== "-") {
-        return fail("Fim de semana EN deveria virar hífen", `sab=${weekend.sab} dom=${weekend.dom}`);
+      if (weekend.sab !== "A" || weekend.dom !== "A") {
+        return fail("Fim de semana EN deveria virar A (Afastamento)", `sab=${weekend.sab} dom=${weekend.dom}`);
       }
-      return ok("Linha limpa e fim de semana normalizado para '-'");
+      return ok("Linha limpa e fim de semana normalizado para 'A'");
     },
   });
 
@@ -487,8 +487,8 @@ export function buildAllTestCases(opts: {
         },
       ]);
       if (rows[0].seg !== "F") return fail("Não deve sobrescrever legenda existente");
-      if (rows[0].sab !== "-" || rows[0].dom !== "-") {
-        return fail("Fim de semana EN deve normalizar para hífen", `${rows[0].sab}/${rows[0].dom}`);
+      if (rows[0].sab !== "A" || rows[0].dom !== "A") {
+        return fail("Fim de semana EN deve normalizar para A", `${rows[0].sab}/${rows[0].dom}`);
       }
       if (findUndefinedPaths(rows).length > 0) return fail("Linhas preparadas com undefined");
       return ok("Linhas preparadas sem inventar dados e sem undefined");
@@ -605,8 +605,8 @@ export function buildAllTestCases(opts: {
           qua: "EN",
           qui: "EN",
           sex: "EN",
-          sab: "-",
-          dom: "-",
+          sab: "A",
+          dom: "A",
           observacao: "x",
         }),
       ];
@@ -666,8 +666,8 @@ export function buildAllTestCases(opts: {
           qua: "EN",
           qui: "EN",
           sex: "EN",
-          sab: "-",
-          dom: "-",
+          sab: "A",
+          dom: "A",
           observacao: "protegida",
         }),
       ];
@@ -818,8 +818,8 @@ export function buildAllTestCases(opts: {
           qua: "EN",
           qui: "EN",
           sex: "EN",
-          sab: "-",
-          dom: "-",
+          sab: "A",
+          dom: "A",
           observacao: "semana anterior",
         }),
       ];
@@ -835,8 +835,8 @@ export function buildAllTestCases(opts: {
           qua: "EN",
           qui: "EN",
           sex: "EN",
-          sab: "-",
-          dom: "-",
+          sab: "A",
+          dom: "A",
           observacao: "atual",
         }),
       ];
@@ -1110,8 +1110,8 @@ export function buildAllTestCases(opts: {
         qua: "EN",
         qui: "EN",
         sex: "EN",
-        sab: "-",
-        dom: "-",
+        sab: "A",
+        dom: "A",
         observacao: "obs teste",
       });
       // Não deve lançar
@@ -1149,8 +1149,8 @@ export function buildAllTestCases(opts: {
         qua: "EN",
         qui: "EN",
         sex: "EN",
-        sab: "-",
-        dom: "-",
+        sab: "A",
+        dom: "A",
         observacao: "obs",
       });
       try {
@@ -1271,7 +1271,7 @@ export function buildAllTestCases(opts: {
 
   cases.push({
     id: "freq-003",
-    nome: "Exibição hífen vs vazio manual e fim de semana",
+    nome: "Exibição Afastamento vs vazio manual e fim de semana",
     categoria: "Controle de Frequência",
     perfil: "Sistema",
     acao: "displayFrequenciaCelula / isWeekendDay",
@@ -1286,13 +1286,19 @@ export function buildAllTestCases(opts: {
         origem: "edicao_manual",
         editadoManualmente: true,
       });
-      if (empty !== "-") return fail("Sem lançamento deveria exibir hífen", empty);
+      const hyphenLegacy = displayFrequenciaCelula({
+        valor: "-",
+        origem: "escala_semanal",
+        editadoManualmente: false,
+      });
+      if (empty !== "A") return fail("Sem lançamento deveria exibir A", empty);
+      if (hyphenLegacy !== "A") return fail("Hífen legado deveria exibir A", hyphenLegacy);
       if (cleared !== "") return fail("Apagado manual deveria exibir vazio", cleared);
       if (!isWeekendDay(2026, 1, 3) || !isWeekendDay(2026, 1, 4)) {
         return fail("Sáb/dom de jan/2026 não detectados");
       }
       if (isWeekendDay(2026, 1, 5)) return fail("Segunda não é fim de semana");
-      return ok("Hífen/vazio e destaque de calendário corretos");
+      return ok("Afastamento/vazio e destaque de calendário corretos");
     },
   });
 

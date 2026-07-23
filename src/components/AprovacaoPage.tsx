@@ -643,8 +643,7 @@ export default function AprovacaoPage({
               </h1>
               <p className="text-[11px] text-gray-400 truncate">
                 {semanaLabel}
-                {escala?.periodo ? ` · ${escala.periodo}` : ""} · Gestor {usuario.postoGrad}{" "}
-                {usuario.nome} · RE {normalizeRe(usuario.re)}
+                {escala?.periodo ? ` · ${escala.periodo}` : ""}
               </p>
             </div>
           </div>

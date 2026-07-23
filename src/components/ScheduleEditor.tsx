@@ -205,9 +205,9 @@ export default function ScheduleEditor({
   const [legendasList, setLegendasList] = useState<{ sigla: string; descricao: string; cor: string; ordem?: number }[]>([]);
   const configuredScaleOptions =
     legendasList.length > 0 ? legendasList.map((legenda) => legenda.sigla) : OPCOES_ESCALA;
-  const scaleOptions = configuredScaleOptions.includes("-")
+  const scaleOptions = configuredScaleOptions.includes("A")
     ? configuredScaleOptions
-    : ["-", ...configuredScaleOptions];
+    : ["A", ...configuredScaleOptions];
 
   // Painéis de observação por militar (abertos abaixo da tabela)
   const [openWeeklyObs, setOpenWeeklyObs] = useState<string[]>([]);
@@ -1520,7 +1520,8 @@ export default function ScheduleEditor({
     }
     // Fallbacks for standard options
     const fallbacks: Record<string, string> = {
-      "-": "Sem escala",
+      "A": "Afastamento",
+      "-": "Afastamento",
       "EN": "Expediente Normal / Escala Normal",
       "F": "Folga",
       "FC": "Folga Complementar / Folga Chefe",
@@ -2118,11 +2119,6 @@ export default function ScheduleEditor({
                     <StatusBadge status={altStatus} />
                     <span className="text-[10px] text-gray-400 font-mono">v{altVersao}</span>
                   </span>
-                </div>
-                <div className="text-[10px] sm:text-xs text-gray-400 mt-1 truncate">
-                  Usuário: <b className="text-gray-200">{usuario.postoGrad} {usuario.nome}</b>
-                  <span className="hidden sm:inline"> (R.E. {usuario.re})</span>
-                  <span className="ml-2 text-gray-500">· {usuario.perfil || "Operador"}</span>
                 </div>
               </div>
             </div>
