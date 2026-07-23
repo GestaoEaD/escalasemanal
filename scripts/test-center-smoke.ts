@@ -24,8 +24,21 @@ import {
   normalizeLegenda,
   prepareLegendaForFirestore,
 } from "../src/utils/legendaModel";
+import {
+  buildControleFrequenciaId,
+  daysInMonth,
+  parseControleFrequenciaId,
+} from "../src/utils/frequenciaIds";
+import {
+  buildLegendaLookup,
+  convertEscalaValorToFrequencia,
+  calcMeiaDiariaFromCelulas,
+  calcAAFromCelulas,
+} from "../src/utils/frequenciaCalculo";
+import { getWeeksOverlappingMonth } from "../src/utils/frequenciaSync";
+import { canEditFrequencia } from "../src/utils/permissions";
 import { COMMAND_INVENTORY } from "../src/utils/testCenter/inventory";
-import { Usuario } from "../src/types";
+import { FrequenciaCelula, Usuario } from "../src/types";
 import { WeekInfo } from "../src/utils/dateUtils";
 
 function assert(cond: boolean, msg: string) {
@@ -150,7 +163,7 @@ const blocked = clearWeeklySchedule({
   status: "aprovada",
   rows: filled,
 });
-assert(!blocked.ok && blocked.reason === "aprovada", "aprovada bloqueia limpeza");
+assert(blocked.ok === false && blocked.reason === "aprovada", "aprovada bloqueia limpeza");
 
 const allowed = clearWeeklySchedule({
   usuario: admin,
@@ -183,10 +196,42 @@ const enLeg = normalizeLegenda({
 assert(enLeg.representacoes?.escalaConsolidada === "1", "EN consolidada");
 assert(isDiaTrabalhado(enLeg) && getValorMeiaDiaria(enLeg) === 1, "EN regras");
 
+const freqId = buildControleFrequenciaId(2026, 1, "Sec Gest Educ");
+assert(freqId === "2026_01_Sec_Gest_Educ", "id frequencia");
+assert(parseControleFrequenciaId(freqId)?.mes === 1, "parse id frequencia");
+assert(daysInMonth(2026, 2) === 28, "dias fevereiro 2026");
+assert(getWeeksOverlappingMonth(2026, 1).length > 0, "semanas overlapping janeiro");
+
+const lookup = buildLegendaLookup([enLeg]);
+assert(convertEscalaValorToFrequencia("EN", lookup) === "1", "conversão EN→1");
+assert(convertEscalaValorToFrequencia("LP", lookup) === "LP", "sem consolidada mantém sigla");
+
+const dias: Record<string, FrequenciaCelula> = {
+  "01": { valor: "1", origem: "escala_semanal", editadoManualmente: false },
+  "02": { valor: "1", origem: "escala_semanal", editadoManualmente: false },
+};
+assert(calcMeiaDiariaFromCelulas(dias, lookup) === 2, "soma 1/2 diária");
+assert(calcAAFromCelulas(dias, lookup) === 2, "soma A.A.");
+
+assert(canEditFrequencia(admin, 2099, 12, "em_edicao") === true, "admin edita frequencia futura");
+assert(canEditFrequencia(gestor, 2099, 12, "em_edicao") === false, "gestor não edita frequencia");
+assert(canEditFrequencia(op, 2099, 12, "aprovada") === false, "aprovada bloqueia frequencia");
+assert(
+  parseApprovalPath("/aprovacao/frequencia/2026_01_Sec")?.mode === "legacy",
+  "parse path frequencia"
+);
+assert(
+  COMMAND_INVENTORY.some(
+    (i) => i.tela === "Controle de Frequência" && i.botao === "Sincronizar escalas"
+  ),
+  "inventário Controle de Frequência"
+);
+
 console.log("\nCentral de Testes smoke: PASSOU");
 console.log("Feature Dados da semana anterior: implementada na Escala Semanal (Alteração não alterada).");
 console.log("Feature Limpar escala: implementada na Escala Semanal; bloqueada se aprovada; sem gravação automática.");
 console.log("Feature Legendas: campos opcionais de representação/regras (preparação Escala Consolidada).");
+console.log("Feature Controle de Frequência: sync Alteração>Semanal, preserve manual, aprovação e print A4 landscape.");
 console.log(
-  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; CRUD legendas (básico / consolidada / regras)."
+  "Pendências manuais: limpar/cancelar/salvar/reload; escala aprovada; CRUD legendas (básico / consolidada / regras); sync/print frequencia."
 );

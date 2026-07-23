@@ -2,6 +2,7 @@ import { Usuario } from "../../types";
 import {
   canAccessConfig,
   canApproveScales,
+  canEditFrequencia,
   canEditScale,
   canExportScale,
   canReopenApprovedScale,
@@ -27,6 +28,15 @@ import {
   normalizeLegenda,
   prepareLegendaForFirestore,
 } from "../legendaModel";
+import {
+  buildControleFrequenciaId,
+  parseControleFrequenciaId,
+} from "../frequenciaIds";
+import {
+  buildLegendaLookup,
+  convertEscalaValorToFrequencia,
+} from "../frequenciaCalculo";
+import { getWeeksOverlappingMonth } from "../frequenciaSync";
 import {
   normalizeEscalaStatus,
   parseApprovalPath,
@@ -517,7 +527,7 @@ export function buildAllTestCases(opts: {
         status: "em_edicao",
         rows: filled,
       });
-      if (!result.ok) return fail("Limpeza deveria ser permitida em em_edicao", result.message);
+      if (result.ok === false) return fail("Limpeza deveria ser permitida em em_edicao", result.message);
       if (findUndefinedPaths(result.rows).length > 0) return fail("Limpeza gerou undefined");
       return ok("Colaboradores mantidos; legendas/horários/obs no estado inicial");
     },
@@ -576,7 +586,7 @@ export function buildAllTestCases(opts: {
           }),
         ],
       });
-      if (!result.ok) return fail(result.message);
+      if (result.ok === false) return fail(result.message);
       if (typeof auditClearWeeklySchedule !== "function") {
         return fail("Auditoria CLEAR_WEEKLY_SCHEDULE ausente");
       }
@@ -614,7 +624,7 @@ export function buildAllTestCases(opts: {
         status: "aprovada",
         rows,
       });
-      if (blocked.ok) return fail("Não deveria limpar escala aprovada");
+      if (blocked.ok !== false) return fail("Não deveria limpar escala aprovada");
       if (blocked.reason !== "aprovada") return fail("Motivo deveria ser aprovada", blocked.reason);
       if (JSON.stringify(rows) !== before) return fail("Dados foram alterados apesar do bloqueio");
       if (!canEditScale(adminUser, futureWeek, "aprovada")) {
@@ -672,7 +682,7 @@ export function buildAllTestCases(opts: {
           }),
         ],
       });
-      if (!r.ok) return fail(r.message);
+      if (r.ok === false) return fail(r.message);
       const init = getInitialWeeklyEditableFields();
       if (r.rows[0].seg !== init.seg || r.rows[0].observacao !== "") {
         return fail("Estado inicial não aplicado");
@@ -716,8 +726,8 @@ export function buildAllTestCases(opts: {
         status: "em_edicao",
         rows,
       });
-      if (!opOk.ok) return fail("Operador deveria limpar semana editável", opOk.message);
-      if (!admOk.ok) return fail("Admin deveria limpar", admOk.message);
+      if (opOk.ok === false) return fail("Operador deveria limpar semana editável", opOk.message);
+      if (admOk.ok === false) return fail("Admin deveria limpar", admOk.message);
       if (gest.ok) return fail("Gestor não deve limpar (não edita escala)");
       const apOp = clearWeeklySchedule({
         usuario: operadorUser,
@@ -782,7 +792,7 @@ export function buildAllTestCases(opts: {
         status: "em_edicao",
         rows: current,
       });
-      if (!r.ok) return fail(r.message);
+      if (r.ok === false) return fail(r.message);
       if (JSON.stringify(prevRows) !== prevSnap) {
         return fail("Limpeza não deve mutar dados da semana anterior");
       }
@@ -1057,6 +1067,74 @@ export function buildAllTestCases(opts: {
       const token = parseApprovalPath("/aprovacao/ABC123TOKEN");
       if (!token) return fail("Deep-link /aprovacao/{token} não parseado");
       return ok("Navegação por token de aprovação reconhecida");
+    },
+  });
+
+  // --- Controle de Frequência ---
+  cases.push({
+    id: "freq-001",
+    nome: "ID e conversão de legendas do Controle de Frequência",
+    categoria: "Controle de Frequência",
+    perfil: "Sistema",
+    acao: "buildControleFrequenciaId / convertEscalaValorToFrequencia",
+    run: async () => {
+      const id = buildControleFrequenciaId(2026, 3, "Sec Gest Educ");
+      if (id !== "2026_03_Sec_Gest_Educ") return fail("ID inválido", id);
+      const parsed = parseControleFrequenciaId(id);
+      if (!parsed || parsed.ano !== 2026 || parsed.mes !== 3) {
+        return fail("Parse do ID falhou", JSON.stringify(parsed));
+      }
+      const en = normalizeLegenda({
+        sigla: "EN",
+        descricao: "EN",
+        cor: "verde",
+        ativo: true,
+        ordem: 1,
+        representacoes: { escalaSemanal: "EN", escalaConsolidada: "1" },
+        regras: {
+          diaTrabalhado: true,
+          meiaDiaria: { participa: true, valor: 1 },
+          aa: { contaDia: true },
+        },
+      });
+      const lookup = buildLegendaLookup([en]);
+      if (convertEscalaValorToFrequencia("EN", lookup) !== "1") {
+        return fail("EN deveria virar 1");
+      }
+      if (convertEscalaValorToFrequencia("LP", lookup) !== "LP") {
+        return fail("Sigla sem consolidada deve permanecer");
+      }
+      if (getWeeksOverlappingMonth(2026, 1).length < 1) {
+        return fail("Deveria haver semanas intersectando janeiro/2026");
+      }
+      return ok("IDs, conversão e semanas overlapping OK");
+    },
+  });
+
+  cases.push({
+    id: "freq-002",
+    nome: "Permissão de edição mensal do Controle de Frequência",
+    categoria: "Controle de Frequência",
+    perfil: "Todos",
+    acao: "canEditFrequencia",
+    run: async () => {
+      if (!canEditFrequencia(adminUser, 2099, 12, "em_edicao")) {
+        return fail("Admin deveria editar mês futuro");
+      }
+      if (canEditFrequencia(gestorUser, 2099, 12, "em_edicao")) {
+        return fail("Gestor não edita frequência");
+      }
+      if (canEditFrequencia(operadorUser, 2099, 12, "aprovada")) {
+        return fail("Aprovada bloqueia edição");
+      }
+      const freqPath = parseApprovalPath("/aprovacao/frequencia/2026_01_Sec");
+      if (!freqPath || freqPath.mode !== "legacy" || freqPath.tipo !== "frequencia") {
+        return fail("Rota legado de frequência não reconhecida");
+      }
+      if (!COMMAND_INVENTORY.some((i) => i.tela === "Controle de Frequência")) {
+        return fail("Inventário sem Controle de Frequência");
+      }
+      return ok("RBAC e inventário do Controle de Frequência OK");
     },
   });
 

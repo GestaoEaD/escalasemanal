@@ -175,7 +175,7 @@ export async function auditSalvarEscala(options: {
 
 export async function auditWorkflowEscala(options: {
   usuario: Usuario;
-  tipoDoc: "semanal" | "alteracao";
+  tipoDoc: "semanal" | "alteracao" | "frequencia";
   acao:
     | "enviar"
     | "aprovar"
@@ -191,16 +191,27 @@ export async function auditWorkflowEscala(options: {
   detalhes?: string;
 }): Promise<AuditOperation> {
   const isAlt = options.tipoDoc === "alteracao";
-  const tipoMap: Record<typeof options.acao, AuditOperacaoTipo> = {
-    enviar: isAlt ? "ENVIAR_ESCALA_ALTERACAO" : "ENVIAR_ESCALA_SEMANAL",
-    aprovar: isAlt ? "APROVAR_ESCALA_ALTERACAO" : "APROVAR_ESCALA_SEMANAL",
-    revisao: isAlt ? "SOLICITAR_REVISAO_ALTERACAO" : "SOLICITAR_REVISAO_SEMANAL",
-    cancelar: isAlt ? "CANCELAR_SOLICITACAO_ALTERACAO" : "CANCELAR_SOLICITACAO_SEMANAL",
-    reabrir: isAlt ? "REABRIR_ESCALA_ALTERACAO" : "REABRIR_ESCALA_SEMANAL",
-  };
+  const isFreq = options.tipoDoc === "frequencia";
+  const tipoMap: Record<typeof options.acao, AuditOperacaoTipo> = isFreq
+    ? {
+        enviar: "ENVIAR_CONTROLE_FREQUENCIA",
+        aprovar: "APROVAR_CONTROLE_FREQUENCIA",
+        revisao: "SOLICITAR_REVISAO_CONTROLE_FREQUENCIA",
+        cancelar: "CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA",
+        reabrir: "REABRIR_CONTROLE_FREQUENCIA",
+      }
+    : {
+        enviar: isAlt ? "ENVIAR_ESCALA_ALTERACAO" : "ENVIAR_ESCALA_SEMANAL",
+        aprovar: isAlt ? "APROVAR_ESCALA_ALTERACAO" : "APROVAR_ESCALA_SEMANAL",
+        revisao: isAlt ? "SOLICITAR_REVISAO_ALTERACAO" : "SOLICITAR_REVISAO_SEMANAL",
+        cancelar: isAlt
+          ? "CANCELAR_SOLICITACAO_ALTERACAO"
+          : "CANCELAR_SOLICITACAO_SEMANAL",
+        reabrir: isAlt ? "REABRIR_ESCALA_ALTERACAO" : "REABRIR_ESCALA_SEMANAL",
+      };
   return registerAuditOperation({
     tipo: tipoMap[options.acao],
-    escala: isAlt ? "ALTERACAO" : "SEMANAL",
+    escala: isFreq ? "FREQUENCIA" : isAlt ? "ALTERACAO" : "SEMANAL",
     usuario: options.usuario,
     anoSemana: options.anoSemana,
     versao: options.versao,
@@ -214,7 +225,7 @@ export async function auditWorkflowEscala(options: {
 
 export async function auditAbrirLinkAprovacao(options: {
   usuario: Usuario;
-  tipoDoc: "semanal" | "alteracao";
+  tipoDoc: "semanal" | "alteracao" | "frequencia";
   anoSemana: string;
   versao?: number;
   solicitacaoId: string;
@@ -222,7 +233,12 @@ export async function auditAbrirLinkAprovacao(options: {
 }): Promise<AuditOperation> {
   return registerAuditOperation({
     tipo: "ABRIR_LINK_APROVACAO",
-    escala: options.tipoDoc === "alteracao" ? "ALTERACAO" : "SEMANAL",
+    escala:
+      options.tipoDoc === "frequencia"
+        ? "FREQUENCIA"
+        : options.tipoDoc === "alteracao"
+          ? "ALTERACAO"
+          : "SEMANAL",
     usuario: options.usuario,
     anoSemana: options.anoSemana,
     versao: options.versao,

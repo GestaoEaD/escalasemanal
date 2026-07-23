@@ -2,11 +2,16 @@ import React, { useEffect, useState } from "react";
 import {
   Usuario,
   EscalaDocument,
+  ControleFrequenciaDocument,
+  ControleFrequenciaRow,
+  ControleFrequenciaObservacao,
   ESCALA_STATUS_LABELS,
   ScheduleRow,
   TipoEscalaDocumento,
   TIPO_ESCALA_LABELS,
+  MESES_NOMES,
 } from "../types";
+import { daysInMonth, dayKey } from "../utils/frequenciaIds";
 import {
   approveScale,
   getClosedApprovalMessage,
@@ -27,6 +32,10 @@ import { auditAbrirLinkAprovacao } from "../utils/auditService";
 import { applyWeekendDefault } from "../utils/escalaPayload";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
+import {
+  approveFrequencia,
+  requestFrequenciaRevision,
+} from "../utils/frequenciaService";
 import { SolicitacaoAprovacao } from "../types";
 import StatusBadge from "./StatusBadge";
 import {
@@ -140,6 +149,94 @@ function ReadOnlyScheduleTable({
   );
 }
 
+function ReadOnlyFrequenciaTable({
+  title,
+  docData,
+}: {
+  title: string;
+  docData: ControleFrequenciaDocument;
+}) {
+  const nDays = daysInMonth(docData.ano, docData.mes);
+  const dayKeys = Array.from({ length: nDays }, (_, i) => dayKey(i + 1));
+  const rows = (docData.rows || []) as ControleFrequenciaRow[];
+  const observacoes = ((docData.observacoes || []) as ControleFrequenciaObservacao[]).filter(
+    (o) => !o.excluido && o.texto?.trim()
+  );
+  const mesNome = MESES_NOMES[docData.mes - 1] || `Mês ${docData.mes}`;
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-bold uppercase tracking-wider text-gray-700">
+        {title} — {docData.secao} · {mesNome}/{docData.ano}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[960px] text-[10px]">
+          <thead className="bg-gray-900 text-white">
+            <tr>
+              <th className="px-2 py-2 text-left font-bold sticky left-0 bg-gray-900">Posto</th>
+              <th className="px-2 py-2 text-left font-bold">R.E.</th>
+              <th className="px-2 py-2 text-left font-bold">Nome</th>
+              {dayKeys.map((k) => (
+                <th key={k} className="px-0.5 py-2 text-center font-bold">
+                  {Number(k)}
+                </th>
+              ))}
+              <th className="px-1 py-2 text-center font-bold">1/2</th>
+              <th className="px-1 py-2 text-center font-bold">A.A.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5 + nDays}
+                  className="px-4 py-8 text-center text-gray-400 italic"
+                >
+                  Nenhum militar neste controle.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, idx) => (
+                <tr key={row.re} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                  <td className="px-2 py-1 font-bold text-gray-900 sticky left-0 bg-inherit">
+                    {row.postoGrad}
+                  </td>
+                  <td className="px-2 py-1 font-mono text-gray-600">{row.re}</td>
+                  <td className="px-2 py-1 font-semibold text-gray-800 whitespace-nowrap">
+                    {row.nome}
+                  </td>
+                  {dayKeys.map((k) => (
+                    <td key={k} className="px-0.5 py-1 text-center font-bold text-gray-700">
+                      {row.dias?.[k]?.valor || ""}
+                    </td>
+                  ))}
+                  <td className="px-1 py-1 text-center font-bold">{row.meiaDiaria ?? 0}</td>
+                  <td className="px-1 py-1 text-center font-bold">{row.aa ?? 0}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      {observacoes.length > 0 && (
+        <div className="border-t border-gray-200 px-4 py-3 space-y-2 bg-gray-50">
+          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+            Observações
+          </div>
+          {observacoes.map((o) => (
+            <div key={o.id} className="rounded-lg border border-gray-200 bg-white p-2.5">
+              {o.re ? (
+                <div className="text-[11px] font-bold text-gray-900 mb-1">RE {o.re}</div>
+              ) : null}
+              <div className="text-[11px] text-gray-700 whitespace-pre-wrap">{o.texto}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AprovacaoPage({
   token,
   escalaId: legacyEscalaId,
@@ -170,7 +267,9 @@ export default function AprovacaoPage({
   const titleUpper =
     tipo === "alteracao"
       ? "APROVAÇÃO DA ESCALA ALTERAÇÃO"
-      : "APROVAÇÃO DA ESCALA SEMANAL";
+      : tipo === "frequencia"
+        ? "APROVAÇÃO DO CONTROLE DE FREQUÊNCIA"
+        : "APROVAÇÃO DA ESCALA SEMANAL";
 
   const reload = async () => {
     setLoading(true);
@@ -277,7 +376,9 @@ export default function AprovacaoPage({
   const requestOpen = isApprovalRequestOpen(escala) && !consultaOnly;
   const canAct = allowed && requestOpen && !busy;
   const semanaLabel = escala
-    ? `Semana ${String(escala.semana).padStart(2, "0")}/${escala.ano}`
+    ? tipo === "frequencia"
+      ? `${(escala as any).secao || ""} · ${String((escala as any).mes || "").padStart(2, "0")}/${escala.ano}`
+      : `Semana ${String(escala.semana).padStart(2, "0")}/${escala.ano}`
     : escalaId;
   const revisaoInfo = getRevisaoInfo(escala?.aprovacao);
 
@@ -336,10 +437,20 @@ export default function AprovacaoPage({
       }
 
       if (confirmMode === "approve") {
-        await approveScale(escalaId, usuario, observacao.trim(), tipo);
+        if (tipo === "frequencia") {
+          const freq = fresh as unknown as ControleFrequenciaDocument;
+          await approveFrequencia(freq, usuario, observacao.trim());
+        } else {
+          await approveScale(escalaId, usuario, observacao.trim(), tipo);
+        }
         setSuccess(`${docLabel} aprovada com sucesso.`);
       } else {
-        await requestRevisionScale(escalaId, usuario, motivoRevisao.trim(), tipo);
+        if (tipo === "frequencia") {
+          const freq = fresh as unknown as ControleFrequenciaDocument;
+          await requestFrequenciaRevision(freq, usuario, motivoRevisao.trim());
+        } else {
+          await requestRevisionScale(escalaId, usuario, motivoRevisao.trim(), tipo);
+        }
         setSuccess(`Revisão solicitada. A ${docLabel} foi devolvida para correção.`);
       }
       closeConfirm();
@@ -580,7 +691,17 @@ export default function AprovacaoPage({
                 <Lock size={12} />
                 Visualização somente leitura — {docLabel}
               </div>
-              <ReadOnlyScheduleTable title={docLabel} rows={(escala.rows || []).map(applyWeekendDefault)} />
+              {tipo === "frequencia" ? (
+                <ReadOnlyFrequenciaTable
+                  title={docLabel}
+                  docData={escala as unknown as ControleFrequenciaDocument}
+                />
+              ) : (
+                <ReadOnlyScheduleTable
+                  title={docLabel}
+                  rows={(escala.rows || []).map(applyWeekendDefault)}
+                />
+              )}
             </div>
 
             {requestOpen ? (

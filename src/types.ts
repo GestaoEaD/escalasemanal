@@ -13,7 +13,7 @@ export type EscalaStatus =
   | "rejeitada";
 
 /** Documento oficial com ciclo de aprovação próprio. */
-export type TipoEscalaDocumento = "semanal" | "alteracao";
+export type TipoEscalaDocumento = "semanal" | "alteracao" | "frequencia";
 
 /** Provedor de autenticação — preparado para futura migração Google. */
 export type AuthProvider = "local" | "google";
@@ -152,10 +152,14 @@ export interface EscalaDocument {
 export const TIPO_ESCALA_LABELS: Record<TipoEscalaDocumento, string> = {
   semanal: "Escala Semanal",
   alteracao: "Escala Alteração",
+  frequencia: "Controle de Frequência",
 };
 
 /** Tipo do documento na coleção solicitacoes_aprovacao. */
-export type SolicitacaoTipoDocumento = "ESCALA_SEMANAL" | "ESCALA_ALTERACAO";
+export type SolicitacaoTipoDocumento =
+  | "ESCALA_SEMANAL"
+  | "ESCALA_ALTERACAO"
+  | "CONTROLE_FREQUENCIA";
 
 export type SolicitacaoAprovacaoStatus = "AGUARDANDO" | "FINALIZADA";
 
@@ -226,9 +230,22 @@ export type AuditOperacaoTipo =
   | "ABRIR_LINK_APROVACAO"
   | "LOAD_PREVIOUS_WEEK_DATA"
   | "CLEAR_WEEKLY_SCHEDULE"
+  | "SALVAR_CONTROLE_FREQUENCIA"
+  | "SYNC_CONTROLE_FREQUENCIA"
+  | "ENVIAR_CONTROLE_FREQUENCIA"
+  | "APROVAR_CONTROLE_FREQUENCIA"
+  | "SOLICITAR_REVISAO_CONTROLE_FREQUENCIA"
+  | "CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA"
+  | "REABRIR_CONTROLE_FREQUENCIA"
   | "OPERACAO_LEGADA";
 
-export type AuditDocumentoTipo = "SEMANAL" | "ALTERACAO" | "CONFIGURACAO" | "SISTEMA" | "AUTENTICACAO";
+export type AuditDocumentoTipo =
+  | "SEMANAL"
+  | "ALTERACAO"
+  | "FREQUENCIA"
+  | "CONFIGURACAO"
+  | "SISTEMA"
+  | "AUTENTICACAO";
 
 export interface AuditUsuarioSnapshot {
   nome: string;
@@ -314,12 +331,20 @@ export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
   ABRIR_LINK_APROVACAO: "Abriu Link Aprovação",
   LOAD_PREVIOUS_WEEK_DATA: "Dados Semana Anterior",
   CLEAR_WEEKLY_SCHEDULE: "Limpar Escala",
+  SALVAR_CONTROLE_FREQUENCIA: "Salvar Frequência",
+  SYNC_CONTROLE_FREQUENCIA: "Sincronizar Frequência",
+  ENVIAR_CONTROLE_FREQUENCIA: "Enviar Frequência",
+  APROVAR_CONTROLE_FREQUENCIA: "Aprovar Frequência",
+  SOLICITAR_REVISAO_CONTROLE_FREQUENCIA: "Revisão Frequência",
+  CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA: "Cancelar Frequência",
+  REABRIR_CONTROLE_FREQUENCIA: "Reabrir Frequência",
   OPERACAO_LEGADA: "Operação",
 };
 
 export const AUDIT_DOCUMENTO_LABELS: Record<AuditDocumentoTipo, string> = {
   SEMANAL: "Escala Semanal",
   ALTERACAO: "Escala Alteração",
+  FREQUENCIA: "Controle de Frequência",
   CONFIGURACAO: "Configurações",
   SISTEMA: "Sistema",
   AUTENTICACAO: "Autenticação",
@@ -350,7 +375,7 @@ export type DayOfWeek = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
 export interface LegendaRepresentacoes {
   /** Código exibido / usado na Escala Semanal (se omitido, usa-se `sigla`). */
   escalaSemanal?: string;
-  /** Código/valor na futura Escala Consolidada (opcional). */
+  /** Código/valor no Controle de Frequência (e consolidação futura). */
   escalaConsolidada?: string;
 }
 
@@ -426,3 +451,94 @@ export const POSTOS_GRADUACOES = [
   "CB PM",
   "SD PM",
 ];
+
+/** Origem de um valor diário no Controle de Frequência. */
+export type FrequenciaCelulaOrigem =
+  | "escala_alteracao"
+  | "escala_semanal"
+  | "edicao_manual"
+  | "vazio";
+
+export interface FrequenciaCelula {
+  valor: string;
+  origem: FrequenciaCelulaOrigem;
+  editadoManualmente: boolean;
+  /** Sigla original da escala antes da conversão por legenda. */
+  valorEscalaOriginal?: string;
+}
+
+export interface ControleFrequenciaRow {
+  re: string;
+  postoGrad: string;
+  nome: string;
+  secao: string;
+  ordem?: number;
+  /** Chaves "01".."31". */
+  dias: Record<string, FrequenciaCelula>;
+  meiaDiaria: number;
+  aa: number;
+}
+
+export type FrequenciaObservacaoOrigem =
+  | "escala_alteracao"
+  | "escala_semanal"
+  | "manual";
+
+export interface ControleFrequenciaObservacao {
+  id: string;
+  texto: string;
+  origem: FrequenciaObservacaoOrigem;
+  re?: string;
+  criadoPor: string;
+  criadoEm: string;
+  editadoPor?: string;
+  editadoEm?: string;
+  /** Soft-delete — mantém histórico. */
+  excluido?: boolean;
+}
+
+export interface FrequenciaResponsavel {
+  nome: string;
+  re: string;
+  postoGrad: string;
+  data: string;
+  hora: string;
+}
+
+/** Documento Firestore `controle_frequencia/{ano}_{mes}_{secao}`. */
+export interface ControleFrequenciaDocument {
+  id: string;
+  ano: number;
+  mes: number;
+  secao: string;
+  status?: EscalaStatus;
+  versao?: number;
+  aprovacao?: EscalaAprovacao | null;
+  historico?: HistoricoEscalaEvento[];
+  rows: ControleFrequenciaRow[];
+  observacoes: ControleFrequenciaObservacao[];
+  lastSaved?: LastSaved | null;
+  responsavelEdicao?: FrequenciaResponsavel | null;
+  responsavelAprovacao?: FrequenciaResponsavel | null;
+  syncMeta?: {
+    lastSyncAt?: string;
+    sourceWeeks?: string[];
+  };
+}
+
+export const MESES_NOMES = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+] as const;
+
+export const CONTROLE_FREQUENCIA_COLLECTION = "controle_frequencia";

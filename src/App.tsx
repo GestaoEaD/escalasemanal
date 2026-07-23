@@ -14,6 +14,7 @@ import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
 import Configuracoes from "./components/Configuracoes";
 import AprovacaoPage from "./components/AprovacaoPage";
+import FrequenciaApp from "./components/frequencia/FrequenciaApp";
 
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(() => {
@@ -30,9 +31,9 @@ export default function App() {
 
   const initialApproval = parseApprovalPath(window.location.pathname);
 
-  const [currentView, setCurrentView] = useState<"selector" | "editor" | "config" | "aprovacao">(
-    () => (initialApproval ? "aprovacao" : "selector")
-  );
+  const [currentView, setCurrentView] = useState<
+    "selector" | "editor" | "config" | "aprovacao" | "frequencia"
+  >(() => (initialApproval ? "aprovacao" : "selector"));
   const [approvalToken, setApprovalToken] = useState<string | null>(() =>
     initialApproval?.mode === "token" ? initialApproval.token : null
   );
@@ -86,8 +87,8 @@ export default function App() {
     tipo: TipoEscalaDocumento = "semanal"
   ) => {
     let token = escalaIdOrToken.trim();
-    // Se parecer ID de escala (ano_semana), resolver token ativo
-    if (/^\d{4}_\d{1,2}$/.test(token)) {
+    // Se parecer ID de escala (ano_semana) ou frequência (ano_mes_secao), resolver token ativo
+    if (/^\d{4}_\d{1,2}$/.test(token) || /^\d{4}_\d{1,2}_.+/.test(token)) {
       const resolved = await resolveActiveApprovalToken(token, tipo);
       if (!resolved) {
         alert("Não há solicitação ativa com link para este documento.");
@@ -201,6 +202,16 @@ export default function App() {
         />
       );
 
+    case "frequencia":
+      return (
+        <FrequenciaApp
+          usuario={usuario}
+          year={selectedYear}
+          onBack={() => setCurrentView("selector")}
+          onOpenApproval={openApproval}
+        />
+      );
+
     case "selector":
     default:
       return (
@@ -210,6 +221,10 @@ export default function App() {
           onLogout={handleLogout}
           onOpenConfig={() => setCurrentView("config")}
           onOpenApproval={openApproval}
+          onOpenFrequencia={(year) => {
+            setSelectedYear(year);
+            setCurrentView("frequencia");
+          }}
         />
       );
   }

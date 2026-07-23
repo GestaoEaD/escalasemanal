@@ -54,13 +54,17 @@ export function createApprovalToken(length = 11): string {
 export function tipoDocumentoFromEscala(
   tipo: TipoEscalaDocumento
 ): SolicitacaoTipoDocumento {
-  return tipo === "alteracao" ? "ESCALA_ALTERACAO" : "ESCALA_SEMANAL";
+  if (tipo === "alteracao") return "ESCALA_ALTERACAO";
+  if (tipo === "frequencia") return "CONTROLE_FREQUENCIA";
+  return "ESCALA_SEMANAL";
 }
 
 export function tipoEscalaFromDocumento(
   tipo: SolicitacaoTipoDocumento
 ): TipoEscalaDocumento {
-  return tipo === "ESCALA_ALTERACAO" ? "alteracao" : "semanal";
+  if (tipo === "ESCALA_ALTERACAO") return "alteracao";
+  if (tipo === "CONTROLE_FREQUENCIA") return "frequencia";
+  return "semanal";
 }
 
 export function buildTokenApprovalPath(token: string): string {
@@ -74,6 +78,11 @@ export function getTokenApprovalUrl(token: string): string {
 }
 
 function parseAnoSemana(escalaId: string): { ano: number; semana: number } {
+  // Controle de Frequência: 2026_01_Secao...
+  const freq = String(escalaId || "").match(/^(\d{4})_(\d{1,2})_/);
+  if (freq) {
+    return { ano: Number(freq[1]), semana: Number(freq[2]) };
+  }
   const m = String(escalaId || "").match(/^(\d{4})_(\d{1,2})$/);
   if (!m) return { ano: new Date().getFullYear(), semana: 1 };
   return { ano: Number(m[1]), semana: Number(m[2]) };

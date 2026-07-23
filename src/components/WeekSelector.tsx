@@ -5,7 +5,7 @@ import { db, collection, getDocs, query, where } from "../firebase";
 import { canAccessConfig, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
 import StatusBadge from "./StatusBadge";
-import { Calendar, LogOut, ChevronRight, Settings, Link2 } from "lucide-react";
+import { Calendar, LogOut, ChevronRight, Settings, Link2, ClipboardList } from "lucide-react";
 import { motion } from "motion/react";
 
 interface WeekSelectorProps {
@@ -14,6 +14,7 @@ interface WeekSelectorProps {
   onLogout: () => void;
   onOpenConfig?: () => void;
   onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
+  onOpenFrequencia?: (year: number) => void;
 }
 
 export default function WeekSelector({
@@ -22,6 +23,7 @@ export default function WeekSelector({
   onLogout,
   onOpenConfig,
   onOpenApproval,
+  onOpenFrequencia,
 }: WeekSelectorProps) {
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [weeklyStatusByWeek, setWeeklyStatusByWeek] = useState<Record<string, EscalaStatus>>({});
@@ -180,6 +182,18 @@ export default function WeekSelector({
               <option value="2027">2027</option>
               <option value="2028">2028</option>
             </select>
+            {onOpenFrequencia && (
+              <button
+                type="button"
+                id="controle-frequencia-btn"
+                onClick={() => onOpenFrequencia(selectedYear)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-md cursor-pointer shadow-sm"
+                title="Abrir Controle de Frequência do ano selecionado"
+              >
+                <ClipboardList size={14} />
+                <span>CONTROLE DE FREQUÊNCIA</span>
+              </button>
+            )}
           </div>
         </div>
 

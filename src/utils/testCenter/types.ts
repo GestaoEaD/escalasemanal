@@ -13,7 +13,10 @@ export type TestCategory =
   | "Navegação"
   | "Sanitização"
   | "Inventário"
-  | "Firestore";
+  | "Firestore"
+  | "Limpar escala"
+  | "Legendas"
+  | "Controle de Frequência";
 
 export interface TestResult {
   id: string;

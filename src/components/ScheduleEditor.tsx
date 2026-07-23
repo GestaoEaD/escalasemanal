@@ -857,7 +857,7 @@ export default function ScheduleEditor({
       status: weeklyStatus,
       rows: localWeeklyRows,
     });
-    if (!gate.ok) {
+    if (gate.ok === false) {
       setPreviousWeekInfo(gate.message);
       void auditClearWeeklySchedule({
         usuario,
@@ -907,7 +907,7 @@ export default function ScheduleEditor({
       status: statusForClear,
       rows: localWeeklyRows,
     });
-    if (!result.ok) {
+    if (result.ok === false) {
       setClearWeeklyConfirmOpen(false);
       setPreviousWeekInfo(result.message);
       await auditClearWeeklySchedule({

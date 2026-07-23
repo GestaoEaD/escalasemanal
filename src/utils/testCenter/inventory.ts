@@ -188,4 +188,46 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
     acaoFirestore: "Somente docs test_* sob confirmação",
     geraLog: "Opcional (detalhes SISTEMA)",
   },
+  {
+    tela: "Seletor de Semanas",
+    botao: "CONTROLE DE FREQUÊNCIA",
+    funcaoEsperada: "Abrir seletor de meses do ano selecionado",
+    perfilPermitido: "Todos",
+    acaoFirestore: "Leitura status controle_frequencia do ano",
+    geraLog: "Não",
+  },
+  {
+    tela: "Controle de Frequência",
+    botao: "Selecionar mês / seção",
+    funcaoEsperada: "Abrir editor mensal por seção",
+    perfilPermitido: "Todos",
+    acaoFirestore: "Leitura/criação controle_frequencia",
+    geraLog: "Não",
+  },
+  {
+    tela: "Controle de Frequência",
+    botao: "Sincronizar escalas",
+    funcaoEsperada:
+      "Recarregar células a partir de Alteração > Semanal; preserva edição manual",
+    perfilPermitido: "Admin / Operador (mês editável)",
+    acaoFirestore: "setDoc controle_frequencia + leitura escalas",
+    geraLog: "Sim (SYNC_CONTROLE_FREQUENCIA)",
+  },
+  {
+    tela: "Controle de Frequência",
+    botao: "Salvar",
+    funcaoEsperada: "Persistir tabela, totais e observações",
+    perfilPermitido: "Admin / Operador (conforme status e mês)",
+    acaoFirestore: "setDoc controle_frequencia",
+    geraLog: "Sim (SALVAR_CONTROLE_FREQUENCIA)",
+  },
+  {
+    tela: "Controle de Frequência",
+    botao: "Enviar / Aprovar / Imprimir",
+    funcaoEsperada:
+      "Fluxo de aprovação reutilizado + impressão A4 paisagem",
+    perfilPermitido: "Admin envia; Gestor aprova; todos imprimem",
+    acaoFirestore: "controle_frequencia + solicitacoes_aprovacao",
+    geraLog: "Sim (ENVIAR_/APROVAR_CONTROLE_FREQUENCIA)",
+  },
 ];

@@ -2836,7 +2836,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                        Representação na Escala Consolidada
+                        Representação no Controle de Frequência
                       </label>
                       <input
                         type="text"
@@ -2854,7 +2854,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                         className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       />
                       <p className="mt-1 text-[10px] text-gray-400">
-                        Opcional. Nem toda legenda precisa de valor consolidado.
+                        Opcional. Valor exibido/somado no Controle de Frequência (e consolidação futura).
                       </p>
                     </div>
                   </>

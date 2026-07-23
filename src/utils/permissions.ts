@@ -49,6 +49,11 @@ export function canReopenApprovedScale(
   return isGestor(usuario) && (status || "em_edicao") === "aprovada";
 }
 
+/** Exportação de escala (todos os perfis autenticados). */
+export function canExportScale(usuario: Usuario | null | undefined): boolean {
+  return Boolean(usuario?.re);
+}
+
 /** Semana é atual ou futura (comparado com o horário local). */
 export function isWeekCurrentOrFuture(week: WeekInfo, today: Date = new Date()): boolean {
   const end = new Date(week.endDate);
@@ -84,9 +89,26 @@ export function canEditScale(
   return st === "em_edicao" || st === "revisao_solicitada";
 }
 
-/** Pode exportar PDF/Excel. */
-export function canExportScale(usuario: Usuario | null | undefined): boolean {
-  return !!usuario;
+export function canEditFrequencia(
+  usuario: Usuario | null | undefined,
+  ano: number,
+  mes: number,
+  status: EscalaStatus | undefined | null,
+  today: Date = new Date()
+): boolean {
+  if (!usuario) return false;
+  if (isGestor(usuario)) return false;
+
+  const st = status === "rejeitada" ? "revisao_solicitada" : status || "em_edicao";
+  if (st === "aprovada" || st === "aguardando_aprovacao") return false;
+
+  if (isAdministrador(usuario)) return true;
+
+  // Operador: mês atual ou futuro
+  const monthEnd = new Date(ano, mes, 0);
+  monthEnd.setHours(23, 59, 59, 999);
+  if (monthEnd < today) return false;
+  return st === "em_edicao" || st === "revisao_solicitada";
 }
 
 /** Confirmação de RE do gestor autenticado (sem o dígito). */

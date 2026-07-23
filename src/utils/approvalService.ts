@@ -29,10 +29,15 @@ import {
   getTokenApprovalUrl,
 } from "./solicitacaoAprovacaoService";
 
-export type EscalaCollectionName = "escalas_semanais" | "escalas_alteracao";
+export type EscalaCollectionName =
+  | "escalas_semanais"
+  | "escalas_alteracao"
+  | "controle_frequencia";
 
 export function getEscalaCollection(tipo: TipoEscalaDocumento): EscalaCollectionName {
-  return tipo === "alteracao" ? "escalas_alteracao" : "escalas_semanais";
+  if (tipo === "alteracao") return "escalas_alteracao";
+  if (tipo === "frequencia") return "controle_frequencia";
+  return "escalas_semanais";
 }
 
 export function getEscalaDocumentoLabel(tipo: TipoEscalaDocumento): string {
@@ -42,7 +47,9 @@ export function getEscalaDocumentoLabel(tipo: TipoEscalaDocumento): string {
 export function normalizeTipoEscalaDocumento(
   value: string | null | undefined
 ): TipoEscalaDocumento {
-  return value === "alteracao" ? "alteracao" : "semanal";
+  if (value === "alteracao") return "alteracao";
+  if (value === "frequencia") return "frequencia";
+  return "semanal";
 }
 
 /** URL canônica: /aprovacao/{token}. Aceita legado /aprovacao/{tipo}/{escalaId}. */
@@ -51,7 +58,9 @@ export type ApprovalPathParsed =
   | { mode: "legacy"; escalaId: string; tipo: TipoEscalaDocumento };
 
 export function parseApprovalPath(pathname: string): ApprovalPathParsed | null {
-  const typed = pathname.match(/^\/aprovacao\/(semanal|alteracao)\/([^/]+)\/?$/i);
+  const typed = pathname.match(
+    /^\/aprovacao\/(semanal|alteracao|frequencia)\/([^/]+)\/?$/i
+  );
   if (typed) {
     try {
       return {
@@ -70,7 +79,7 @@ export function parseApprovalPath(pathname: string): ApprovalPathParsed | null {
   const single = pathname.match(/^\/aprovacao\/([^/]+)\/?$/i);
   if (single) {
     const seg = single[1];
-    if (/^(semanal|alteracao)$/i.test(seg)) return null;
+    if (/^(semanal|alteracao|frequencia)$/i.test(seg)) return null;
     let decoded = seg;
     try {
       decoded = decodeURIComponent(seg);
@@ -80,6 +89,10 @@ export function parseApprovalPath(pathname: string): ApprovalPathParsed | null {
     // Links antigos: /aprovacao/2026_29
     if (/^\d{4}_\d{1,2}$/.test(decoded)) {
       return { mode: "legacy", tipo: "semanal", escalaId: decoded };
+    }
+    // Controle frequência: 2026_01_Secao
+    if (/^\d{4}_\d{1,2}_.+/.test(decoded)) {
+      return { mode: "legacy", tipo: "frequencia", escalaId: decoded };
     }
     return { mode: "token", token: decoded };
   }
