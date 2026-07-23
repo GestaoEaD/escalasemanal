@@ -23,7 +23,6 @@ import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia } from
 import {
   displayFrequenciaCelula,
   isWeekendDay,
-  weekendCellClass,
 } from "../../utils/frequenciaDisplay";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
@@ -406,16 +405,21 @@ export default function FrequenciaEditor({
   }
 
   const idSticky =
-    "bg-white print:bg-white group-hover:bg-gray-50 print:group-hover:bg-white";
-  const sepId = "border-r-2 border-r-gray-500";
-  const sepTotais = "border-l-2 border-l-gray-500";
-  // Sticky offsets alinhados aos min-width das colunas de identificação
+    "bg-white print:bg-white group-hover:bg-slate-50 print:group-hover:bg-white";
+  const sepId = "border-r-2 border-r-slate-400";
+  const sepTotais = "border-l-2 border-l-slate-400";
+  // Sticky offsets = freq-id-posto (5.75) + freq-id-re (4.75) = 10.5rem
   const stickyPosto = "sticky left-0 z-[1] print:static";
-  const stickyRe = "sticky left-[4.75rem] z-[1] print:static";
-  const stickyNome = "sticky left-[9rem] z-[1] print:static";
-  const stickyPostoHead = "sticky left-0 z-20 bg-gray-100 print:static";
-  const stickyReHead = "sticky left-[4.75rem] z-20 bg-gray-100 print:static";
-  const stickyNomeHead = "sticky left-[9rem] z-20 bg-gray-100 print:static";
+  const stickyRe = "sticky left-[5.75rem] z-[1] print:static";
+  const stickyNome = "sticky left-[10.5rem] z-[1] print:static";
+  const stickyPostoHead = "sticky left-0 z-20 bg-slate-100 print:static";
+  const stickyReHead = "sticky left-[5.75rem] z-20 bg-slate-100 print:static";
+  const stickyNomeHead = "sticky left-[10.5rem] z-20 bg-slate-100 print:static";
+
+  const dayCellTone = (weekend: boolean) =>
+    weekend
+      ? "bg-slate-100/90 group-hover:bg-slate-200/70 print:group-hover:bg-slate-100/90"
+      : "bg-white group-hover:bg-slate-50/80 print:group-hover:bg-white";
 
   return (
     <div className="min-h-screen bg-gray-50 pb-16 frequencia-print-root">
@@ -575,60 +579,84 @@ export default function FrequenciaEditor({
           </div>
         </div>
 
-        <div className="bg-white border border-gray-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
-          <div className="overflow-x-auto table-scroll">
-            <table className="frequencia-table border-collapse text-[11px] leading-tight min-w-max w-full">
+        <div className="bg-white border border-slate-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
+          <div className="px-3 py-1.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-2 print:hidden">
+            <p className="text-[10px] font-semibold text-slate-500">
+              Use a barra de rolagem abaixo da tabela para percorrer os dias do mês.
+            </p>
+            <span className="text-[10px] font-bold tabular-nums text-slate-400 shrink-0">
+              {dayKeys.length} dias
+            </span>
+          </div>
+          <div className="frequencia-scroll">
+            <table className="frequencia-table text-[11px] leading-snug w-max min-w-full print:w-full print:min-w-0 print:max-w-full">
+              <colgroup>
+                <col className="freq-id-posto" />
+                <col className="freq-id-re" />
+                <col className="freq-id-nome" />
+                {dayKeys.map((k) => (
+                  <col key={k} className="freq-day" />
+                ))}
+                <col className="freq-total-meia" />
+                <col className="freq-total-aa" />
+              </colgroup>
               <thead>
-                <tr className="bg-gray-800 text-white">
+                <tr className="bg-slate-800 text-white">
                   <th
                     colSpan={3}
-                    className={`px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider ${sepId}`}
+                    className={`px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${sepId}`}
                   >
                     Identificação
                   </th>
                   <th
                     colSpan={dayKeys.length}
-                    className="px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider"
+                    className="px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider"
                   >
                     Frequência
                   </th>
                   <th
                     colSpan={2}
-                    className={`px-1.5 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider ${sepTotais}`}
+                    className={`px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${sepTotais}`}
                   >
                     Totais
                   </th>
                 </tr>
-                <tr className="bg-gray-100 text-gray-900 sticky top-0 z-10 print:static">
+                <tr className="bg-slate-100 text-slate-900">
                   <th
-                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.75rem] ${stickyPostoHead}`}
+                    className={`freq-id-posto border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${stickyPostoHead}`}
                   >
-                    POSTO/GRAD.
+                    Posto/Grad.
                   </th>
                   <th
-                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.25rem] ${stickyReHead}`}
+                    className={`freq-id-re border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${stickyReHead}`}
                   >
                     RE
                   </th>
                   <th
-                    className={`border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[7rem] ${stickyNomeHead} ${sepId}`}
+                    className={`freq-id-nome border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${stickyNomeHead} ${sepId}`}
                   >
-                    NOME
+                    Nome
                   </th>
                   {dayKeys.map((k) => (
                     <th
                       key={k}
-                      className={`border border-gray-300 px-0 py-1 text-center font-bold min-w-[1.5rem] w-6 align-middle ${weekendCellClass(weekendByKey[k])}`}
+                      className={`freq-day border border-slate-300 px-0.5 py-1.5 text-center text-[10px] font-bold tabular-nums align-middle ${
+                        weekendByKey[k]
+                          ? "bg-slate-200/90 text-slate-800"
+                          : "bg-slate-100"
+                      }`}
                     >
                       {Number(k)}
                     </th>
                   ))}
                   <th
-                    className={`border border-gray-300 px-1 py-1 text-center font-bold whitespace-nowrap min-w-[2.75rem] align-middle ${sepTotais}`}
+                    className={`freq-total-meia border border-slate-300 px-1 py-1.5 text-center text-[9px] font-bold uppercase leading-tight align-middle ${sepTotais}`}
                   >
-                    1/2 DIÁRIA
+                    1/2
+                    <br />
+                    Diária
                   </th>
-                  <th className="border border-gray-300 px-1 py-1 text-center font-bold whitespace-nowrap min-w-[2.25rem] align-middle">
+                  <th className="freq-total-aa border border-slate-300 px-1 py-1.5 text-center text-[10px] font-bold uppercase align-middle">
                     A.A.
                   </th>
                 </tr>
@@ -638,26 +666,33 @@ export default function FrequenciaEditor({
                   <tr>
                     <td
                       colSpan={3 + dayKeys.length + 2}
-                      className="border border-gray-200 px-3 py-4 text-center text-gray-400"
+                      className="border border-slate-200 px-3 py-6 text-center text-slate-400"
                     >
                       Nenhum colaborador ativo nesta seção. Sincronize ou verifique o cadastro.
                     </td>
                   </tr>
                 ) : (
-                  docData.rows.map((row) => (
-                    <tr key={row.re} className="group hover:bg-gray-50/80 print:hover:bg-transparent">
+                  docData.rows.map((row, rowIdx) => (
+                    <tr
+                      key={row.re}
+                      className={`group print:hover:bg-transparent ${
+                        rowIdx % 2 === 1 ? "bg-slate-50/50" : "bg-white"
+                      }`}
+                    >
                       <td
-                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-semibold whitespace-nowrap align-middle ${stickyPosto} ${idSticky}`}
+                        className={`freq-id-posto border border-slate-200 px-2 py-1 text-left text-[11px] font-semibold text-slate-700 whitespace-nowrap align-middle truncate ${stickyPosto} ${idSticky}`}
+                        title={row.postoGrad}
                       >
                         {row.postoGrad}
                       </td>
                       <td
-                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-mono whitespace-nowrap align-middle ${stickyRe} ${idSticky}`}
+                        className={`freq-id-re border border-slate-200 px-2 py-1 text-left font-mono text-[11px] text-slate-800 whitespace-nowrap align-middle ${stickyRe} ${idSticky}`}
                       >
                         {row.re}
                       </td>
                       <td
-                        className={`border border-gray-200 px-1.5 py-0.5 text-left font-bold whitespace-nowrap align-middle ${stickyNome} ${idSticky} ${sepId}`}
+                        className={`freq-id-nome border border-slate-200 px-2 py-1 text-left text-[11px] font-bold text-slate-900 whitespace-nowrap align-middle truncate ${stickyNome} ${idSticky} ${sepId}`}
+                        title={row.nome}
                       >
                         {row.nome}
                       </td>
@@ -672,7 +707,7 @@ export default function FrequenciaEditor({
                         return (
                           <td
                             key={k}
-                            className={`border border-gray-200 p-0 text-center align-middle ${weekendCellClass(weekend)}`}
+                            className={`freq-day border border-slate-200 p-0.5 text-center align-middle ${dayCellTone(weekend)}`}
                           >
                             {editable ? (
                               <input
@@ -680,8 +715,8 @@ export default function FrequenciaEditor({
                                 onChange={(e) => {
                                   const next = e.target.value;
                                   const wasEmptyNonManual =
-                                    !cel.editadoManualmente && !String(cel.valor || "").trim();
-                                  // Evita gravar o hífen visual como edição se o usuário só reexibiu "-"
+                                    !cel.editadoManualmente &&
+                                    !String(cel.valor || "").trim();
                                   if (wasEmptyNonManual && next === "-") return;
                                   setCell(row.re, k, next);
                                 }}
@@ -695,14 +730,16 @@ export default function FrequenciaEditor({
                                     : undefined
                                 }
                                 aria-label={`Dia ${Number(k)} — ${row.nome}`}
-                                className={`w-full min-w-[1.35rem] h-6 px-0 text-center text-[11px] leading-none font-bold border border-transparent rounded-sm bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-300 align-middle ${
-                                  cel.editadoManualmente ? "text-blue-800 bg-blue-50/40" : "text-gray-900"
+                                className={`freq-day-input ${
+                                  cel.editadoManualmente ? "is-manual" : "text-slate-900"
                                 }`}
                               />
                             ) : (
                               <span
-                                className={`inline-flex items-center justify-center w-full min-h-[1.5rem] font-bold leading-none ${
-                                  cel.editadoManualmente ? "text-blue-800" : "text-gray-900"
+                                className={`freq-day-value ${
+                                  cel.editadoManualmente
+                                    ? "text-blue-800"
+                                    : "text-slate-900"
                                 }`}
                               >
                                 {shown}
@@ -712,11 +749,11 @@ export default function FrequenciaEditor({
                         );
                       })}
                       <td
-                        className={`border border-gray-200 px-1 py-0.5 text-center font-bold align-middle ${sepTotais}`}
+                        className={`freq-total-meia border border-slate-200 px-1.5 py-1 text-center font-mono text-[11px] font-bold tabular-nums text-slate-900 align-middle ${sepTotais}`}
                       >
                         {row.meiaDiaria}
                       </td>
-                      <td className="border border-gray-200 px-1 py-0.5 text-center font-bold align-middle">
+                      <td className="freq-total-aa border border-slate-200 px-1.5 py-1 text-center font-mono text-[11px] font-bold tabular-nums text-slate-900 align-middle">
                         {row.aa}
                       </td>
                       <datalist id={`freq-opts-${row.re}`}>
@@ -1022,20 +1059,95 @@ export default function FrequenciaEditor({
 
       <style>{`
         @media print {
-          @page { size: A4 landscape; margin: 6mm; }
+          /* Reforço A4 paisagem (além de @page frequencia em index.css) */
+          @page { size: A4 landscape; margin: 5mm; }
+
           body * { visibility: hidden; }
-          .frequencia-print-root, .frequencia-print-root * { visibility: visible; }
-          .frequencia-print-root { position: absolute; left: 0; top: 0; width: 100%; }
-          .frequencia-table { font-size: 7px !important; line-height: 1.1 !important; }
-          .frequencia-table th, .frequencia-table td { padding: 1px 2px !important; }
-          .frequencia-table input {
+          .frequencia-print-root,
+          .frequencia-print-root * { visibility: visible; }
+
+          .frequencia-print-root {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 287mm; /* A4 landscape útil ≈ 297mm − margens */
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+          }
+
+          .frequencia-print-root header,
+          .frequencia-print-root .print\\:hidden {
+            display: none !important;
+          }
+
+          .frequencia-scroll {
+            overflow: visible !important;
+            border: none !important;
+          }
+
+          .frequencia-table {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            table-layout: fixed !important;
+            font-size: 6.5px !important;
+            line-height: 1.15 !important;
+          }
+
+          .frequencia-table col.freq-id-posto,
+          .frequencia-table .freq-id-posto {
+            width: 7% !important;
+            min-width: 0 !important;
+          }
+          .frequencia-table col.freq-id-re,
+          .frequencia-table .freq-id-re {
+            width: 6% !important;
+            min-width: 0 !important;
+          }
+          .frequencia-table col.freq-id-nome,
+          .frequencia-table .freq-id-nome {
+            width: 12% !important;
+            min-width: 0 !important;
+          }
+          .frequencia-table col.freq-day,
+          .frequencia-table .freq-day {
+            width: auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+          }
+          .frequencia-table col.freq-total-meia,
+          .frequencia-table .freq-total-meia {
+            width: 4.5% !important;
+            min-width: 0 !important;
+          }
+          .frequencia-table col.freq-total-aa,
+          .frequencia-table .freq-total-aa {
+            width: 3.5% !important;
+            min-width: 0 !important;
+          }
+
+          .frequencia-table th,
+          .frequencia-table td {
+            padding: 1px 1px !important;
+          }
+
+          .frequencia-table .freq-day-input,
+          .frequencia-table .freq-day-value {
             border: none !important;
             background: transparent !important;
-            height: 12px !important;
+            box-shadow: none !important;
+            height: auto !important;
             min-height: 0 !important;
-            font-size: 7px !important;
+            font-size: 6.5px !important;
+            padding: 0 !important;
           }
-          .print\\:hidden { display: none !important; }
+
+          .frequencia-print-root [class*="sticky"] {
+            position: static !important;
+            left: auto !important;
+          }
         }
       `}</style>
     </div>
