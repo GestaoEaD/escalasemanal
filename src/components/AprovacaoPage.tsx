@@ -299,8 +299,9 @@ function ReadOnlyFrequenciaTable({
                     POSTO/GRAD.
                   </th>
                   <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">RE</th>
+                  <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">NOME</th>
                   <th className="border border-gray-200 px-2 py-1.5 text-left font-bold">
-                    NOME / OBSERVAÇÃO
+                    OBSERVAÇÃO
                   </th>
                 </tr>
               </thead>
@@ -313,10 +314,11 @@ function ReadOnlyFrequenciaTable({
                         {ident.postoGrad}
                       </td>
                       <td className="border border-gray-200 px-2 py-1.5 font-mono">{ident.re}</td>
-                      <td className="border border-gray-200 px-2 py-1.5">
-                        <span className="font-bold">{ident.nome}</span>
-                        <span className="text-gray-500"> — </span>
-                        <span className="whitespace-pre-wrap">{o.texto}</span>
+                      <td className="border border-gray-200 px-2 py-1.5 font-bold whitespace-nowrap">
+                        {ident.nome}
+                      </td>
+                      <td className="border border-gray-200 px-2 py-1.5 whitespace-pre-wrap">
+                        {o.texto}
                       </td>
                     </tr>
                   );

@@ -409,13 +409,13 @@ export default function FrequenciaEditor({
     "bg-white print:bg-white group-hover:bg-slate-50 print:group-hover:bg-white";
   const sepId = "border-r-2 border-r-slate-400";
   const sepTotais = "border-l-2 border-l-slate-400";
-  // Sticky offsets = freq-id-posto (5.5) + freq-id-re (4.5) = 10rem
+  // Sticky offsets = freq-id-posto (6) + freq-id-re (5) = 11rem
   const stickyPosto = "sticky left-0 z-[1] print:static";
-  const stickyRe = "sticky left-[5.5rem] z-[1] print:static";
-  const stickyNome = "sticky left-[10rem] z-[1] print:static";
+  const stickyRe = "sticky left-[6rem] z-[1] print:static";
+  const stickyNome = "sticky left-[11rem] z-[1] print:static";
   const stickyPostoHead = "sticky left-0 z-20 bg-slate-100 print:static";
-  const stickyReHead = "sticky left-[5.5rem] z-20 bg-slate-100 print:static";
-  const stickyNomeHead = "sticky left-[10rem] z-20 bg-slate-100 print:static";
+  const stickyReHead = "sticky left-[6rem] z-20 bg-slate-100 print:static";
+  const stickyNomeHead = "sticky left-[11rem] z-20 bg-slate-100 print:static";
 
   const dayCellTone = (weekend: boolean) =>
     weekend
@@ -788,7 +788,7 @@ export default function FrequenciaEditor({
             </h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[11px] leading-tight border-collapse min-w-[640px]">
+            <table className="w-full text-[11px] leading-tight border-collapse min-w-[720px]">
               <thead className="bg-gray-100">
                 <tr>
                   <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.75rem]">
@@ -797,8 +797,11 @@ export default function FrequenciaEditor({
                   <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[4.25rem]">
                     RE
                   </th>
+                  <th className="border border-gray-300 px-1.5 py-1 text-left font-bold whitespace-nowrap min-w-[7rem]">
+                    NOME
+                  </th>
                   <th className="border border-gray-300 px-1.5 py-1 text-left font-bold min-w-[14rem]">
-                    NOME / OBSERVAÇÃO
+                    OBSERVAÇÃO
                   </th>
                   {editable && (
                     <th className="border border-gray-300 px-1 py-1 text-center font-bold w-20 print:hidden">
@@ -811,7 +814,7 @@ export default function FrequenciaEditor({
                 {visibleObs.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={editable ? 4 : 3}
+                      colSpan={editable ? 5 : 4}
                       className="border border-gray-200 px-3 py-3 text-center text-gray-400"
                     >
                       Nenhuma observação.
@@ -828,6 +831,9 @@ export default function FrequenciaEditor({
                         <td className="border border-gray-200 px-1.5 py-1 text-left font-mono align-middle whitespace-nowrap">
                           {ident.re}
                         </td>
+                        <td className="border border-gray-200 px-1.5 py-1 text-left font-bold text-gray-900 align-middle whitespace-nowrap">
+                          {ident.nome}
+                        </td>
                         <td className="border border-gray-200 px-1.5 py-1 text-left align-middle">
                           {editingObsId === o.id ? (
                             <textarea
@@ -837,11 +843,9 @@ export default function FrequenciaEditor({
                               rows={2}
                             />
                           ) : (
-                            <div className="leading-snug">
-                              <span className="font-bold text-gray-900">{ident.nome}</span>
-                              <span className="text-gray-500"> — </span>
-                              <span className="text-gray-800 whitespace-pre-wrap">{o.texto}</span>
-                            </div>
+                            <span className="text-gray-800 whitespace-pre-wrap leading-snug">
+                              {o.texto}
+                            </span>
                           )}
                         </td>
                         {editable && (

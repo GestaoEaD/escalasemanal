@@ -42,6 +42,15 @@ function resolveObsPosto(
   return row?.postoGrad || "—";
 }
 
+function resolveObsNome(
+  obs: ControleFrequenciaObservacao,
+  doc: ControleFrequenciaDocument
+): string {
+  if (!obs.re) return "—";
+  const row = doc.rows.find((r) => r.re === obs.re);
+  return row?.nome || "—";
+}
+
 const FREQUENCIA_PRINT_CSS = `
   /* —— Preview na tela (mesma linguagem visual da impressão) —— */
   @page {
@@ -276,6 +285,13 @@ const FREQUENCIA_PRINT_CSS = `
   }
   .obs-table .col-obs-posto { width: 12%; text-align: left; }
   .obs-table .col-obs-re { width: 9%; text-align: left; }
+  .obs-table .col-obs-nome {
+    width: 12%;
+    text-align: left;
+    font-weight: 750;
+    color: #101828;
+    white-space: nowrap;
+  }
   .obs-table .col-obs-text {
     width: auto;
     text-align: left;
@@ -546,12 +562,13 @@ export function exportFrequenciaToPDF(options: {
   const visibleObs = (doc.observacoes || []).filter((o) => !o.excluido);
   const obsRows =
     visibleObs.length === 0
-      ? `<tr><td colspan="3" style="text-align:center;padding:6px;">Sem observações.</td></tr>`
+      ? `<tr><td colspan="4" style="text-align:center;padding:6px;">Sem observações.</td></tr>`
       : visibleObs
           .map((o) => {
             return `<tr>
               <td class="col-obs-posto">${escapeHtml(resolveObsPosto(o, doc))}</td>
               <td class="col-obs-re">${escapeHtml(o.re || "—")}</td>
+              <td class="col-obs-nome">${escapeHtml(resolveObsNome(o, doc))}</td>
               <td class="col-obs-text">${escapeHtml(o.texto || "")}</td>
             </tr>`;
           })
@@ -639,8 +656,9 @@ export function exportFrequenciaToPDF(options: {
   <table class="obs-table">
     <thead>
       <tr>
-        <th class="col-obs-posto">Posto/Grad.</th>
+        <th class="col-obs-posto">Posto/Graduação</th>
         <th class="col-obs-re">RE</th>
+        <th class="col-obs-nome">Nome</th>
         <th class="col-obs-text">Observação</th>
       </tr>
     </thead>
