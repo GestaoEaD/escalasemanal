@@ -35,12 +35,13 @@ export const OFFICIAL_COLLABORATORS = [
   { ordem: 20, postoGrad: "CB PM", re: "147445-6", nome: "RODRIGUES", secao: "Seç Gest Educ", ativo: true },
 ];
 
-/** Nomes de guerra dos gestores iniciais (perfil aplicado via Firestore, sem hardcode de permissão). */
+/** Nomes de guerra dos gestores que antes eram seedados (legado — não recriar). */
 const INITIAL_GESTOR_NOMES = ["AUGUSTO", "FERREIRA", "FABBRI", "DAMACENO", "LEANDRO"] as const;
 
 /**
- * Garante usuários gestores iniciais no Firestore (uma vez).
- * Novos gestores futuros: basta alterar o perfil no cadastro de usuários.
+ * Legado: gestores iniciais sem e-mail NÃO são mais criados automaticamente.
+ * Permissão deve ser concedida pelo administrador com e-mail Google cadastrado.
+ * Mantém a flag para não reintroduzir o seed antigo.
  */
 async function ensureInitialGestores() {
   const statusDocRef = doc(db, "configuracoes", "status");
@@ -48,30 +49,19 @@ async function ensureInitialGestores() {
   const statusData = statusSnap.exists() ? statusSnap.data() : null;
   if (statusData?.gestores_iniciais_seeded) return;
 
-  const batch = writeBatch(db);
-  for (const col of OFFICIAL_COLLABORATORS) {
-    if (!(INITIAL_GESTOR_NOMES as readonly string[]).includes(col.nome)) continue;
-    const userRef = doc(db, "usuarios", col.re);
-    batch.set(
-      userRef,
-      {
-        re: col.re,
-        nome: col.nome,
-        postoGrad: col.postoGrad,
-        secao: col.secao,
-        perfil: "Gestor",
-        ativo: true,
-        email: "",
-        authProvider: "local",
-        ultimoLogin: null,
-        emailVerificado: false,
-      },
-      { merge: true }
-    );
-  }
-  batch.set(statusDocRef, { gestores_iniciais_seeded: true }, { merge: true });
-  await batch.commit();
-  console.log("Gestores iniciais cadastrados/atualizados com sucesso.");
+  // Marca como concluído sem criar usuários — login agora exige e-mail Google.
+  await setDoc(
+    statusDocRef,
+    {
+      gestores_iniciais_seeded: true,
+      gestores_iniciais_revogados_sem_email: true,
+      gestores_iniciais_nomes_legado: [...INITIAL_GESTOR_NOMES],
+    },
+    { merge: true }
+  );
+  console.log(
+    "Seed de gestores iniciais desativado (permissões só via cadastro com e-mail Google)."
+  );
 }
 
 export const OFFICIAL_POSTOS = [
