@@ -46,6 +46,9 @@ import { exportUsuariosToExcel } from "../utils/exportUtils";
 import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
 import { normalizeSecaoNome, secoesIguais } from "../utils/secaoMatch";
 import { normalizeAtivoFlag } from "../utils/ativoFlag";
+import { toSessionUser, writeSession } from "../utils/sessionService";
+import { upsertAuthIndex, removeAuthIndex } from "../utils/authIndex";
+import { cascadeSecaoRename } from "../utils/secaoCascade";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -69,6 +72,7 @@ function withSecaoCodigo(s: Record<string, unknown>): Secao {
 interface ConfiguracoesProps {
   usuario: Usuario;
   onBack: () => void;
+  onUsuarioUpdate?: (usuario: Usuario) => void;
 }
 
 type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros" | "testes";
@@ -211,7 +215,7 @@ const translateColorToHex = (color: string): string => {
   return map[trimmed] || color;
 };
 
-export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
+export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: ConfiguracoesProps) {
   // Active module tab
   const [activeTab, setActiveTab] = useState<MenuTab>("colaboradores");
 
@@ -290,6 +294,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
 
   const [secaoModalOpen, setSecaoModalOpen] = useState(false);
   const [currentSecao, setCurrentSecao] = useState<any | null>(null);
+  // Nome original da seção em edição (null = inclusão de nova seção)
+  const [secaoOriginalNome, setSecaoOriginalNome] = useState<string | null>(null);
+  const [secaoRenames, setSecaoRenames] = useState<{ from: string; to: string }[]>([]);
 
   const [legendaModalOpen, setLegendaModalOpen] = useState(false);
   const [currentLegenda, setCurrentLegenda] = useState<Legenda | null>(null);
@@ -391,6 +398,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setSecaoRenames([]);
 
     } catch (err: any) {
       console.error("Erro ao carregar dados administrativos:", err);
@@ -435,7 +443,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       removedUsuarios.length > 0 ||
       removedPostos.length > 0 ||
       removedSecoes.length > 0 ||
-      removedLegendas.length > 0
+      removedLegendas.length > 0 ||
+      secaoRenames.length > 0
     );
   }, [
     colaboradores, origColaboradores,
@@ -444,7 +453,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     secoes, origSecoes,
     legendas, origLegendas,
     gerais, origGerais,
-    removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas
+    removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas,
+    secaoRenames
   ]);
 
   // Handle Undo/Discard changes
@@ -462,6 +472,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setSecaoRenames([]);
 
       setSaveError(null);
       setSaveSuccess(false);
@@ -543,6 +554,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         return updateOrderFields(filtered);
       });
       setRemovedSecoes((prev) => [...prev, id]);
+      setSecaoRenames((prev) => prev.filter((r) => !secoesIguais(r.from, id) && !secoesIguais(r.to, id)));
     } else if (type === "legendas") {
       setLegendas((prev) => {
         const filtered = prev.filter((l) => l.sigla !== id);
@@ -590,8 +602,25 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         origColaboradores,
         origUsuarios
       );
-      const colsToSave = reconciled.colaboradores;
-      const usersToSave = reconciled.usuarios;
+
+      const resolveSecaoRenamed = (nome: string): string => {
+        let current = nome;
+        for (let i = 0; i < 20; i++) {
+          const hit = secaoRenames.find((r) => secoesIguais(r.from, current));
+          if (!hit) break;
+          current = hit.to;
+        }
+        return current;
+      };
+
+      const colsToSave = reconciled.colaboradores.map((c) => ({
+        ...c,
+        secao: normalizeSecaoNome(resolveSecaoRenamed(c.secao)),
+      }));
+      const usersToSave = reconciled.usuarios.map((u) => ({
+        ...u,
+        secao: normalizeSecaoNome(resolveSecaoRenamed(u.secao)),
+      }));
       setColaboradores(colsToSave);
       setUsuarios(usersToSave);
 
@@ -774,15 +803,25 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       }
 
       // --- 4. AUDIT & SAVE: SECOES ---
-      // A. Deletes
+      const renameFromByTo = new Map(
+        secaoRenames.map((r) => [normalizeSecaoNome(r.to), normalizeSecaoNome(r.from)])
+      );
+      const renamedFromSet = new Set(secaoRenames.map((r) => normalizeSecaoNome(r.from)));
+
+      // A. Deletes (renomeações só apagam o doc antigo; auditoria fica no bloco de edição)
       for (const nomeDel of removedSecoes) {
         const docId = nomeDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         batch.delete(doc(db, "secoes", docId));
-        createAuditLog("Seções", "Exclusão", nomeDel, "Todos", nomeDel, "");
+        if (!renamedFromSet.has(normalizeSecaoNome(nomeDel))) {
+          createAuditLog("Seções", "Exclusão", nomeDel, "Todos", nomeDel, "");
+        }
       }
       // B. Creations and edits
       for (const s of secoes) {
-        const original = origSecoes.find((os) => os.nome === s.nome);
+        const renameFrom = renameFromByTo.get(normalizeSecaoNome(s.nome));
+        const original = renameFrom
+          ? origSecoes.find((os) => secoesIguais(os.nome, renameFrom))
+          : origSecoes.find((os) => secoesIguais(os.nome, s.nome));
         const docId = s.nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "secoes", docId);
         const payload = {
@@ -801,6 +840,9 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             `Nome: ${payload.nome}, Código: ${payload.codigo || "—"}, Ordem: ${payload.ordem}, Ativo: ${payload.ativo ? "Sim" : "Não"}`
           );
         } else {
+          if (renameFrom && !secoesIguais(String(renameFrom), s.nome)) {
+            createAuditLog("Seções", "Edição", s.nome, "Nome", String(renameFrom), s.nome);
+          }
           if (s.ordem !== original.ordem) {
             createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
           }
@@ -915,6 +957,38 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       // Commit the database batch
       await batch.commit();
 
+      // Propaga rename de seção em escalas e CF
+      for (const rename of secaoRenames) {
+        try {
+          const cascade = await cascadeSecaoRename(rename.from, rename.to);
+          if (cascade.semanais + cascade.alteracao + cascade.frequencia > 0) {
+            createAuditLog(
+              "Seções",
+              "Edição",
+              rename.to,
+              "Propagação rename",
+              rename.from,
+              `semanais=${cascade.semanais}; alteracao=${cascade.alteracao}; frequencia=${cascade.frequencia}`
+            );
+          }
+        } catch (cascadeErr) {
+          console.warn("Falha ao propagar rename de seção:", cascadeErr);
+        }
+      }
+
+      // Mantém auth_index alinhado aos usuários
+      for (const u of usersToSave) {
+        if (u.email) {
+          await upsertAuthIndex(u).catch((e) => console.warn("auth_index upsert:", e));
+        }
+      }
+      for (const reDel of removedUsuarios) {
+        const original = origUsuarios.find((u) => u.re === reDel);
+        if (original?.email) {
+          await removeAuthIndex(original.email).catch(() => undefined);
+        }
+      }
+
       // Uma operação de auditoria com todas as alterações internas
       await auditConfiguracao({
         usuario,
@@ -936,6 +1010,15 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setSecaoRenames([]);
+
+      // Atualiza seção na sessão se o usuário logado foi afetado por rename
+      const sessaoSecao = normalizeSecaoNome(resolveSecaoRenamed(usuario.secao));
+      if (!secoesIguais(sessaoSecao, usuario.secao)) {
+        const updated = toSessionUser({ ...usuario, secao: sessaoSecao });
+        writeSession(updated);
+        onUsuarioUpdate?.(updated);
+      }
 
       setSaveSuccess(true);
       // Auto-hide success alert in 4 seconds
@@ -1134,7 +1217,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     e.preventDefault();
     if (!currentSecao) return;
 
-    const nome = String(currentSecao.nome || "").trim();
+    const nome = normalizeSecaoNome(currentSecao.nome);
     const codigo = normalizeSecaoCodigo(currentSecao.codigo);
 
     if (!nome) {
@@ -1146,20 +1229,61 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       return;
     }
 
+    const duplicateNome = secoes.some(
+      (s) => secoesIguais(s.nome, nome) && !secoesIguais(s.nome, secaoOriginalNome || "")
+    );
+    if (duplicateNome) {
+      alert("Já existe uma seção com este nome.");
+      return;
+    }
+
     const duplicateCodigo = secoes.find(
-      (s) => normalizeSecaoCodigo(s.codigo) === codigo && s.nome !== nome
+      (s) =>
+        normalizeSecaoCodigo(s.codigo) === codigo &&
+        !secoesIguais(s.nome, secaoOriginalNome || nome)
     );
     if (duplicateCodigo) {
       alert(`O código ${codigo} já está em uso pela seção "${duplicateCodigo.nome}".`);
       return;
     }
 
-    const existingIndex = secoes.findIndex((s) => s.nome === nome);
     let updatedList = [...secoes];
-    const payload = { ...currentSecao, nome, codigo };
+    const payload = {
+      ...currentSecao,
+      nome,
+      codigo,
+      ativo: currentSecao.ativo !== false,
+    };
 
-    if (existingIndex > -1) {
-      updatedList[existingIndex] = { ...payload };
+    const editIndex =
+      secaoOriginalNome !== null
+        ? secoes.findIndex((s) => secoesIguais(s.nome, secaoOriginalNome))
+        : -1;
+
+    if (editIndex > -1) {
+      updatedList[editIndex] = {
+        ...payload,
+        ordem: secoes[editIndex].ordem ?? payload.ordem,
+      };
+      if (secaoOriginalNome && !secoesIguais(secaoOriginalNome, nome)) {
+        setRemovedSecoes((prev) =>
+          prev.includes(secaoOriginalNome) ? prev : [...prev, secaoOriginalNome]
+        );
+        setSecaoRenames((prev) => [
+          ...prev.filter((r) => !secoesIguais(r.from, secaoOriginalNome)),
+          { from: secaoOriginalNome, to: nome },
+        ]);
+        setColaboradores((prev) =>
+          prev.map((c) =>
+            secoesIguais(c.secao, secaoOriginalNome) ? { ...c, secao: nome } : c
+          )
+        );
+        setUsuarios((prev) =>
+          prev.map((u) =>
+            secoesIguais(u.secao, secaoOriginalNome) ? { ...u, secao: nome } : u
+          )
+        );
+      }
     } else {
       const maxOrdem = secoes.reduce((max, s) => (s.ordem && s.ordem > max ? s.ordem : max), 0);
       updatedList.push({
@@ -1172,6 +1296,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     setSecoes(updatedList);
     setSecaoModalOpen(false);
     setCurrentSecao(null);
+    setSecaoOriginalNome(null);
   };
 
   const handleLegendaSubmit = (e: React.FormEvent) => {
@@ -2019,6 +2144,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     id="new-secao-btn"
                     onClick={() => {
                       setCurrentSecao({ nome: "", codigo: "", ativo: true });
+                      setSecaoOriginalNome(null);
                       setSecaoModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -2084,6 +2210,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                                     ...s,
                                     codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
                                   });
+                                  setSecaoOriginalNome(s.nome);
                                   setSecaoModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -2819,9 +2946,16 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
             >
               <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {secoes.some((s) => s.nome === currentSecao.nome) ? "Editar Seção" : "Adicionar Seção"}
+                  {secaoOriginalNome !== null ? "Editar Seção" : "Adicionar Seção"}
                 </h3>
-                <button onClick={() => setSecaoModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                <button
+                  onClick={() => {
+                    setSecaoModalOpen(false);
+                    setCurrentSecao(null);
+                    setSecaoOriginalNome(null);
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
                   <X size={18} />
                 </button>
               </div>
@@ -2832,12 +2966,14 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <input
                     type="text"
                     value={currentSecao.nome}
-                    disabled={secoes.some((s) => s.nome === currentSecao.nome)}
                     onChange={(e) => setCurrentSecao({ ...currentSecao, nome: e.target.value })}
-                    placeholder="Ex: Seção Exemplo"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
+                    placeholder="Ex: Seç Gest Educ"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                     required
                   />
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    Nome editável. Ao renomear e salvar, colaboradores e permissões com a seção antiga são atualizados.
+                  </p>
                 </div>
 
                 <div>
@@ -2875,7 +3011,11 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                 <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
                   <button
                     type="button"
-                    onClick={() => setSecaoModalOpen(false)}
+                    onClick={() => {
+                      setSecaoModalOpen(false);
+                      setCurrentSecao(null);
+                      setSecaoOriginalNome(null);
+                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar

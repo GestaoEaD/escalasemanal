@@ -24,10 +24,19 @@ import {
 } from "./solicitacaoAprovacaoService";
 import { registerAuditOperation } from "./auditService";
 import {
+  assertCanApprove,
+  assertCanCancelApproval,
+  assertCanReopen,
+  assertCanSubmitForApproval,
+  assertPendingApproval,
+} from "./permissionGuards";
+import {
   buildControleFrequenciaId,
   controleFrequenciaDocPath,
   formatNowParts,
 } from "./frequenciaIds";
+import { recalcAllRows } from "./frequenciaCalculo";
+import { normalizeLegenda } from "./legendaModel";
 import {
   buildEmptyControleDocument,
   getWeeksOverlappingMonth,
@@ -35,8 +44,6 @@ import {
   syncFrequenciaObservacoes,
   syncFrequenciaRows,
 } from "./frequenciaSync";
-import { recalcAllRows } from "./frequenciaCalculo";
-import { normalizeLegenda } from "./legendaModel";
 import { normalizeSecaoNome } from "./secaoMatch";
 import { normalizeAtivoFlag } from "./ativoFlag";
 
@@ -228,10 +235,16 @@ export async function saveControleFrequencia(
     throw new Error("Este Controle de Frequência não pode ser editado no status atual.");
   }
 
+  const legendasSnap = await getDocs(collection(db, "legendas"));
+  const legendas = legendasSnap.docs.map((d) =>
+    normalizeLegenda(d.data() as Record<string, unknown>)
+  );
+  const rowsRecalc = recalcAllRows(docData.rows || [], legendas);
+
   const timestamp = Timestamp.now();
-  const { data, hora } = formatNowParts();
   const next: ControleFrequenciaDocument = {
     ...docData,
+    rows: rowsRecalc,
     status: status || "em_edicao",
     versao: docData.versao && docData.versao > 0 ? docData.versao : 1,
     lastSaved: {
@@ -260,6 +273,7 @@ export async function saveControleFrequencia(
     statusAtual: statusLabelSafe(next.status),
     alteracoes: alteracoes || [],
     detalhes: `Seção: ${next.secao} · ${next.rows.length} colaborador(es)`,
+    origem: "ui",
   });
 
   return next;
@@ -293,6 +307,7 @@ export async function submitFrequenciaForApproval(
   docData: ControleFrequenciaDocument,
   usuario: Usuario
 ): Promise<{ doc: ControleFrequenciaDocument; url: string; token: string }> {
+  assertCanSubmitForApproval(usuario);
   const status = normalizeEscalaStatus(docData.status);
   if (status === "aguardando_aprovacao") {
     throw new Error("Este Controle de Frequência já está aguardando aprovação.");
@@ -380,9 +395,7 @@ export async function cancelFrequenciaApproval(
   usuario: Usuario
 ): Promise<ControleFrequenciaDocument> {
   const status = normalizeEscalaStatus(docData.status);
-  if (status !== "aguardando_aprovacao") {
-    throw new Error("Não há solicitação ativa para cancelar.");
-  }
+  assertCanCancelApproval(usuario, status);
   const token = docData.aprovacao?.solicitacaoId;
   if (token) {
     await finalizeSolicitacaoAprovacao({
@@ -427,6 +440,9 @@ export async function approveFrequencia(
   usuario: Usuario,
   observacao: string = ""
 ): Promise<ControleFrequenciaDocument> {
+  assertCanApprove(usuario);
+  assertPendingApproval(docData.status, "Controle de Frequência");
+  const statusAnterior = normalizeEscalaStatus(docData.status);
   const { data, hora } = formatNowParts();
   const timestamp = Timestamp.now();
   const token = docData.aprovacao?.solicitacaoId;
@@ -489,6 +505,9 @@ export async function approveFrequencia(
     semana: next.mes,
     anoSemana: next.id,
     solicitacaoId: token,
+    statusAnterior: statusLabelSafe(statusAnterior),
+    statusAtual: "Aprovada",
+    detalhes: observacao || undefined,
   });
   return next;
 }
@@ -498,6 +517,9 @@ export async function requestFrequenciaRevision(
   usuario: Usuario,
   motivo: string
 ): Promise<ControleFrequenciaDocument> {
+  assertCanApprove(usuario);
+  assertPendingApproval(docData.status, "Controle de Frequência");
+  const statusAnterior = normalizeEscalaStatus(docData.status);
   const { data, hora } = formatNowParts();
   const timestamp = Timestamp.now();
   const token = docData.aprovacao?.solicitacaoId;
@@ -508,17 +530,20 @@ export async function requestFrequenciaRevision(
       usuario,
     });
   }
+  const versaoAnterior = docData.versao && docData.versao > 0 ? docData.versao : 1;
+  const novaVersao = versaoAnterior + 1;
   const evento = buildHistoricoEvento({
     tipo: "solicitacao_revisao",
     descricao: `Revisão solicitada — Controle de Frequência`,
     usuario,
-    versao: docData.versao,
+    versao: novaVersao,
     solicitacaoId: token,
     detalhes: motivo,
   });
   const next: ControleFrequenciaDocument = {
     ...docData,
     status: "revisao_solicitada",
+    versao: novaVersao,
     aprovacao: cleanAprovacao({
       ...(docData.aprovacao || {
         solicitacaoId: token || "",
@@ -529,7 +554,7 @@ export async function requestFrequenciaRevision(
         rejeitadoPor: null,
         motivoRejeicao: "",
         observacaoAprovacao: "",
-        versaoEnviada: docData.versao || 1,
+        versaoEnviada: versaoAnterior,
       }),
       revisaoSolicitadaPor: {
         nome: usuario.nome,
@@ -559,6 +584,9 @@ export async function requestFrequenciaRevision(
     anoSemana: next.id,
     motivo,
     solicitacaoId: token,
+    versao: novaVersao,
+    statusAnterior: statusLabelSafe(statusAnterior),
+    statusAtual: "Revisão Solicitada",
   });
   return next;
 }
@@ -568,6 +596,8 @@ export async function reopenFrequencia(
   usuario: Usuario,
   motivo: string
 ): Promise<ControleFrequenciaDocument> {
+  assertCanReopen(usuario, docData.status);
+  const statusAnterior = normalizeEscalaStatus(docData.status);
   const evento = buildHistoricoEvento({
     tipo: "reabertura",
     descricao: "Controle de Frequência reaberto",
@@ -597,7 +627,10 @@ export async function reopenFrequencia(
     ano: next.ano,
     semana: next.mes,
     anoSemana: next.id,
+    versao: next.versao,
     motivo,
+    statusAnterior: statusLabelSafe(statusAnterior),
+    statusAtual: "Em edição",
   });
   return next;
 }

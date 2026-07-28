@@ -1,6 +1,5 @@
-import React, { useState } from "react";
-import { Usuario } from "../types";
 import { findUsuarioByEmail } from "../utils/approvalService";
+import { auditAuth } from "../utils/auditService";
 import {
   getGoogleAuthErrorMessage,
   GoogleAuthFlowError,
@@ -9,8 +8,10 @@ import {
   type FriendlyAuthMessage,
   type GoogleAuthErrorKind,
 } from "../utils/googleAuthService";
+import { Usuario } from "../types";
 import { Shield, AlertCircle, ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import React, { useState } from "react";
 
 interface LoginProps {
   onLoginSuccess: (user: Usuario) => void;
@@ -67,6 +68,19 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       if (!userData) {
         await signOutGoogle();
         showKind("not_registered");
+        void auditAuth(
+          "LOGIN_FALHA",
+          {
+            re: "",
+            nome: email,
+            postoGrad: "",
+            secao: "",
+            perfil: "Operador",
+            ativo: false,
+            email,
+          },
+          "E-mail Google não cadastrado em usuarios"
+        ).catch(() => undefined);
         return;
       }
 

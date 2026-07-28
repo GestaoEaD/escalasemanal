@@ -1,8 +1,120 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function authEmail() {
+      return request.auth.token.email;
+    }
+
+    function authIndexExists() {
+      return exists(/databases/$(database)/documents/auth_index/$(authEmail()));
+    }
+
+    function callerPerfil() {
+      return get(/databases/$(database)/documents/auth_index/$(authEmail())).data.perfil;
+    }
+
+    function isAdmin() {
+      return signedIn() && authIndexExists() && callerPerfil() == 'Administrador';
+    }
+
+    function isGestor() {
+      return signedIn() && authIndexExists() && callerPerfil() == 'Gestor';
+    }
+
+    function isOperador() {
+      return signedIn() && authIndexExists() && callerPerfil() == 'Operador';
+    }
+
+    function isRegistered() {
+      return signedIn() && authIndexExists();
+    }
+
+    // Índice e-mail → perfil (escrito no login / save de usuários)
+    match /auth_index/{email} {
+      allow read: if signedIn() && authEmail() == email;
+      allow create, update: if signedIn() && (authEmail() == email || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /logs/{id} {
+      allow read: if isAdmin();
+      // signedIn (não só registered) para auditar LOGIN_FALHA antes do auth_index
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    match /counters/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /usuarios/{re} {
+      // Leitura autenticada necessária para lookup no login (antes do auth_index).
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        || (signedIn()
+            && request.resource.data.email == authEmail());
+      allow delete: if isAdmin();
+    }
+
+    match /colaboradores/{id} {
+      allow read: if isRegistered();
+      // Admin e Operador editam cadastro pela escala; Gestor só lê
+      allow write: if isAdmin() || isOperador();
+    }
+
+    match /secoes/{id} {
+      allow read: if isRegistered();
+      allow write: if isAdmin();
+    }
+
+    match /postos/{id} {
+      allow read: if isRegistered();
+      allow write: if isAdmin();
+    }
+
+    match /legendas/{id} {
+      allow read: if isRegistered();
+      allow write: if isAdmin();
+    }
+
+    match /configuracoes/{id} {
+      allow read: if isRegistered();
+      allow write: if isAdmin();
+    }
+
+    match /escalas_semanais/{id} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+    }
+
+    match /escalas_alteracao/{id} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+    }
+
+    match /controle_frequencia/{id} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+    }
+
+    match /solicitacoes_aprovacao/{id} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+    }
+
+    match /presenca_online/{id} {
+      allow read: if isRegistered();
+      allow write: if isRegistered();
+    }
+
+    // Negar tudo que não estiver listado acima
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

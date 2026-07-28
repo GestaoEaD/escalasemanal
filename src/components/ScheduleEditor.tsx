@@ -544,7 +544,32 @@ export default function ScheduleEditor({
       if (hasWeeklySaved) {
         if (alterationSnap.exists()) {
           const data = alterationSnap.data() as EscalaDocument;
-          const loadedAltRows = (data.rows || []).map(applyWeekendDefault);
+          let loadedAltRows = (data.rows || []).map(applyWeekendDefault);
+          const hasStatusField = data.status !== undefined && data.status !== null;
+          const altStatusLoaded = hasStatusField
+            ? normalizeEscalaStatus(data.status)
+            : "em_edicao";
+
+          if (isScheduleRosterEditable(altStatusLoaded)) {
+            const synced = syncScheduleRosterWithCadastro(loadedAltRows, sortedCols);
+            if (synced.changed) {
+              loadedAltRows = synced.rows.map(applyWeekendDefault);
+              await setDoc(
+                alterationDocRef,
+                prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
+                  ...data,
+                  rows: loadedAltRows.map(cleanScheduleRow),
+                  status: altStatusLoaded,
+                  versao: data.versao && data.versao > 0 ? data.versao : 1,
+                  aprovacao: cleanAprovacao(data.aprovacao || null),
+                  historico: cleanHistorico(
+                    Array.isArray(data.historico) ? data.historico : []
+                  ),
+                } as unknown as Record<string, unknown>)
+              );
+            }
+          }
+
           setDbAlterationRows(loadedAltRows);
           setLocalAlterationRows(loadedAltRows);
           setOpenAltObs(
@@ -553,8 +578,7 @@ export default function ScheduleEditor({
           setDbAlterationSaved(data.lastSaved);
           setLoadedAlterationTimestamp(data.lastSaved?.timestamp || null);
 
-          const hasStatusField = data.status !== undefined && data.status !== null;
-          setAltStatus(hasStatusField ? normalizeEscalaStatus(data.status) : "em_edicao");
+          setAltStatus(altStatusLoaded);
           setAltVersao(data.versao && data.versao > 0 ? data.versao : 1);
           setAltAprovacao(data.aprovacao || null);
           setAltHistorico(
@@ -1322,6 +1346,8 @@ export default function ScheduleEditor({
 
       let savedStatus = "";
       let savedVersao = 1;
+      const statusAntesLabel =
+        target === "semanal" ? statusLabel(weeklyStatus) : statusLabel(altStatus);
 
       if (target === "semanal") {
         const contentDirty =
@@ -1429,8 +1455,12 @@ export default function ScheduleEditor({
           ];
         }
 
-        const alterationRowsToSave = applyCadastroToScheduleRows(
+        const alterationSynced = syncScheduleRosterWithCadastro(
           localAlterationRows,
+          collaboratorsPool
+        );
+        const alterationRowsToSave = applyCadastroToScheduleRows(
+          alterationSynced.rows,
           collaboratorsPool
         ).map(cleanScheduleRow);
 
@@ -1468,7 +1498,7 @@ export default function ScheduleEditor({
         tipoDoc: target,
         anoSemana: docId,
         versao: savedVersao,
-        statusAnterior: savedStatus,
+        statusAnterior: statusAntesLabel,
         statusAtual: savedStatus,
         alteracoes,
       });

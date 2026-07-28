@@ -188,11 +188,21 @@ export function syncFrequenciaRows(options: {
         const semVal = cellValueFromSchedule(semRow, field);
 
         if (altVal) {
-          const converted = convertEscalaValorToFrequencia(altVal, lookup);
-          valorEscalaOriginal = altVal;
-          if (converted) {
-            valor = converted;
+          const convertedAlt = convertEscalaValorToFrequencia(altVal, lookup);
+          if (convertedAlt) {
+            valor = convertedAlt;
             origem = "escala_alteracao";
+            valorEscalaOriginal = altVal;
+          } else if (semVal) {
+            // Alteração não mapeada: não zerar o dia — cai para Semanal.
+            const convertedSem = convertEscalaValorToFrequencia(semVal, lookup);
+            valorEscalaOriginal = semVal;
+            if (convertedSem) {
+              valor = convertedSem;
+              origem = "escala_semanal";
+            }
+          } else {
+            valorEscalaOriginal = altVal;
           }
         } else if (semVal) {
           const converted = convertEscalaValorToFrequencia(semVal, lookup);

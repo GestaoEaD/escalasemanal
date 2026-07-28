@@ -181,21 +181,29 @@ export default function AppShell({
                   <div className="text-sm font-semibold text-gray-800 truncate">
                     {usuario.postoGrad} {usuario.nome}
                   </div>
-                  <div className="text-xs text-gray-500 flex items-center justify-end gap-1.5">
+                  <div className="text-xs text-gray-500 flex items-center justify-end gap-1.5 min-w-0">
                     <span
-                      className="inline-flex items-center gap-1 tabular-nums text-emerald-700 font-semibold"
+                      className="inline-flex items-center gap-1 tabular-nums text-emerald-700 font-semibold shrink-0"
                       title="Usuários autenticados ativos neste momento"
                     >
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
                       {onlineLabel}
                     </span>
-                    <span className="text-gray-300">·</span>
-                    <span className="truncate">
+                    {usuario.secao?.trim() && (
+                      <>
+                        <span className="text-gray-300 shrink-0">·</span>
+                        <span className="truncate font-medium text-gray-600" title={usuario.secao}>
+                          {usuario.secao}
+                        </span>
+                      </>
+                    )}
+                    <span className="text-gray-300 shrink-0">·</span>
+                    <span className="truncate shrink-0">
                       R.E. {usuario.re} · {usuario.perfil || "Operador"}
                     </span>
                   </div>
                 </div>
-                <div className="md:hidden flex flex-col items-end min-w-0">
+                <div className="md:hidden flex flex-col items-end min-w-0 max-w-[9.5rem]">
                   <span
                     className="inline-flex items-center gap-1 text-[10px] tabular-nums text-emerald-700 font-bold whitespace-nowrap"
                     title="Usuários online"
@@ -203,6 +211,14 @@ export default function AppShell({
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     {onlineLabel}
                   </span>
+                  {usuario.secao?.trim() && (
+                    <span
+                      className="text-[9px] font-semibold text-gray-600 truncate max-w-full"
+                      title={usuario.secao}
+                    >
+                      {usuario.secao}
+                    </span>
+                  )}
                 </div>
               </div>
 

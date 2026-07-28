@@ -31,6 +31,13 @@ import {
   finalizeSolicitacaoAprovacao,
   getTokenApprovalUrl,
 } from "./solicitacaoAprovacaoService";
+import {
+  assertCanApprove,
+  assertCanCancelApproval,
+  assertCanReopen,
+  assertCanSubmitForApproval,
+  assertPendingApproval,
+} from "./permissionGuards";
 
 export type EscalaCollectionName =
   | "escalas_semanais"
@@ -383,6 +390,7 @@ export async function submitScaleForApproval(
   url: string;
   token: string;
 }> {
+  assertCanSubmitForApproval(usuario);
   const label = getEscalaDocumentoLabel(tipo);
   const collectionName = getEscalaCollection(tipo);
   const ref = doc(db, collectionName, escalaId);
@@ -487,6 +495,7 @@ export async function approveScale(
   observacao: string = "",
   tipo: TipoEscalaDocumento = "semanal"
 ): Promise<void> {
+  assertCanApprove(gestor);
   const label = getEscalaDocumentoLabel(tipo);
   const collectionName = getEscalaCollection(tipo);
   const ref = doc(db, collectionName, escalaId);
@@ -494,9 +503,7 @@ export async function approveScale(
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
   const currentStatus = normalizeEscalaStatus(data.status);
-  if (currentStatus !== "aguardando_aprovacao") {
-    throw new Error(getClosedApprovalMessage(currentStatus, tipo));
-  }
+  assertPendingApproval(currentStatus, label);
 
   const versao = data.versao && data.versao > 0 ? data.versao : 1;
   const solicitacaoId = data.aprovacao?.solicitacaoId || "";
@@ -568,6 +575,7 @@ export async function requestRevisionScale(
   motivo: string,
   tipo: TipoEscalaDocumento = "semanal"
 ): Promise<void> {
+  assertCanApprove(gestor);
   const motivoTrim = String(motivo || "").trim();
   if (!motivoTrim) {
     throw new Error("Informe o motivo da revisão.");
@@ -580,9 +588,7 @@ export async function requestRevisionScale(
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
   const currentStatus = normalizeEscalaStatus(data.status);
-  if (currentStatus !== "aguardando_aprovacao") {
-    throw new Error(getClosedApprovalMessage(currentStatus, tipo));
-  }
+  assertPendingApproval(currentStatus, label);
 
   const versaoAnterior = data.versao && data.versao > 0 ? data.versao : 1;
   const novaVersao = versaoAnterior + 1;
@@ -667,9 +673,7 @@ export async function cancelApprovalRequest(
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
   const currentStatus = normalizeEscalaStatus(data.status);
-  if (currentStatus !== "aguardando_aprovacao") {
-    throw new Error("Somente solicitações em aguardo podem ser canceladas.");
-  }
+  assertCanCancelApproval(usuario, currentStatus);
 
   const versao = data.versao && data.versao > 0 ? data.versao : 1;
   const solicitacaoId = data.aprovacao?.solicitacaoId || "";
@@ -737,9 +741,7 @@ export async function reopenApprovedScale(
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
   const currentStatus = normalizeEscalaStatus(data.status);
-  if (currentStatus !== "aprovada") {
-    throw new Error(`Somente ${label.toLowerCase()} aprovada pode ser reaberta.`);
-  }
+  assertCanReopen(gestor, currentStatus);
 
   const versaoAnterior = data.versao && data.versao > 0 ? data.versao : 1;
   const novaVersao = versaoAnterior + 1;

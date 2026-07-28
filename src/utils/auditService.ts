@@ -53,6 +53,7 @@ export function toAuditUsuario(usuario: Usuario | null | undefined): AuditUsuari
     re: usuario?.re || "",
     posto: usuario?.postoGrad || "",
     perfil: usuario?.perfil || "Operador",
+    ...(usuario?.secao ? { secao: String(usuario.secao) } : {}),
   };
 }
 
@@ -96,6 +97,7 @@ export interface RegisterAuditInput {
   detalhes?: string;
   solicitacaoId?: string;
   motivo?: string;
+  origem?: string;
   date?: Date;
 }
 
@@ -138,6 +140,7 @@ export async function registerAuditOperation(
   if (input.detalhes) op.detalhes = input.detalhes;
   if (input.solicitacaoId) op.solicitacaoId = input.solicitacaoId;
   if (input.motivo) op.motivo = input.motivo;
+  if (input.origem) op.origem = input.origem;
 
   await setDoc(
     doc(db, LOGS_COLLECTION, id),
@@ -262,13 +265,16 @@ export async function auditExportacao(options: {
 }
 
 export async function auditAuth(
-  tipo: "LOGIN" | "LOGOUT",
-  usuario: Usuario
+  tipo: "LOGIN" | "LOGOUT" | "LOGIN_FALHA",
+  usuario: Usuario,
+  detalhes?: string
 ): Promise<AuditOperation> {
   return registerAuditOperation({
     tipo,
     escala: "AUTENTICACAO",
     usuario,
+    detalhes,
+    origem: "auth",
   });
 }
 

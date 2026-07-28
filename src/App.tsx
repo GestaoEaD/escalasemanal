@@ -4,6 +4,7 @@ import { TipoEscalaDocumento, Usuario } from "./types";
 import { WeekInfo } from "./utils/dateUtils";
 import { canAccessConfig, canApproveScales } from "./utils/permissions";
 import { auditAuth } from "./utils/auditService";
+import { upsertAuthIndex } from "./utils/authIndex";
 import { resolveActiveApprovalToken } from "./utils/approvalService";
 import {
   AppRoute,
@@ -183,6 +184,9 @@ export default function App() {
     writeSession(sessionUser);
     setUsuario(sessionUser);
     setAuthPhase("authenticated");
+    void upsertAuthIndex(sessionUser).catch((err) =>
+      console.warn("Falha ao gravar auth_index:", err)
+    );
     void markUsuarioGoogleLogin(sessionUser).catch((err) =>
       console.warn("Falha ao atualizar metadados de login Google:", err)
     );
@@ -278,7 +282,13 @@ export default function App() {
     if (!canAccessConfig(usuario)) {
       page = <SessionLoadingScreen />;
     } else {
-      page = <Configuracoes usuario={usuario} onBack={goHome} />;
+      page = (
+        <Configuracoes
+          usuario={usuario}
+          onBack={goHome}
+          onUsuarioUpdate={setUsuario}
+        />
+      );
     }
   } else if (route.view === "frequencia") {
     page = (

@@ -25,15 +25,19 @@ import {
   isWeekendDay,
 } from "../../utils/frequenciaDisplay";
 import { exportFrequenciaToPDF } from "../../utils/frequenciaExport";
+import { exportFrequenciaToExcel } from "../../utils/frequenciaExcelExport";
 import { loadCodigoOpmBySecaoNome } from "../../utils/secaoCodigo";
 import FrequenciaHeader from "../relatorios/FrequenciaHeader";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
+import { registerAuditOperation } from "../../utils/auditService";
 import {
   canCancelApprovalRequest,
   canEditFrequencia,
+  canExportScale,
   canReopenApprovedScale,
   canSubmitForApproval,
+  confirmGestorRe,
   isGestor,
 } from "../../utils/permissions";
 import { Legenda } from "../../types";
@@ -41,6 +45,7 @@ import StatusBadge from "../StatusBadge";
 import {
   ArrowLeft,
   CheckCircle,
+  FileSpreadsheet,
   Link2,
   Plus,
   Printer,
@@ -75,6 +80,7 @@ export default function FrequenciaEditor({
   onOpenApproval,
 }: Props) {
   const [docData, setDocData] = useState<ControleFrequenciaDocument | null>(null);
+  const [baselineDoc, setBaselineDoc] = useState<ControleFrequenciaDocument | null>(null);
   const [legendas, setLegendas] = useState<Legenda[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -138,9 +144,11 @@ export default function FrequenciaEditor({
             : "Controle atualizado com colaboradores da seção e escalas."
         );
         setDocData(next);
+        setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);
       } else {
         setDocData(next);
+        setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);
       }
     } catch (e: unknown) {
@@ -195,8 +203,35 @@ export default function FrequenciaEditor({
     setSaving(true);
     setError(null);
     try {
-      const saved = await saveControleFrequencia(docData, usuario);
+      const alteracoes: {
+        campo: string;
+        antes: string;
+        depois: string;
+        colaborador?: string;
+      }[] = [];
+      if (baselineDoc) {
+        for (const row of docData.rows) {
+          const old = baselineDoc.rows.find((r) => r.re === row.re);
+          const label = `${row.postoGrad} ${row.nome}`;
+          for (const [k, cel] of Object.entries(row.dias || {}) as [
+            string,
+            FrequenciaCelula,
+          ][]) {
+            const prevVal = old?.dias?.[k]?.valor || "";
+            if (String(cel.valor || "") !== String(prevVal)) {
+              alteracoes.push({
+                campo: `Dia ${k}`,
+                antes: prevVal,
+                depois: String(cel.valor || ""),
+                colaborador: label,
+              });
+            }
+          }
+        }
+      }
+      const saved = await saveControleFrequencia(docData, usuario, alteracoes);
       setDocData(saved);
+      setBaselineDoc(JSON.parse(JSON.stringify(saved)));
       setDirty(false);
       setSuccess("Controle de Frequência salvo.");
     } catch (e: unknown) {
@@ -284,9 +319,16 @@ export default function FrequenciaEditor({
 
   const handleApprove = async () => {
     if (!docData) return;
+    const typed = window.prompt("Confirme seu R.E. para aprovar:");
+    if (typed == null) return;
+    if (!confirmGestorRe(usuario, typed)) {
+      setError("R.E. não confere com o gestor autenticado.");
+      return;
+    }
     try {
       const next = await approveFrequencia(docData, usuario);
       setDocData(next);
+      setBaselineDoc(JSON.parse(JSON.stringify(next)));
       setSuccess("Controle aprovado.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao aprovar.");
@@ -295,9 +337,16 @@ export default function FrequenciaEditor({
 
   const handleRevision = async () => {
     if (!docData || !revisaoMotivo.trim()) return;
+    const typed = window.prompt("Confirme seu R.E. para solicitar revisão:");
+    if (typed == null) return;
+    if (!confirmGestorRe(usuario, typed)) {
+      setError("R.E. não confere com o gestor autenticado.");
+      return;
+    }
     try {
       const next = await requestFrequenciaRevision(docData, usuario, revisaoMotivo.trim());
       setDocData(next);
+      setBaselineDoc(JSON.parse(JSON.stringify(next)));
       setRevisaoOpen(false);
       setRevisaoMotivo("");
       setSuccess("Revisão solicitada.");
@@ -565,7 +614,28 @@ export default function FrequenciaEditor({
             <button
               type="button"
               onClick={() => {
-                if (!docData) return;
+                if (!docData || !canExportScale(usuario)) return;
+                exportFrequenciaToExcel({ doc: docData, codigoOpm });
+                void registerAuditOperation({
+                  tipo: "EXPORTAR",
+                  escala: "FREQUENCIA",
+                  usuario,
+                  ano: docData.ano,
+                  semana: docData.mes,
+                  anoSemana: docData.id,
+                  detalhes: `Export Excel/CSV · seção ${docData.secao}`,
+                  origem: "export",
+                }).catch(() => undefined);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-md border border-gray-300 bg-white text-gray-800 cursor-pointer"
+            >
+              <FileSpreadsheet size={13} />
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!docData || !canExportScale(usuario)) return;
                 void exportFrequenciaToPDF({
                   doc: docData,
                   codigoOpm,
@@ -575,6 +645,16 @@ export default function FrequenciaEditor({
                     postoGrad: usuario.postoGrad,
                   },
                 });
+                void registerAuditOperation({
+                  tipo: "EXPORTAR",
+                  escala: "FREQUENCIA",
+                  usuario,
+                  ano: docData.ano,
+                  semana: docData.mes,
+                  anoSemana: docData.id,
+                  detalhes: `Export PDF · seção ${docData.secao}`,
+                  origem: "export",
+                }).catch(() => undefined);
               }}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-md border border-gray-300 bg-white text-gray-800 cursor-pointer"
             >

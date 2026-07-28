@@ -250,6 +250,7 @@ export type AuditOperacaoTipo =
   | "SOLICITAR_REVISAO_CONTROLE_FREQUENCIA"
   | "CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA"
   | "REABRIR_CONTROLE_FREQUENCIA"
+  | "LOGIN_FALHA"
   | "OPERACAO_LEGADA";
 
 export type AuditDocumentoTipo =
@@ -265,6 +266,7 @@ export interface AuditUsuarioSnapshot {
   re: string;
   posto: string;
   perfil: string;
+  secao?: string;
 }
 
 /** Documento de auditoria — uma operação com N alterações internas. */
@@ -287,6 +289,8 @@ export interface AuditOperation {
   detalhes?: string;
   solicitacaoId?: string;
   motivo?: string;
+  /** Origem da alteração: UI, sync, export, auth, etc. */
+  origem?: string;
   /** Marcador de documento legado normalizado. */
   legado?: boolean;
 }
@@ -351,6 +355,7 @@ export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
   SOLICITAR_REVISAO_CONTROLE_FREQUENCIA: "Revisão Frequência",
   CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA: "Cancelar Frequência",
   REABRIR_CONTROLE_FREQUENCIA: "Reabrir Frequência",
+  LOGIN_FALHA: "Login Falhou",
   OPERACAO_LEGADA: "Operação",
 };
 
