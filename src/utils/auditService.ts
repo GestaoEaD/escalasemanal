@@ -9,6 +9,7 @@ import {
   getDocs,
   setDoc,
   Timestamp,
+  serverTimestamp,
   runTransaction,
 } from "../firebase";
 import {
@@ -28,12 +29,10 @@ import { prepareFirestoreWrite } from "./firestoreSanitize";
 const LOGS_COLLECTION = "logs";
 
 function formatNowParts(date: Date = new Date()): {
-  timestamp: ReturnType<typeof Timestamp.fromDate>;
   data: string;
   hora: string;
   dataHora: string;
 } {
-  const timestamp = Timestamp.fromDate(date);
   const data =
     String(date.getDate()).padStart(2, "0") +
     "/" +
@@ -44,7 +43,7 @@ function formatNowParts(date: Date = new Date()): {
     String(date.getHours()).padStart(2, "0") +
     ":" +
     String(date.getMinutes()).padStart(2, "0");
-  return { timestamp, data, hora, dataHora: `${data} ${hora}` };
+  return { data, hora, dataHora: `${data} ${hora}` };
 }
 
 export function toAuditUsuario(usuario: Usuario | null | undefined): AuditUsuarioSnapshot {
@@ -106,7 +105,7 @@ export async function registerAuditOperation(
   input: RegisterAuditInput
 ): Promise<AuditOperation> {
   const id = await allocateLogId();
-  const { timestamp, data, hora, dataHora } = formatNowParts(input.date);
+  const { data, hora, dataHora } = formatNowParts(input.date);
   const parsed = parseAnoSemana(input.anoSemana);
   const usuario = toAuditUsuario(input.usuario);
 
@@ -117,7 +116,8 @@ export async function registerAuditOperation(
     data,
     hora,
     dataHora,
-    timestamp,
+    // Timestamp confiável do servidor (rules exigem == request.time)
+    timestamp: serverTimestamp() as AuditOperation["timestamp"],
   };
 
   if (input.escala) op.escala = input.escala;

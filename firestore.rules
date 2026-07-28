@@ -33,6 +33,72 @@ service cloud.firestore {
       return signedIn() && authIndexExists();
     }
 
+    function canEditCadastro() {
+      return isAdmin() || isOperador();
+    }
+
+    function statusIn(data, values) {
+      return data.keys().hasAny(['status']) && data.status in values;
+    }
+
+    function sameStatus() {
+      return request.resource.data.status == resource.data.status;
+    }
+
+    // Transições de workflow enforceadas no servidor (sem Cloud Functions).
+    function workflowSubmit() {
+      return isAdmin()
+        && resource.data.status in ['em_edicao', 'revisao_solicitada']
+        && request.resource.data.status == 'aguardando_aprovacao';
+    }
+
+    function workflowApprove() {
+      return isGestor()
+        && resource.data.status == 'aguardando_aprovacao'
+        && request.resource.data.status == 'aprovada';
+    }
+
+    function workflowRevision() {
+      return isGestor()
+        && resource.data.status == 'aguardando_aprovacao'
+        && request.resource.data.status == 'revisao_solicitada';
+    }
+
+    function workflowCancel() {
+      return isAdmin()
+        && resource.data.status == 'aguardando_aprovacao'
+        && request.resource.data.status == 'em_edicao';
+    }
+
+    function workflowReopen() {
+      return isGestor()
+        && resource.data.status == 'aprovada'
+        && request.resource.data.status == 'em_edicao';
+    }
+
+    function workflowContentEdit() {
+      return canEditCadastro()
+        && sameStatus()
+        && !(resource.data.status in ['aprovada', 'aguardando_aprovacao']);
+    }
+
+    function canWriteWorkflowDoc() {
+      return workflowContentEdit()
+        || workflowSubmit()
+        || workflowApprove()
+        || workflowRevision()
+        || workflowCancel()
+        || workflowReopen();
+    }
+
+    function canCreateWorkflowDoc() {
+      return canEditCadastro()
+        && (
+          !('status' in request.resource.data)
+          || request.resource.data.status == 'em_edicao'
+        );
+    }
+
     // Índice e-mail → perfil (escrito no login / save de usuários)
     match /auth_index/{email} {
       allow read: if signedIn() && authEmail() == email;
@@ -42,8 +108,10 @@ service cloud.firestore {
 
     match /logs/{id} {
       allow read: if isAdmin();
-      // signedIn (não só registered) para auditar LOGIN_FALHA antes do auth_index
-      allow create: if signedIn();
+      // timestamp deve ser serverTimestamp() (== request.time nas rules)
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAny(['timestamp'])
+        && request.resource.data.timestamp == request.time;
       allow update, delete: if false;
     }
 
@@ -53,18 +121,15 @@ service cloud.firestore {
     }
 
     match /usuarios/{re} {
-      // Leitura autenticada necessária para lookup no login (antes do auth_index).
       allow read: if signedIn();
       allow create, update: if isAdmin()
-        || (signedIn()
-            && request.resource.data.email == authEmail());
+        || (signedIn() && request.resource.data.email == authEmail());
       allow delete: if isAdmin();
     }
 
     match /colaboradores/{id} {
       allow read: if isRegistered();
-      // Admin e Operador editam cadastro pela escala; Gestor só lê
-      allow write: if isAdmin() || isOperador();
+      allow write: if canEditCadastro();
     }
 
     match /secoes/{id} {
@@ -89,22 +154,30 @@ service cloud.firestore {
 
     match /escalas_semanais/{id} {
       allow read: if isRegistered();
-      allow write: if isRegistered();
+      allow create: if canCreateWorkflowDoc();
+      allow update: if canWriteWorkflowDoc();
+      allow delete: if isAdmin();
     }
 
     match /escalas_alteracao/{id} {
       allow read: if isRegistered();
-      allow write: if isRegistered();
+      allow create: if canCreateWorkflowDoc();
+      allow update: if canWriteWorkflowDoc();
+      allow delete: if isAdmin();
     }
 
     match /controle_frequencia/{id} {
       allow read: if isRegistered();
-      allow write: if isRegistered();
+      allow create: if canCreateWorkflowDoc();
+      allow update: if canWriteWorkflowDoc();
+      allow delete: if isAdmin();
     }
 
     match /solicitacoes_aprovacao/{id} {
       allow read: if isRegistered();
-      allow write: if isRegistered();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || isGestor();
+      allow delete: if isAdmin();
     }
 
     match /presenca_online/{id} {
@@ -112,7 +185,6 @@ service cloud.firestore {
       allow write: if isRegistered();
     }
 
-    // Negar tudo que não estiver listado acima
     match /{document=**} {
       allow read, write: if false;
     }

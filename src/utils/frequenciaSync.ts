@@ -26,7 +26,7 @@ import {
   formatNowParts,
   jsDowToEscalaField,
 } from "./frequenciaIds";
-import { reEquals, normalizeRe } from "./reUtils";
+import { reEquals, reDocKey } from "./reUtils";
 import { colaboradorNaSecao, normalizeSecaoNome } from "./secaoMatch";
 
 function emptyCelula(): FrequenciaCelula {
@@ -114,7 +114,7 @@ export function syncFrequenciaRows(options: {
 
   const existingByRe = new Map<string, ControleFrequenciaRow>();
   for (const r of options.existingRows || []) {
-    const key = normalizeRe(r.re) || String(r.re || "").trim();
+    const key = reDocKey(r.re) || String(r.re || "").trim();
     if (key) existingByRe.set(key, r);
   }
 
@@ -126,11 +126,11 @@ export function syncFrequenciaRows(options: {
   // Segurança: não apagar o relatório se o filtro de seção vier vazio por divergência de cadastro.
   if (cols.length === 0 && (options.existingRows?.length || 0) > 0) {
     const byRe = new Map(
-      options.colaboradores.map((c) => [normalizeRe(c.re) || c.re, c])
+      options.colaboradores.map((c) => [reDocKey(c.re) || c.re, c])
     );
     cols = (options.existingRows || [])
       .map((row) => {
-        const col = byRe.get(normalizeRe(row.re) || row.re);
+        const col = byRe.get(reDocKey(row.re) || row.re);
         if (col && col.ativo === false) return null;
         return (
           col || {
@@ -149,7 +149,7 @@ export function syncFrequenciaRows(options: {
   const nDays = daysInMonth(ano, mes);
   const rows: ControleFrequenciaRow[] = cols.map((col) => {
     const prev =
-      existingByRe.get(normalizeRe(col.re) || col.re) ||
+      existingByRe.get(reDocKey(col.re) || col.re) ||
       existingByRe.get(String(col.re || "").trim());
     const dias: Record<string, FrequenciaCelula> = prev
       ? { ...emptyDias(ano, mes), ...prev.dias }

@@ -6,7 +6,7 @@ import { isColaboradorAtivo, normalizeAtivoFlag } from "./ativoFlag";
 import { buildInitialWeeklyScheduleRow } from "./clearWeeklySchedule";
 import { cleanScheduleRow } from "./escalaPayload";
 import { normalizeEscalaStatus } from "./approvalService";
-import { normalizeRe, reEquals } from "./reUtils";
+import { reEquals, reDocKey } from "./reUtils";
 import { normalizeSecaoNome } from "./secaoMatch";
 
 export function normalizeColaboradorCadastro(raw: Colaborador): Colaborador {
@@ -94,12 +94,12 @@ export function syncScheduleRosterWithCadastro(
   }
 
   const presentKeys = new Set(
-    kept.map((r) => normalizeRe(r.re) || String(r.re || "").trim())
+    kept.map((r) => reDocKey(r.re) || String(r.re || "").trim())
   );
 
   const added: ScheduleRow[] = [];
   for (const col of activePool) {
-    const key = normalizeRe(col.re) || col.re;
+    const key = reDocKey(col.re) || col.re;
     if (!key || presentKeys.has(key)) continue;
     if (kept.some((r) => reEquals(r.re, col.re))) continue;
     const row = buildInitialWeeklyScheduleRow({

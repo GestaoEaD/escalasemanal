@@ -161,7 +161,9 @@ export function buildAllTestCases(opts: {
       if (normalizeRe("124342-0") !== "124342") return fail("normalizeRe falhou para 124342-0");
       if (!reEquals("124342-0", "124342")) return fail("reEquals deveria aceitar RE sem dígito");
       if (reEquals("124342-0", "999999-0")) return fail("reEquals aceitou REs diferentes");
-      return ok("RE normalizado e comparado corretamente (domínio, não login)");
+      if (reEquals("128687-A", "128687-B")) return fail("reEquals colidiu sufixos distintos A/B");
+      if (!reEquals("128687-A", "128687-A")) return fail("reEquals rejeitou RE idêntico com sufixo");
+      return ok("RE normalizado e comparado corretamente (sem colisão de sufixo)");
     },
   });
 

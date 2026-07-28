@@ -14,7 +14,7 @@ import {
 } from "../firebase";
 import { Usuario } from "../types";
 import { normalizeEmail } from "./usuarioHelpers";
-import { normalizeRe } from "./reUtils";
+import { reDocKey } from "./reUtils";
 
 const COLLECTION = "presenca_online";
 const HEARTBEAT_MS = 30_000;
@@ -36,7 +36,7 @@ let unloadHandler: (() => void) | null = null;
 let activeRe: string | null = null;
 
 function presenceDocId(re: string): string {
-  return normalizeRe(re) || String(re || "").trim();
+  return reDocKey(re) || String(re || "").trim();
 }
 
 function buildPayload(usuario: Usuario): Record<string, unknown> {

@@ -445,7 +445,11 @@ export default function ScheduleEditor({
         const weeklyStatusLoaded = normalizeEscalaStatus(data.status);
 
         // Escalas editáveis acompanham o cadastro (reativações / inativos).
-        if (isScheduleRosterEditable(weeklyStatusLoaded)) {
+        // Só persiste se o usuário puder editar (Gestor não grava no load).
+        if (
+          isScheduleRosterEditable(weeklyStatusLoaded) &&
+          canEditScale(usuario, week, weeklyStatusLoaded)
+        ) {
           const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols);
           if (synced.changed) {
             loadedRows = synced.rows.map(applyWeekendDefault);
@@ -550,7 +554,10 @@ export default function ScheduleEditor({
             ? normalizeEscalaStatus(data.status)
             : "em_edicao";
 
-          if (isScheduleRosterEditable(altStatusLoaded)) {
+          if (
+            isScheduleRosterEditable(altStatusLoaded) &&
+            canEditScale(usuario, week, altStatusLoaded)
+          ) {
             const synced = syncScheduleRosterWithCadastro(loadedAltRows, sortedCols);
             if (synced.changed) {
               loadedAltRows = synced.rows.map(applyWeekendDefault);

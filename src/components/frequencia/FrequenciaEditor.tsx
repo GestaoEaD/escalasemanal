@@ -130,7 +130,9 @@ export default function FrequenciaEditor({
       ]);
       setLegendas(legs);
       let next = result.doc;
-      if (result.synced) {
+      const st = normalizeEscalaStatus(next.status);
+      const mayEdit = canEditFrequencia(usuario, year, month, st);
+      if (result.synced && mayEdit) {
         next = {
           ...next,
           rows: recalcAllRows(next.rows, legs),
@@ -147,6 +149,9 @@ export default function FrequenciaEditor({
         setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);
       } else {
+        if (result.synced && !mayEdit) {
+          next = { ...next, rows: recalcAllRows(next.rows, legs) };
+        }
         setDocData(next);
         setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);
