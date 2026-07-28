@@ -139,6 +139,8 @@ export async function ensureAndSyncControleFrequencia(options: {
   secao: string;
   usuario: Usuario;
   forceResync?: boolean;
+  /** Quando true (padrão), reaplica o cadastro de colaboradores da seção em docs editáveis. */
+  syncCadastro?: boolean;
 }): Promise<{ doc: ControleFrequenciaDocument; created: boolean; synced: boolean }> {
   const id = buildControleFrequenciaId(options.ano, options.mes, options.secao);
   let existing = await loadControleFrequencia(options.ano, options.mes, options.secao);
@@ -156,8 +158,10 @@ export async function ensureAndSyncControleFrequencia(options: {
   const blocked =
     status === "aprovada" || status === "aguardando_aprovacao";
 
-  // Auto-sync only on first create; explicit forceResync for button
-  const shouldSync = (created || options.forceResync === true) && !blocked;
+  // Sincroniza com o cadastro (seções/colaboradores) em documentos editáveis.
+  // forceResync também força recarga a partir das escalas.
+  const shouldSync =
+    !blocked && (created || options.forceResync === true || options.syncCadastro !== false);
 
   if (!shouldSync) {
     return { doc: existing, created, synced: false };

@@ -44,6 +44,7 @@ import {
 } from "../utils/legendaModel";
 import { exportUsuariosToExcel } from "../utils/exportUtils";
 import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
+import { normalizeSecaoNome, secoesIguais } from "../utils/secaoMatch";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -90,7 +91,7 @@ function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colab
     postoGrad: String(src.postoGrad || ""),
     nome: String(src.nome || ""),
     nomeCompleto: src.nomeCompleto,
-    secao: String(src.secao || ""),
+    secao: normalizeSecaoNome(src.secao),
     email: normalizeEmail(src.email),
     observacao: src.observacao || "",
     ativo: normalizeAtivoFlag(src.ativo),
@@ -98,6 +99,59 @@ function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colab
     createdAt: src.createdAt,
     updatedAt: src.updatedAt,
   };
+}
+
+/**
+ * Alinha seção (e identidade) entre colaborador e usuário com o mesmo RE.
+ * Preferência: alteração recente de seção; senão cadastro de colaborador.
+ */
+function reconcileColaboradoresUsuariosSecao(
+  cols: Colaborador[],
+  users: Usuario[],
+  origCols: Colaborador[],
+  origUsers: Usuario[]
+): { colaboradores: Colaborador[]; usuarios: Usuario[] } {
+  const colsOut = cols.map((c) => normalizeColaborador(c));
+  const usersOut = users.map((u) => ({
+    ...u,
+    re: String(u.re || "").trim(),
+    secao: normalizeSecaoNome(u.secao),
+  }));
+
+  for (let i = 0; i < colsOut.length; i++) {
+    const col = colsOut[i];
+    const ui = usersOut.findIndex((u) => u.re === col.re);
+    if (ui < 0) continue;
+
+    const usr = usersOut[ui];
+    const origCol = origCols.find((c) => c.re === col.re);
+    const origUsr = origUsers.find((u) => u.re === usr.re);
+
+    const colSecaoChanged =
+      Boolean(origCol) && !secoesIguais(col.secao, origCol!.secao);
+    const usrSecaoChanged =
+      Boolean(origUsr) && !secoesIguais(usr.secao, origUsr!.secao);
+
+    let secao = col.secao;
+    if (usrSecaoChanged && !colSecaoChanged) {
+      secao = normalizeSecaoNome(usr.secao);
+    } else if (colSecaoChanged) {
+      secao = normalizeSecaoNome(col.secao);
+    } else if (!secoesIguais(col.secao, usr.secao)) {
+      secao = normalizeSecaoNome(col.secao || usr.secao);
+    }
+
+    colsOut[i] = { ...col, secao };
+    usersOut[ui] = {
+      ...usr,
+      secao,
+      nome: col.nome || usr.nome,
+      postoGrad: col.postoGrad || usr.postoGrad,
+      nomeCompleto: col.nomeCompleto || usr.nomeCompleto,
+    };
+  }
+
+  return { colaboradores: colsOut, usuarios: usersOut };
 }
 
 /** Select tri-estado para campos booleanos opcionais (não configurado / sim / não). */
@@ -538,6 +592,18 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         });
       };
 
+      // Alinha seção entre colaboradores e usuários (mesmo RE) antes de gravar.
+      const reconciled = reconcileColaboradoresUsuariosSecao(
+        colaboradores,
+        usuarios,
+        origColaboradores,
+        origUsuarios
+      );
+      const colsToSave = reconciled.colaboradores;
+      const usersToSave = reconciled.usuarios;
+      setColaboradores(colsToSave);
+      setUsuarios(usersToSave);
+
       // --- 1. AUDIT & SAVE: COLABORADORES ---
       // A. Handle deletes
       for (const reDel of removedColaboradores) {
@@ -547,7 +613,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, "");
       }
       // B. Handle creations and edits
-      for (const col of colaboradores) {
+      for (const col of colsToSave) {
         const original = origColaboradores.find((c) => c.re === col.re);
         const docRef = doc(db, "colaboradores", col.re);
         const normalized = normalizeColaborador(col);
@@ -591,7 +657,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
               normalizeEmail(normalized.email) || ""
             );
           }
-          if (normalized.secao !== original.secao) {
+          if (!secoesIguais(normalized.secao, original.secao)) {
             createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
           }
           if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
@@ -622,7 +688,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
       }
       // B. Creations and edits
-      for (const usr of usuarios) {
+      for (const usr of usersToSave) {
         const prepared = prepareUsuarioDocument(usr);
         const original = origUsuarios.find((u) => u.re === prepared.re);
         const emailCheck = validateUsuarioEmail({
@@ -678,7 +744,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
               emailDepois
             );
           }
-          if (prepared.secao !== original.secao) {
+          if (!secoesIguais(prepared.secao, original.secao)) {
             createAuditLog("Permissão", "Edição", userLabel, "Seção", original.secao, prepared.secao);
           }
           if (prepared.perfil !== original.perfil) {
@@ -866,8 +932,8 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       });
 
       // Set original states to the newly saved ones
-      setOrigColaboradores(JSON.parse(JSON.stringify(colaboradores)));
-      setOrigUsuarios(JSON.parse(JSON.stringify(usuarios)));
+      setOrigColaboradores(JSON.parse(JSON.stringify(colsToSave)));
+      setOrigUsuarios(JSON.parse(JSON.stringify(usersToSave)));
       setOrigPostos(JSON.parse(JSON.stringify(postos)));
       setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
       setOrigLegendas(JSON.parse(JSON.stringify(legendas)));

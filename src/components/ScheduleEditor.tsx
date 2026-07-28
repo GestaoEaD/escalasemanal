@@ -54,6 +54,7 @@ import {
   cleanLastSaved,
   cleanScheduleRow,
 } from "../utils/escalaPayload";
+import { normalizeSecaoNome } from "../utils/secaoMatch";
 import CollaboratorModal from "./CollaboratorModal";
 import ConcurrencyModal from "./ConcurrencyModal";
 import StatusBadge from "./StatusBadge";
@@ -83,6 +84,22 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
+/** Espelha posto/nome/seção do cadastro nas linhas da escala (relatórios). */
+function applyCadastroToScheduleRows(
+  rows: ScheduleRow[],
+  pool: Colaborador[]
+): ScheduleRow[] {
+  return rows.map((row) => {
+    const col = pool.find((c) => c.re === row.re);
+    if (!col) return row;
+    return {
+      ...row,
+      postoGrad: col.postoGrad,
+      nome: col.nome,
+      secao: normalizeSecaoNome(col.secao),
+    };
+  });
+}
 const AUTO_SYSTEM_USER_OBSERVACAO = /^usu[aá]rio do sistema$/i;
 
 function sanitizeWeeklyObservacao(observacao?: string): string {
@@ -1318,6 +1335,11 @@ export default function ScheduleEditor({
           ];
         }
 
+        const weeklyRowsToSave = applyCadastroToScheduleRows(
+          localWeeklyRows,
+          collaboratorsPool
+        ).map(cleanScheduleRow);
+
         await setDoc(
           doc(db, "escalas_semanais", docId),
           prepareFirestoreWrite(`escalas_semanais/${docId}`, {
@@ -1325,7 +1347,7 @@ export default function ScheduleEditor({
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
-            rows: localWeeklyRows.map(cleanScheduleRow),
+            rows: weeklyRowsToSave,
             lastSaved: savedMetadata,
             observacoes: "",
             status: nextStatus,
@@ -1335,8 +1357,8 @@ export default function ScheduleEditor({
           } as unknown as Record<string, unknown>)
         );
 
-        setDbWeeklyRows(JSON.parse(JSON.stringify(localWeeklyRows)));
-        setLocalWeeklyRows(JSON.parse(JSON.stringify(localWeeklyRows)));
+        setDbWeeklyRows(JSON.parse(JSON.stringify(weeklyRowsToSave)));
+        setLocalWeeklyRows(JSON.parse(JSON.stringify(weeklyRowsToSave)));
         setDbWeeklySaved(savedMetadata);
         setLoadedWeeklyTimestamp(timestamp);
         setWeeklyStatus(nextStatus);
@@ -1380,6 +1402,11 @@ export default function ScheduleEditor({
           ];
         }
 
+        const alterationRowsToSave = applyCadastroToScheduleRows(
+          localAlterationRows,
+          collaboratorsPool
+        ).map(cleanScheduleRow);
+
         await setDoc(
           doc(db, "escalas_alteracao", docId),
           prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
@@ -1387,7 +1414,7 @@ export default function ScheduleEditor({
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
-            rows: localAlterationRows.map(cleanScheduleRow),
+            rows: alterationRowsToSave,
             lastSaved: savedMetadata,
             observacoes: "",
             status: nextStatus,
@@ -1397,8 +1424,8 @@ export default function ScheduleEditor({
           } as unknown as Record<string, unknown>)
         );
 
-        setDbAlterationRows(JSON.parse(JSON.stringify(localAlterationRows)));
-        setLocalAlterationRows(JSON.parse(JSON.stringify(localAlterationRows)));
+        setDbAlterationRows(JSON.parse(JSON.stringify(alterationRowsToSave)));
+        setLocalAlterationRows(JSON.parse(JSON.stringify(alterationRowsToSave)));
         setDbAlterationSaved(savedMetadata);
         setLoadedAlterationTimestamp(timestamp);
         setAltStatus(nextStatus);

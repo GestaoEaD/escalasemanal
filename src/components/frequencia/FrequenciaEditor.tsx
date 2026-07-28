@@ -129,16 +129,20 @@ export default function FrequenciaEditor({
           ...next,
           rows: recalcAllRows(next.rows, legs),
         };
-        if (result.created) {
-          next = await saveControleFrequencia(next, usuario);
-          await auditSyncFrequencia(next, usuario);
-          setSuccess("Controle criado e sincronizado com as escalas.");
-        } else {
-          setDirty(true);
-        }
+        // Persiste sincronização do cadastro (novos/movidos/inativos) no relatório.
+        next = await saveControleFrequencia(next, usuario);
+        await auditSyncFrequencia(next, usuario);
+        setSuccess(
+          result.created
+            ? "Controle criado e sincronizado com as escalas e o cadastro."
+            : "Controle atualizado com colaboradores da seção e escalas."
+        );
+        setDocData(next);
+        setDirty(false);
+      } else {
+        setDocData(next);
+        setDirty(false);
       }
-      setDocData(next);
-      setDirty(result.synced && !result.created);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha ao carregar controle.");
     } finally {
@@ -934,7 +938,7 @@ export default function FrequenciaEditor({
               <div className="grid gap-1.5 sm:grid-cols-[minmax(6.5rem,8rem)_minmax(4.5rem,6rem)_minmax(6rem,9rem)_1fr_auto] items-end">
                 <label className="block">
                   <span className="block text-[9px] font-bold text-gray-500 uppercase mb-0.5">
-                    Selecionar RE
+                    Nome de Guerra
                   </span>
                   <select
                     value={obsReDraft}
@@ -944,7 +948,7 @@ export default function FrequenciaEditor({
                     <option value="">—</option>
                     {docData.rows.map((r) => (
                       <option key={r.re} value={r.re}>
-                        {r.re}
+                        {r.nome || r.re}
                       </option>
                     ))}
                   </select>

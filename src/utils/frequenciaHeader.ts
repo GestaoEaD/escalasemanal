@@ -72,9 +72,18 @@ function escapeHtml(value: string): string {
  * Larguras totais: esquerdo 32% | direito 68%
  * Dentro do direito: OPM 30% | Código 38% | Mês/Ano 18% | Página 14%
  * Dentro do esquerdo: brasão 25% | texto 75%
+ *
+ * Cores alinhadas à identidade da página (slate / gray-50).
  */
 export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-wrap {
+    --freq-border: #334155; /* slate-700 */
+    --freq-text: #0f172a; /* slate-900 */
+    --freq-muted: #1e293b; /* slate-800 */
+    --freq-label-bg: #e2e8f0; /* slate-200 */
+    --freq-left-bg: #f8fafc; /* slate-50 */
+    --freq-legend-bg: #f1f5f9; /* slate-100 */
+    --freq-white: #ffffff;
     width: 100%;
     margin: 0 0 8px;
     box-sizing: border-box;
@@ -96,18 +105,18 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     grid-template-rows: minmax(56px, 1.5fr) minmax(26px, 0.48fr) minmax(36px, 0.72fr);
     width: 100%;
     min-height: 130px;
-    border: 1px solid #000;
-    background: #fff;
-    color: #000;
+    border: 1px solid var(--freq-border);
+    background: var(--freq-white);
+    color: var(--freq-text);
     font-family: Arial, Helvetica, sans-serif;
   }
 
-  /* —— Bloco esquerdo (rowspan visual das 3 linhas) —— */
+  /* —— Bloco esquerdo: brasão + texto institucional —— */
   .freq-inst-left {
     grid-column: 1;
     grid-row: 1 / 4;
-    border-right: 1px solid #000;
-    background: #fff;
+    border-right: 1px solid var(--freq-border);
+    background: var(--freq-left-bg);
     min-width: 0;
   }
 
@@ -118,40 +127,47 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     height: 100%;
     min-height: 130px;
     align-items: center;
+    justify-items: stretch;
   }
 
   .freq-inst-brasao-wrap {
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     height: 100%;
-    padding: 6px 4px;
+    padding: 8px 4px 8px 8px;
     min-width: 0;
   }
 
   .freq-inst-brasao {
     display: block;
     width: 100%;
-    max-width: 92px;
+    max-width: 100px;
     height: auto;
-    max-height: 96px;
+    max-height: 108px;
+    aspect-ratio: 1;
     object-fit: contain;
-    object-position: center;
+    object-position: center center;
+    /* Remove fundo preto do PNG sobre o slate-50 */
     mix-blend-mode: lighten;
   }
 
   .freq-inst-org {
-    display: grid;
-    place-content: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     height: 100%;
-    padding: 8px 10px;
+    padding: 10px 12px 10px 6px;
     text-align: center;
     font-size: clamp(11px, 1.15vw, 14px);
     font-weight: 700;
     line-height: 1.25;
     text-transform: uppercase;
     letter-spacing: 0.02em;
+    color: var(--freq-muted);
     white-space: normal;
   }
 
@@ -161,7 +177,7 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     grid-row: 1;
     display: grid;
     place-items: center;
-    border-bottom: 1px solid #000;
+    border-bottom: 1px solid var(--freq-border);
     padding: 10px 12px;
     text-align: center;
     font-size: clamp(18px, 2.35vw, 26px);
@@ -169,7 +185,8 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     line-height: 1.05;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    background: #fff;
+    color: var(--freq-text);
+    background: var(--freq-white);
     white-space: nowrap;
     overflow: hidden;
   }
@@ -180,15 +197,15 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     grid-row: 2;
     display: grid;
     grid-template-columns: 30% 38% 18% 14%;
-    border-bottom: 1px solid #000;
-    background: #e0e0e0;
+    border-bottom: 1px solid var(--freq-border);
+    background: var(--freq-label-bg);
     min-height: 26px;
   }
 
   .freq-inst-labels > div {
     display: grid;
     place-items: center;
-    border-right: 1px solid #000;
+    border-right: 1px solid var(--freq-border);
     padding: 4px 2px;
     text-align: center;
     font-size: clamp(9px, 0.95vw, 11px);
@@ -196,6 +213,7 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     text-transform: uppercase;
     letter-spacing: 0.03em;
     line-height: 1.1;
+    color: var(--freq-muted);
     white-space: nowrap;
     overflow: hidden;
   }
@@ -211,11 +229,11 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     display: grid;
     grid-template-columns: 30% 38% 18% 14%;
     min-height: 36px;
-    background: #fff;
+    background: var(--freq-white);
   }
 
   .freq-inst-values > div {
-    border-right: 1px solid #000;
+    border-right: 1px solid var(--freq-border);
     min-width: 0;
     min-height: 36px;
   }
@@ -233,11 +251,12 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-opm > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid #000;
+    border-right: 1px solid var(--freq-border);
     padding: 4px 3px;
     text-align: center;
     font-size: clamp(10px, 1.05vw, 13px);
     font-weight: 700;
+    color: var(--freq-text);
     text-transform: none;
     white-space: nowrap;
     overflow: hidden;
@@ -257,9 +276,10 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-cod > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid #000;
+    border-right: 1px solid var(--freq-border);
     font-size: clamp(11px, 1.15vw, 14px);
     font-weight: 700;
+    color: var(--freq-text);
     font-variant-numeric: tabular-nums;
     line-height: 1;
   }
@@ -277,9 +297,10 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-mesano > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid #000;
+    border-right: 1px solid var(--freq-border);
     font-size: clamp(10px, 1.05vw, 13px);
     font-weight: 700;
+    color: var(--freq-text);
     font-variant-numeric: tabular-nums;
     text-transform: uppercase;
   }
@@ -294,15 +315,16 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     height: 100%;
     font-size: clamp(11px, 1.15vw, 14px);
     font-weight: 700;
+    color: var(--freq-text);
     font-variant-numeric: tabular-nums;
   }
 
   /* —— Legenda (logo abaixo, sem gap) —— */
   .freq-inst-legend {
     width: 100%;
-    border: 1px solid #000;
+    border: 1px solid var(--freq-border);
     border-top: none;
-    background: #fff;
+    background: var(--freq-legend-bg);
     padding: 5px 8px;
     text-align: center;
     font-family: Arial, Helvetica, sans-serif;
@@ -311,30 +333,55 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     line-height: 1.35;
     text-transform: uppercase;
     letter-spacing: 0.01em;
-    color: #000;
+    color: var(--freq-muted);
   }
 
   @media print {
     .freq-inst-main {
       min-height: 118px;
       grid-template-rows: minmax(48px, 1.5fr) minmax(22px, 0.48fr) minmax(32px, 0.72fr);
+      border-color: #000 !important;
     }
     .freq-inst-left-grid { min-height: 118px; }
+    .freq-inst-left {
+      background: #f8fafc !important;
+      border-right-color: #000 !important;
+    }
     .freq-inst-brasao {
-      max-width: 78px;
-      max-height: 82px;
+      max-width: 86px;
+      max-height: 92px;
       mix-blend-mode: lighten !important;
     }
-    .freq-inst-org { font-size: 11px !important; }
-    .freq-inst-title { font-size: 20px !important; padding: 8px 10px !important; }
-    .freq-inst-labels { background: #e0e0e0 !important; }
-    .freq-inst-labels > div { font-size: 9px !important; }
+    .freq-inst-org { font-size: 11px !important; color: #1e293b !important; }
+    .freq-inst-title {
+      font-size: 20px !important;
+      padding: 8px 10px !important;
+      border-bottom-color: #000 !important;
+      color: #0f172a !important;
+    }
+    .freq-inst-labels {
+      background: #e2e8f0 !important;
+      border-bottom-color: #000 !important;
+    }
+    .freq-inst-labels > div {
+      font-size: 9px !important;
+      border-right-color: #000 !important;
+      color: #1e293b !important;
+    }
+    .freq-inst-values > div,
+    .freq-inst-opm > span,
+    .freq-inst-cod > span,
+    .freq-inst-mesano > span {
+      border-right-color: #000 !important;
+    }
     .freq-inst-opm > span,
     .freq-inst-mesano > span { font-size: 10px !important; }
     .freq-inst-cod > span,
     .freq-inst-pag { font-size: 11px !important; }
     .freq-inst-legend {
-      background: #fff !important;
+      background: #f1f5f9 !important;
+      border-color: #000 !important;
+      color: #1e293b !important;
       font-size: 7px !important;
       padding: 4px 6px !important;
     }

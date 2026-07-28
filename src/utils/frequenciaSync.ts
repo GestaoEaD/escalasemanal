@@ -27,6 +27,7 @@ import {
   jsDowToEscalaField,
 } from "./frequenciaIds";
 import { reEquals } from "./reUtils";
+import { colaboradorNaSecao } from "./secaoMatch";
 
 function emptyCelula(): FrequenciaCelula {
   return {
@@ -116,7 +117,7 @@ export function syncFrequenciaRows(options: {
   );
 
   const cols = options.colaboradores
-    .filter((c) => c.secao === secao && c.ativo !== false)
+    .filter((c) => colaboradorNaSecao(c, secao))
     .slice()
     .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
@@ -242,8 +243,8 @@ export function syncFrequenciaObservacoes(options: {
       Boolean(o.editadoEm)
   );
 
-  const cols = options.colaboradores.filter(
-    (c) => c.secao === options.secao && c.ativo !== false
+  const cols = options.colaboradores.filter((c) =>
+    colaboradorNaSecao(c, options.secao)
   );
 
   const synced: ControleFrequenciaObservacao[] = [];
