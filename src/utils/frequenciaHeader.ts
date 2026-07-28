@@ -1,6 +1,6 @@
 /**
  * Cabeçalho institucional do Controle de Frequência (tela + PDF).
- * Fonte única de legenda, mês abreviado e markup HTML para impressão.
+ * Layout fiel ao formulário oficial PMESP.
  */
 
 export const FREQUENCIA_BRASAO_SRC = "/brasao-pmsp.png";
@@ -65,186 +65,190 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** CSS do cabeçalho institucional (janela de impressão / PDF). */
+/**
+ * CSS compartilhado do cabeçalho (tela via classes + janela de impressão).
+ * Cores e proporções alinhadas ao modelo oficial anexado.
+ */
 export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-wrap {
     width: 100%;
-    margin: 0 0 6px;
+    margin: 0 0 8px;
     page-break-inside: avoid;
     break-inside: avoid;
   }
 
-  .freq-inst-header {
+  .freq-inst-table {
     width: 100%;
-    border: 1.5px solid #000;
     border-collapse: collapse;
+    border-spacing: 0;
     table-layout: fixed;
+    border: 1.25px solid #000;
     font-family: Arial, Helvetica, sans-serif;
     color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  .freq-inst-header td {
+  .freq-inst-table th,
+  .freq-inst-table td {
     border: 1px solid #000;
-    vertical-align: middle;
     padding: 0;
-  }
-
-  .freq-inst-left {
-    width: 28%;
-    background: #f3f4f6;
-    padding: 4px 6px !important;
-  }
-
-  .freq-inst-left-inner {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 58px;
-  }
-
-  .freq-inst-brasao {
-    width: 48px;
-    height: 48px;
-    object-fit: contain;
-    flex-shrink: 0;
-    mix-blend-mode: lighten;
-  }
-
-  .freq-inst-org {
-    flex: 1;
+    vertical-align: middle;
     text-align: center;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1.15;
-    text-transform: uppercase;
-    letter-spacing: 0.2px;
   }
 
-  .freq-inst-right {
-    width: 72%;
+  /* Coluna institucional (brasão + texto) — ~32% e altura das 3 linhas da direita */
+  .freq-inst-brand {
+    width: 32%;
+    background: #f2f2f2;
     padding: 0 !important;
   }
 
+  .freq-inst-brand-inner {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .freq-inst-brand-inner td {
+    border: none;
+    background: transparent;
+  }
+
+  .freq-inst-brasao-cell {
+    width: 38%;
+    padding: 4px 2px 4px 4px !important;
+  }
+
+  .freq-inst-brasao {
+    display: block;
+    width: 52px;
+    height: 52px;
+    max-width: 100%;
+    margin: 0 auto;
+    object-fit: contain;
+    mix-blend-mode: lighten;
+  }
+
+  .freq-inst-org-cell {
+    width: 62%;
+    padding: 4px 6px 4px 2px !important;
+  }
+
+  .freq-inst-org {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: 0.15px;
+    text-align: center;
+  }
+
   .freq-inst-title {
-    margin: 0;
-    padding: 5px 4px 4px;
-    text-align: center;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 800;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.6px;
     text-transform: uppercase;
-    border-bottom: 1px solid #000;
+    padding: 7px 6px !important;
+    background: #fff;
+    line-height: 1.1;
   }
 
-  .freq-inst-meta {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  .freq-inst-meta th,
-  .freq-inst-meta td {
-    border: 1px solid #000;
-    text-align: center;
-    vertical-align: middle;
-    padding: 2px 3px;
-    font-size: 8px;
-  }
-
-  .freq-inst-meta th {
-    background: #9ca3af;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    padding: 3px 2px;
-  }
-
-  .freq-inst-meta .col-opm { width: 34%; }
-  .freq-inst-meta .col-cod { width: 36%; }
-  .freq-inst-meta .col-mes { width: 18%; }
-  .freq-inst-meta .col-pag { width: 12%; }
-
-  .freq-inst-opm-row {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  .freq-inst-opm-row td {
-    border: 1px solid #000;
-    padding: 3px 4px;
+  .freq-inst-label {
+    background: #d9d9d9;
     font-size: 9px;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.25px;
+    padding: 3px 2px !important;
+    height: 18px;
   }
 
-  .freq-inst-opm-dec {
-    width: 22%;
-    text-align: center;
+  .freq-inst-col-opm { width: 24%; }
+  .freq-inst-col-cod { width: 24%; }
+  .freq-inst-col-mes { width: 12%; }
+  .freq-inst-col-pag { width: 8%; }
+
+  .freq-inst-value {
+    background: #fff;
+    height: 22px;
+  }
+
+  .freq-inst-sub {
+    width: 100%;
+    height: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .freq-inst-sub td {
+    border: 1px solid #000;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 2px !important;
     background: #fff;
   }
 
-  .freq-inst-opm-nome {
-    text-align: center;
+  .freq-inst-dec {
+    width: 26%;
+    font-weight: 700;
+  }
+
+  .freq-inst-secao {
+    width: 74%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .freq-inst-digits {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
+    font-weight: 600;
   }
 
   .freq-inst-digits td {
-    border: 1px solid #000;
     width: 11.11%;
-    height: 18px;
-    padding: 0;
-    text-align: center;
-    font-size: 10px;
-    font-weight: 800;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: Arial, Helvetica, sans-serif;
     font-variant-numeric: tabular-nums;
-    font-family: ui-monospace, "Courier New", monospace;
+    padding: 2px 0 !important;
+    height: 22px;
   }
 
-  .freq-inst-mesano {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
+  .freq-inst-mes {
+    width: 42%;
+    font-weight: 700;
   }
 
-  .freq-inst-mesano td {
-    border: 1px solid #000;
-    padding: 3px 2px;
-    font-size: 10px;
-    font-weight: 800;
-    text-align: center;
+  .freq-inst-ano {
+    width: 58%;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
   }
-
-  .freq-inst-mesano .mes { width: 45%; }
-  .freq-inst-mesano .ano { width: 55%; }
 
   .freq-inst-pagina {
     font-size: 11px;
-    font-weight: 800;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
     padding: 3px !important;
   }
 
   .freq-inst-legend {
-    width: 100%;
-    border: 1px solid #000;
-    border-top: none;
-    background: #e5e7eb;
-    padding: 3px 5px;
-    font-size: 6.5px;
+    background: #e8e8e8;
+    font-size: 6.8px;
     font-weight: 700;
-    line-height: 1.25;
+    line-height: 1.3;
     text-align: center;
     text-transform: uppercase;
-    letter-spacing: 0.1px;
-    color: #111;
+    letter-spacing: 0.05px;
+    padding: 4px 6px !important;
+  }
+
+  @media print {
+    .freq-inst-brasao {
+      mix-blend-mode: lighten !important;
+    }
+    .freq-inst-label { background: #d9d9d9 !important; }
+    .freq-inst-brand { background: #f2f2f2 !important; }
+    .freq-inst-legend { background: #e8e8e8 !important; }
   }
 `;
 
@@ -262,55 +266,62 @@ export function buildFrequenciaHeaderHtml(
   const secao = escapeHtml(data.secaoNome || "—");
 
   return `<div class="freq-inst-wrap">
-  <table class="freq-inst-header" role="presentation">
+  <table class="freq-inst-table" role="presentation">
+    <colgroup>
+      <col class="freq-inst-brand" />
+      <col class="freq-inst-col-opm" />
+      <col class="freq-inst-col-cod" />
+      <col class="freq-inst-col-mes" />
+      <col class="freq-inst-col-pag" />
+    </colgroup>
     <tr>
-      <td class="freq-inst-left">
-        <div class="freq-inst-left-inner">
-          <img class="freq-inst-brasao" src="${escapeHtml(brasaoSrc)}" alt="Brasão do Estado de São Paulo" />
-          <div class="freq-inst-org">POLÍCIA MILITAR<br/>DO<br/>ESTADO DE SÃO PAULO</div>
-        </div>
-      </td>
-      <td class="freq-inst-right">
-        <h1 class="freq-inst-title">CONTROLE DE FREQUÊNCIA</h1>
-        <table class="freq-inst-meta" role="presentation">
-          <thead>
-            <tr>
-              <th class="col-opm">OPM</th>
-              <th class="col-cod">CÓDIGO DA OPM</th>
-              <th class="col-mes">MÊS/ANO</th>
-              <th class="col-pag">PÁGINA</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td class="col-opm" style="padding:0;">
-                <table class="freq-inst-opm-row" role="presentation">
-                  <tr>
-                    <td class="freq-inst-opm-dec">DEC</td>
-                    <td class="freq-inst-opm-nome">${secao}</td>
-                  </tr>
-                </table>
-              </td>
-              <td class="col-cod" style="padding:0;">
-                <table class="freq-inst-digits" role="presentation">
-                  <tr>${digitCells}</tr>
-                </table>
-              </td>
-              <td class="col-mes" style="padding:0;">
-                <table class="freq-inst-mesano" role="presentation">
-                  <tr>
-                    <td class="mes">${escapeHtml(mes)}</td>
-                    <td class="ano">${escapeHtml(String(data.ano))}</td>
-                  </tr>
-                </table>
-              </td>
-              <td class="col-pag freq-inst-pagina">${escapeHtml(pagina)}</td>
-            </tr>
-          </tbody>
+      <td class="freq-inst-brand" rowspan="3">
+        <table class="freq-inst-brand-inner" role="presentation">
+          <tr>
+            <td class="freq-inst-brasao-cell">
+              <img class="freq-inst-brasao" src="${escapeHtml(brasaoSrc)}" alt="Brasão do Estado de São Paulo" />
+            </td>
+            <td class="freq-inst-org-cell">
+              <div class="freq-inst-org">POLÍCIA MILITAR<br/>DO<br/>ESTADO DE SÃO PAULO</div>
+            </td>
+          </tr>
         </table>
       </td>
+      <td class="freq-inst-title" colspan="4">CONTROLE DE FREQUÊNCIA</td>
+    </tr>
+    <tr>
+      <th class="freq-inst-label">OPM</th>
+      <th class="freq-inst-label">CÓDIGO DA OPM</th>
+      <th class="freq-inst-label">MÊS/ANO</th>
+      <th class="freq-inst-label">PÁGINA</th>
+    </tr>
+    <tr>
+      <td class="freq-inst-value">
+        <table class="freq-inst-sub" role="presentation">
+          <tr>
+            <td class="freq-inst-dec">DEC</td>
+            <td class="freq-inst-secao">${secao}</td>
+          </tr>
+        </table>
+      </td>
+      <td class="freq-inst-value">
+        <table class="freq-inst-sub freq-inst-digits" role="presentation">
+          <tr>${digitCells}</tr>
+        </table>
+      </td>
+      <td class="freq-inst-value">
+        <table class="freq-inst-sub" role="presentation">
+          <tr>
+            <td class="freq-inst-mes">${escapeHtml(mes)}</td>
+            <td class="freq-inst-ano">${escapeHtml(String(data.ano))}</td>
+          </tr>
+        </table>
+      </td>
+      <td class="freq-inst-value freq-inst-pagina">${escapeHtml(pagina)}</td>
+    </tr>
+    <tr>
+      <td class="freq-inst-legend" colspan="5">${escapeHtml(FREQUENCIA_LEGENDA_INSTITUCIONAL)}</td>
     </tr>
   </table>
-  <div class="freq-inst-legend">${escapeHtml(FREQUENCIA_LEGENDA_INSTITUCIONAL)}</div>
 </div>`;
 }
