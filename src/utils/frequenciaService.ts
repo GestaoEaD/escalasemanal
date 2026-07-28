@@ -37,6 +37,8 @@ import {
 } from "./frequenciaSync";
 import { recalcAllRows } from "./frequenciaCalculo";
 import { normalizeLegenda } from "./legendaModel";
+import { normalizeSecaoNome } from "./secaoMatch";
+import { normalizeAtivoFlag } from "./ativoFlag";
 
 function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
   const { data, hora } = formatNowParts();
@@ -60,7 +62,17 @@ export async function loadLegendas(): Promise<Legenda[]> {
 export async function loadColaboradores(): Promise<Colaborador[]> {
   const snap = await getDocs(collection(db, "colaboradores"));
   const list: Colaborador[] = [];
-  snap.forEach((d) => list.push(d.data() as Colaborador));
+  snap.forEach((d) => {
+    const raw = d.data() as Colaborador;
+    list.push({
+      ...raw,
+      re: String(raw.re || "").trim(),
+      secao: normalizeSecaoNome(raw.secao),
+      nome: String(raw.nome || "").trim(),
+      postoGrad: String(raw.postoGrad || "").trim(),
+      ativo: normalizeAtivoFlag(raw.ativo),
+    });
+  });
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   return list;
 }

@@ -45,6 +45,7 @@ import {
 import { exportUsuariosToExcel } from "../utils/exportUtils";
 import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
 import { normalizeSecaoNome, secoesIguais } from "../utils/secaoMatch";
+import { normalizeAtivoFlag } from "../utils/ativoFlag";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -72,16 +73,6 @@ interface ConfiguracoesProps {
 
 type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros" | "testes";
 type LegendaModalSection = "basicas" | "representacoes" | "regras";
-
-/**
- * Normaliza o flag ativo/inativo.
- * Ausência ou valores ambíguos = ativo (compatível com cadastros legados).
- * Somente false / 0 / "false" / "0" = inativo.
- */
-function normalizeAtivoFlag(value: unknown): boolean {
-  if (value === false || value === 0 || value === "false" || value === "0") return false;
-  return true;
-}
 
 function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colaborador {
   const src = raw as Colaborador;

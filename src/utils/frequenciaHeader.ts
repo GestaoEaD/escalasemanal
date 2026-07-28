@@ -3,7 +3,7 @@
  * Replicação pixel-perfect do formulário oficial — sem reinterpretar layout.
  */
 
-export const FREQUENCIA_BRASAO_SRC = "/brasao-pmsp.png";
+export const FREQUENCIA_BRASAO_SRC = "/brasao-pmsp.png?v=2";
 
 export const MESES_ABREV_PT = [
   "JAN",
@@ -149,8 +149,6 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     aspect-ratio: 1;
     object-fit: contain;
     object-position: center center;
-    /* Remove fundo preto do PNG sobre o slate-50 */
-    mix-blend-mode: lighten;
   }
 
   .freq-inst-org {
@@ -350,7 +348,6 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     .freq-inst-brasao {
       max-width: 86px;
       max-height: 92px;
-      mix-blend-mode: lighten !important;
     }
     .freq-inst-org { font-size: 11px !important; color: #1e293b !important; }
     .freq-inst-title {

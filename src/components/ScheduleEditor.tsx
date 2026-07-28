@@ -54,7 +54,12 @@ import {
   cleanLastSaved,
   cleanScheduleRow,
 } from "../utils/escalaPayload";
-import { normalizeSecaoNome } from "../utils/secaoMatch";
+import {
+  applyCadastroToScheduleRows,
+  isScheduleRosterEditable,
+  normalizeColaboradorCadastro,
+  syncScheduleRosterWithCadastro,
+} from "../utils/rosterSync";
 import CollaboratorModal from "./CollaboratorModal";
 import ConcurrencyModal from "./ConcurrencyModal";
 import StatusBadge from "./StatusBadge";
@@ -83,23 +88,6 @@ import {
   Eraser,
 } from "lucide-react";
 import { motion } from "motion/react";
-
-/** Espelha posto/nome/seção do cadastro nas linhas da escala (relatórios). */
-function applyCadastroToScheduleRows(
-  rows: ScheduleRow[],
-  pool: Colaborador[]
-): ScheduleRow[] {
-  return rows.map((row) => {
-    const col = pool.find((c) => c.re === row.re);
-    if (!col) return row;
-    return {
-      ...row,
-      postoGrad: col.postoGrad,
-      nome: col.nome,
-      secao: normalizeSecaoNome(col.secao),
-    };
-  });
-}
 const AUTO_SYSTEM_USER_OBSERVACAO = /^usu[aá]rio do sistema$/i;
 
 function sanitizeWeeklyObservacao(observacao?: string): string {
@@ -417,8 +405,8 @@ export default function ScheduleEditor({
       // 1. Fetch Collaborators Pool
       const colSnapshot = await getDocs(collection(db, "colaboradores"));
       const colList: Colaborador[] = [];
-      colSnapshot.forEach((doc) => {
-        colList.push(doc.data() as Colaborador);
+      colSnapshot.forEach((docSnap) => {
+        colList.push(normalizeColaboradorCadastro(docSnap.data() as Colaborador));
       });
       // Sort by official order field
       const sortedCols = colList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
@@ -442,17 +430,49 @@ export default function ScheduleEditor({
         getDoc(alterationDocRef),
       ]);
 
-      const activeCols = sortedCols.filter(c => c.ativo !== false);
+      const activeCols = sortedCols.filter((c) => c.ativo !== false);
 
       let hasWeeklySaved = false;
+      let rosterSyncNote = "";
 
       // Process Weekly Scale
       if (weeklySnap.exists()) {
         const data = weeklySnap.data() as EscalaDocument;
-        const loadedRows = (data.rows || []).map((row) => applyWeekendDefault({
+        let loadedRows = (data.rows || []).map((row) => applyWeekendDefault({
           ...row,
           observacao: sanitizeWeeklyObservacao(row.observacao),
         }));
+        const weeklyStatusLoaded = normalizeEscalaStatus(data.status);
+
+        // Escalas editáveis acompanham o cadastro (reativações / inativos).
+        if (isScheduleRosterEditable(weeklyStatusLoaded)) {
+          const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols);
+          if (synced.changed) {
+            loadedRows = synced.rows.map(applyWeekendDefault);
+            await setDoc(
+              weeklyDocRef,
+              prepareFirestoreWrite(`escalas_semanais/${docId}`, {
+                ...data,
+                rows: loadedRows.map(cleanScheduleRow),
+                status: weeklyStatusLoaded,
+                versao: data.versao && data.versao > 0 ? data.versao : 1,
+                aprovacao: cleanAprovacao(data.aprovacao || null),
+                historico: cleanHistorico(
+                  Array.isArray(data.historico) ? data.historico : []
+                ),
+              } as unknown as Record<string, unknown>)
+            );
+            const parts: string[] = [];
+            if (synced.added.length > 0) {
+              parts.push(`${synced.added.length} incluído(s) do cadastro`);
+            }
+            if (synced.removedRes.length > 0) {
+              parts.push(`${synced.removedRes.length} inativo(s) removido(s)`);
+            }
+            rosterSyncNote = parts.join("; ");
+          }
+        }
+
         setDbWeeklyRows(loadedRows);
         setLocalWeeklyRows(loadedRows);
         setOpenWeeklyObs(
@@ -461,13 +481,16 @@ export default function ScheduleEditor({
         setDbWeeklySaved(data.lastSaved);
         setLoadedWeeklyTimestamp(data.lastSaved?.timestamp || null);
 
-        setWeeklyStatus(normalizeEscalaStatus(data.status));
+        setWeeklyStatus(weeklyStatusLoaded);
         setWeeklyVersao(data.versao && data.versao > 0 ? data.versao : 1);
         setWeeklyAprovacao(data.aprovacao || null);
         setWeeklyHistorico(Array.isArray(data.historico) ? data.historico : []);
 
         if (data.lastSaved) {
           hasWeeklySaved = true;
+        }
+        if (rosterSyncNote) {
+          setPreviousWeekInfo(`Roster sincronizado com o cadastro: ${rosterSyncNote}.`);
         }
       } else {
         // Create automatically in Firestore & set state based on all active collaborators
@@ -1335,8 +1358,12 @@ export default function ScheduleEditor({
           ];
         }
 
-        const weeklyRowsToSave = applyCadastroToScheduleRows(
+        const weeklySynced = syncScheduleRosterWithCadastro(
           localWeeklyRows,
+          collaboratorsPool
+        );
+        const weeklyRowsToSave = applyCadastroToScheduleRows(
+          weeklySynced.rows,
           collaboratorsPool
         ).map(cleanScheduleRow);
 

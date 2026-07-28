@@ -26,8 +26,8 @@ import {
   formatNowParts,
   jsDowToEscalaField,
 } from "./frequenciaIds";
-import { reEquals } from "./reUtils";
-import { colaboradorNaSecao } from "./secaoMatch";
+import { reEquals, normalizeRe } from "./reUtils";
+import { colaboradorNaSecao, normalizeSecaoNome } from "./secaoMatch";
 
 function emptyCelula(): FrequenciaCelula {
   return {
@@ -112,18 +112,45 @@ export function syncFrequenciaRows(options: {
   const weeks = getWeeksOverlappingMonth(ano, mes);
   const sourceWeeks = weeks.map((w) => w.id);
 
-  const existingByRe = new Map(
-    (options.existingRows || []).map((r) => [r.re, r])
-  );
+  const existingByRe = new Map<string, ControleFrequenciaRow>();
+  for (const r of options.existingRows || []) {
+    const key = normalizeRe(r.re) || String(r.re || "").trim();
+    if (key) existingByRe.set(key, r);
+  }
 
-  const cols = options.colaboradores
+  let cols = options.colaboradores
     .filter((c) => colaboradorNaSecao(c, secao))
     .slice()
     .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
+  // Segurança: não apagar o relatório se o filtro de seção vier vazio por divergência de cadastro.
+  if (cols.length === 0 && (options.existingRows?.length || 0) > 0) {
+    const byRe = new Map(
+      options.colaboradores.map((c) => [normalizeRe(c.re) || c.re, c])
+    );
+    cols = (options.existingRows || [])
+      .map((row) => {
+        const col = byRe.get(normalizeRe(row.re) || row.re);
+        if (col && col.ativo === false) return null;
+        return (
+          col || {
+            re: row.re,
+            postoGrad: row.postoGrad,
+            nome: row.nome,
+            secao: normalizeSecaoNome(secao),
+            ordem: row.ordem,
+            ativo: true,
+          }
+        );
+      })
+      .filter(Boolean) as Colaborador[];
+  }
+
   const nDays = daysInMonth(ano, mes);
   const rows: ControleFrequenciaRow[] = cols.map((col) => {
-    const prev = existingByRe.get(col.re);
+    const prev =
+      existingByRe.get(normalizeRe(col.re) || col.re) ||
+      existingByRe.get(String(col.re || "").trim());
     const dias: Record<string, FrequenciaCelula> = prev
       ? { ...emptyDias(ano, mes), ...prev.dias }
       : emptyDias(ano, mes);
@@ -207,7 +234,7 @@ export function syncFrequenciaRows(options: {
       re: col.re,
       postoGrad: col.postoGrad,
       nome: col.nome,
-      secao: col.secao,
+      secao: normalizeSecaoNome(col.secao || secao),
       ordem: col.ordem,
       dias,
       meiaDiaria: 0,

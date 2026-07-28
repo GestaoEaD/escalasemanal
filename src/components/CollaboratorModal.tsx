@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Colaborador, POSTOS_GRADUACOES } from "../types";
 import { X, Search, UserPlus, ArrowLeft } from "lucide-react";
 import { db, collection, getDocs } from "../firebase";
+import { isColaboradorAtivo } from "../utils/ativoFlag";
 
 interface CollaboratorModalProps {
   isOpen: boolean;
@@ -91,7 +92,7 @@ export default function CollaboratorModal({
   // Filter pool for select tab
   const availablePool = useMemo(() => {
     return collaboratorsPool.filter(
-      (c) => !currentReList.includes(c.re)
+      (c) => isColaboradorAtivo(c) && !currentReList.includes(c.re)
     );
   }, [collaboratorsPool, currentReList]);
 
