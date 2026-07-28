@@ -8,7 +8,6 @@ import {
   doc,
   getDocs,
   setDoc,
-  Timestamp,
   serverTimestamp,
   runTransaction,
 } from "../firebase";
