@@ -4,6 +4,15 @@
 
 export type PerfilUsuario = "Administrador" | "Operador" | "Gestor";
 
+/** Seção administrativa (cadastro em `secoes`). */
+export interface Secao {
+  nome: string;
+  /** Código da OPM — identidade numérica institucional (editável). */
+  codigo: string;
+  ativo?: boolean;
+  ordem?: number;
+}
+
 export type EscalaStatus =
   | "em_edicao"
   | "aguardando_aprovacao"

@@ -22,6 +22,8 @@ import {
   isWeekendDay,
   weekendCellClass,
 } from "../utils/frequenciaDisplay";
+import { loadCodigoOpmBySecaoNome } from "../utils/secaoCodigo";
+import FrequenciaHeader from "./relatorios/FrequenciaHeader";
 import {
   approveScale,
   getClosedApprovalMessage,
@@ -190,6 +192,17 @@ function ReadOnlyFrequenciaTable({
   const mesNome = MESES_NOMES[docData.mes - 1] || `Mês ${docData.mes}`;
   const sepId = "border-r-2 border-r-gray-500";
   const sepTotais = "border-l-2 border-l-gray-500";
+  const [codigoOpm, setCodigoOpm] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCodigoOpmBySecaoNome(docData.secao).then((c) => {
+      if (!cancelled) setCodigoOpm(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [docData.secao]);
 
   const resolveObsIdent = (o: ControleFrequenciaObservacao) => {
     const row = o.re ? rows.find((r) => r.re === o.re) : undefined;
@@ -202,8 +215,18 @@ function ReadOnlyFrequenciaTable({
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-bold uppercase tracking-wider text-gray-700">
-        {title} — {docData.secao} · {mesNome}/{docData.ano}
+      <div className="px-3 pt-3 pb-2 bg-white border-b border-gray-200">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+          {title} — {mesNome}/{docData.ano}
+        </p>
+        <FrequenciaHeader
+          secaoNome={docData.secao}
+          codigoOpm={codigoOpm}
+          mes={docData.mes}
+          ano={docData.ano}
+          paginaAtual={1}
+          totalPaginas={1}
+        />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[960px] text-[10px] border-collapse">
@@ -627,9 +650,9 @@ export default function AprovacaoPage({
   }
 
   return (
-    <div className="flex-1 bg-gray-50 pb-16">
-      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-14 z-20">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
+    <div className="flex-1 bg-gray-50 pb-16 w-full max-w-full min-w-0">
+      <header className="bg-[#111827] text-white border-b border-gray-800 sticky sticky-below-app-header z-20">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3 w-full min-w-0">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={onBack}
@@ -651,7 +674,7 @@ export default function AprovacaoPage({
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 mt-6 space-y-4">
+      <main className="max-w-5xl mx-auto px-4 mt-6 space-y-4 w-full min-w-0">
         {loading && (
           <div className="bg-white border border-gray-200 rounded-xl p-6 text-sm text-gray-500">
             Carregando {docLabel.toLowerCase()}...

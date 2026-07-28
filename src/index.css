@@ -6,62 +6,76 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Base responsiva */
+/* Base responsiva — scroll da página na vertical; horizontal só em containers */
+:root {
+  --app-header-height: 3.5rem;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  width: 100%;
+  max-width: 100%;
 }
 
 body {
-  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
 }
 
-/* Tabelas largas: rolagem horizontal com indicação em touch */
-.table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-x: contain;
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
 }
 
-.table-scroll::-webkit-scrollbar {
-  height: 8px;
-}
-
-.table-scroll::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 999px;
+/** Subcabeçalhos sticky abaixo do AppShell (altura dinâmica). */
+.sticky-below-app-header {
+  top: var(--app-header-height);
 }
 
 /**
- * Controle de Frequência: barra horizontal visível abaixo da planilha
- * e células diárias dimensionadas para códigos curtos (ex.: A, EN, -).
+ * Tabelas largas: rolagem horizontal usável em touch
+ * (mesma família visual do Controle de Frequência).
  */
+.table-scroll,
 .frequencia-scroll {
   overflow-x: auto;
-  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
   scrollbar-width: auto;
   scrollbar-color: #64748b #e2e8f0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.frequencia-scroll {
+  overflow-y: hidden;
   border-top: 1px solid #e5e7eb;
 }
 
+.table-scroll::-webkit-scrollbar,
 .frequencia-scroll::-webkit-scrollbar {
   height: 14px;
 }
 
+.table-scroll::-webkit-scrollbar-track,
 .frequencia-scroll::-webkit-scrollbar-track {
   background: #e2e8f0;
   border-top: 1px solid #cbd5e1;
 }
 
+.table-scroll::-webkit-scrollbar-thumb,
 .frequencia-scroll::-webkit-scrollbar-thumb {
   background: #64748b;
   border-radius: 8px;
   border: 3px solid #e2e8f0;
 }
 
+.table-scroll::-webkit-scrollbar-thumb:hover,
 .frequencia-scroll::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
@@ -85,6 +99,52 @@ body {
 .frequencia-table .freq-id-nome {
   width: 10.5rem;
   min-width: 10.5rem;
+}
+
+/* Mobile: IDs mais estreitos para liberar área dos dias */
+@media (max-width: 640px) {
+  .frequencia-table .freq-id-posto {
+    width: 4.25rem;
+    min-width: 4.25rem;
+  }
+
+  .frequencia-table .freq-id-re {
+    width: 3.75rem;
+    min-width: 3.75rem;
+  }
+
+  .frequencia-table .freq-id-nome {
+    width: 6.5rem;
+    min-width: 6.5rem;
+  }
+
+  .frequencia-table .freq-day {
+    width: 1.9rem;
+    min-width: 1.9rem;
+    max-width: 1.9rem;
+  }
+
+  .frequencia-obs-table .freq-id-posto {
+    width: 4.25rem;
+    min-width: 4.25rem;
+    max-width: 4.25rem;
+  }
+
+  .frequencia-obs-table .freq-id-re {
+    width: 3.75rem;
+    min-width: 3.75rem;
+    max-width: 3.75rem;
+  }
+
+  .frequencia-obs-table .freq-id-nome {
+    width: 6.5rem;
+    min-width: 6.5rem;
+    max-width: 6.5rem;
+  }
+
+  .frequencia-obs-table {
+    min-width: max(100%, 36rem);
+  }
 }
 
 .frequencia-table .freq-day {
@@ -305,5 +365,10 @@ body {
   .frequencia-print-root .sticky {
     position: static !important;
     left: auto !important;
+  }
+
+  .freq-report-header {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

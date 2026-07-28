@@ -25,6 +25,8 @@ import {
   isWeekendDay,
 } from "../../utils/frequenciaDisplay";
 import { exportFrequenciaToPDF } from "../../utils/frequenciaExport";
+import { loadCodigoOpmBySecaoNome } from "../../utils/secaoCodigo";
+import FrequenciaHeader from "../relatorios/FrequenciaHeader";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
 import {
@@ -88,6 +90,7 @@ export default function FrequenciaEditor({
   const [revisaoOpen, setRevisaoOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reopenMotivo, setReopenMotivo] = useState("");
+  const [codigoOpm, setCodigoOpm] = useState("");
 
   const nDays = daysInMonth(year, month);
   const dayKeys = useMemo(
@@ -146,6 +149,16 @@ export default function FrequenciaEditor({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCodigoOpmBySecaoNome(secao).then((codigo) => {
+      if (!cancelled) setCodigoOpm(codigo);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [secao]);
 
   const setCell = (re: string, key: string, valorRaw: string) => {
     if (!docData || !editable) return;
@@ -409,13 +422,13 @@ export default function FrequenciaEditor({
     "bg-white print:bg-white group-hover:bg-slate-50 print:group-hover:bg-white";
   const sepId = "border-r-2 border-r-slate-400";
   const sepTotais = "border-l-2 border-l-slate-400";
-  // Sticky offsets = freq-id-posto (6) + freq-id-re (5) = 11rem
+  // Sticky offsets: mobile 4.25+3.75=8rem; desktop 6+5=11rem (ver index.css)
   const stickyPosto = "sticky left-0 z-[1] print:static";
-  const stickyRe = "sticky left-[6rem] z-[1] print:static";
-  const stickyNome = "sticky left-[11rem] z-[1] print:static";
+  const stickyRe = "sticky left-[4.25rem] sm:left-[6rem] z-[1] print:static";
+  const stickyNome = "sticky left-[8rem] sm:left-[11rem] z-[1] print:static";
   const stickyPostoHead = "sticky left-0 z-20 bg-slate-100 print:static";
-  const stickyReHead = "sticky left-[6rem] z-20 bg-slate-100 print:static";
-  const stickyNomeHead = "sticky left-[11rem] z-20 bg-slate-100 print:static";
+  const stickyReHead = "sticky left-[4.25rem] sm:left-[6rem] z-20 bg-slate-100 print:static";
+  const stickyNomeHead = "sticky left-[8rem] sm:left-[11rem] z-20 bg-slate-100 print:static";
 
   const dayCellTone = (weekend: boolean) =>
     weekend
@@ -423,9 +436,9 @@ export default function FrequenciaEditor({
       : "bg-white group-hover:bg-slate-50/80 print:group-hover:bg-white";
 
   return (
-    <div className="flex-1 bg-gray-50 pb-16 frequencia-print-root">
-      <header className="bg-white border-b border-gray-200 sticky top-14 z-20 shadow-xs print:static print:shadow-none">
-        <div className="max-w-[1600px] mx-auto px-3 sm:px-4 h-auto py-2 flex flex-wrap items-center gap-2">
+    <div className="flex-1 bg-gray-50 pb-16 frequencia-print-root w-full max-w-full min-w-0">
+      <header className="bg-white border-b border-gray-200 sticky sticky-below-app-header z-20 shadow-xs print:static print:shadow-none">
+        <div className="max-w-[1600px] mx-auto px-3 sm:px-4 h-auto py-2 flex flex-wrap items-center gap-2 w-full min-w-0">
           <button
             type="button"
             onClick={onBack}
@@ -549,8 +562,9 @@ export default function FrequenciaEditor({
               type="button"
               onClick={() => {
                 if (!docData) return;
-                exportFrequenciaToPDF({
+                void exportFrequenciaToPDF({
                   doc: docData,
+                  codigoOpm,
                   exportedBy: {
                     nome: usuario.nome,
                     re: usuario.re,
@@ -567,7 +581,7 @@ export default function FrequenciaEditor({
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto px-3 sm:px-4 mt-4 space-y-4">
+      <main className="max-w-[1600px] mx-auto px-3 sm:px-4 mt-4 space-y-4 w-full min-w-0">
         {(error || success) && (
           <div
             className={`text-xs font-semibold rounded-lg px-3 py-2 print:hidden ${
@@ -580,15 +594,15 @@ export default function FrequenciaEditor({
           </div>
         )}
 
-        <div className="hidden print:block text-center mb-2">
-          <div className="text-[10px] font-bold uppercase tracking-wide">
-            Polícia Militar do Estado de São Paulo
-          </div>
-          <div className="text-sm font-bold uppercase">Controle de Frequência</div>
-          <div className="text-[11px]">
-            OPM: {secao} · {MESES_NOMES[month - 1]}/{year}
-          </div>
-        </div>
+        <FrequenciaHeader
+          secaoNome={secao}
+          codigoOpm={codigoOpm}
+          mes={month}
+          ano={year}
+          paginaAtual={1}
+          totalPaginas={1}
+          className="mb-2"
+        />
 
         <div className="bg-white border border-slate-300 rounded-xl overflow-hidden shadow-xs print:shadow-none print:border-black print:rounded-none">
           <div className="px-3 py-1.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-2 print:hidden">

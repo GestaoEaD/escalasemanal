@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp } from "../firebase";
-import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda } from "../types";
+import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao } from "../types";
 import {
   Users,
   Shield,
@@ -43,8 +43,26 @@ import {
   toLegendaFormState,
 } from "../utils/legendaModel";
 import { exportUsuariosToExcel } from "../utils/exportUtils";
+import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
+
+/** Normaliza código da seção para dígitos apenas. */
+function normalizeSecaoCodigo(value: unknown): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function withSecaoCodigo(s: Record<string, unknown>): Secao {
+  const nome = String(s.nome || "");
+  const raw = normalizeSecaoCodigo(s.codigo);
+  return {
+    ...(s as unknown as Secao),
+    nome,
+    codigo: raw || KNOWN_SECAO_CODIGOS[nome] || "",
+    ativo: s.ativo !== false,
+    ordem: typeof s.ordem === "number" ? s.ordem : Number(s.ordem) || 0,
+  };
+}
 
 interface ConfiguracoesProps {
   usuario: Usuario;
@@ -278,7 +296,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       const secoesSnap = await getDocs(collection(db, "secoes"));
       const secoesList: any[] = [];
       secoesSnap.forEach((doc) => {
-        secoesList.push(doc.data());
+        secoesList.push(withSecaoCodigo(doc.data() as Record<string, unknown>));
       });
       secoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
@@ -710,16 +728,37 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
         const original = origSecoes.find((os) => os.nome === s.nome);
         const docId = s.nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "secoes", docId);
-        batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, s as unknown as Record<string, unknown>));
+        const payload = {
+          ...s,
+          codigo: normalizeSecaoCodigo(s.codigo) || KNOWN_SECAO_CODIGOS[s.nome] || "",
+        };
+        batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, payload as unknown as Record<string, unknown>));
 
         if (!original) {
-          createAuditLog("Seções", "Inclusão", s.nome, "Todos", "", `Nome: ${s.nome}, Ordem: ${s.ordem}, Ativo: ${s.ativo ? "Sim" : "Não"}`);
+          createAuditLog(
+            "Seções",
+            "Inclusão",
+            s.nome,
+            "Todos",
+            "",
+            `Nome: ${payload.nome}, Código: ${payload.codigo || "—"}, Ordem: ${payload.ordem}, Ativo: ${payload.ativo ? "Sim" : "Não"}`
+          );
         } else {
           if (s.ordem !== original.ordem) {
             createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
           }
           if (s.ativo !== original.ativo) {
             createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não");
+          }
+          if (String(payload.codigo || "") !== String(original.codigo || "")) {
+            createAuditLog(
+              "Seções",
+              "Edição",
+              s.nome,
+              "Código da OPM",
+              String(original.codigo || ""),
+              String(payload.codigo || "")
+            );
           }
         }
       }
@@ -1038,22 +1077,38 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
     e.preventDefault();
     if (!currentSecao) return;
 
-    if (!currentSecao.nome.trim()) {
+    const nome = String(currentSecao.nome || "").trim();
+    const codigo = normalizeSecaoCodigo(currentSecao.codigo);
+
+    if (!nome) {
       alert("Por favor, preencha o nome da seção.");
       return;
     }
+    if (!codigo) {
+      alert("Por favor, preencha o Código da OPM (somente números).");
+      return;
+    }
 
-    const existingIndex = secoes.findIndex((s) => s.nome === currentSecao.nome);
+    const duplicateCodigo = secoes.find(
+      (s) => normalizeSecaoCodigo(s.codigo) === codigo && s.nome !== nome
+    );
+    if (duplicateCodigo) {
+      alert(`O código ${codigo} já está em uso pela seção "${duplicateCodigo.nome}".`);
+      return;
+    }
+
+    const existingIndex = secoes.findIndex((s) => s.nome === nome);
     let updatedList = [...secoes];
+    const payload = { ...currentSecao, nome, codigo };
 
     if (existingIndex > -1) {
-      updatedList[existingIndex] = { ...currentSecao };
+      updatedList[existingIndex] = { ...payload };
     } else {
       const maxOrdem = secoes.reduce((max, s) => (s.ordem && s.ordem > max ? s.ordem : max), 0);
       updatedList.push({
-        ...currentSecao,
+        ...payload,
         ordem: maxOrdem + 1,
-        ativo: true
+        ativo: true,
       });
     }
 
@@ -1195,10 +1250,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
   }
 
   return (
-    <div className="flex-1 bg-gray-50 pb-16">
+    <div className="flex-1 bg-gray-50 pb-16 w-full max-w-full min-w-0">
       {/* Top Header */}
-      <header className="bg-slate-900 text-white sticky top-14 z-10 shadow-md">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+      <header className="bg-slate-900 text-white sticky sticky-below-app-header z-10 shadow-md">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 w-full min-w-0">
           <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
             <div className="flex items-center space-x-3 min-w-0">
               <button
@@ -1259,7 +1314,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
       </header>
 
       {/* Main Grid Wrapper */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 w-full min-w-0">
         {/* Alerts */}
         {saveSuccess && (
           <div className="mb-6 rounded-md bg-emerald-50 border border-emerald-200 p-4">
@@ -1906,7 +1961,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                   <button
                     id="new-secao-btn"
                     onClick={() => {
-                      setCurrentSecao({ nome: "", ativo: true });
+                      setCurrentSecao({ nome: "", codigo: "", ativo: true });
                       setSecaoModalOpen(true);
                     }}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
@@ -1922,6 +1977,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                       <tr>
                         <th className="px-4 py-3 text-center w-24">Ordem</th>
                         <th className="px-4 py-3">Nome da Seção</th>
+                        <th className="px-4 py-3">Código da OPM</th>
                         <th className="px-4 py-3 text-center">Situação</th>
                         <th className="px-4 py-3 text-right">Ações</th>
                       </tr>
@@ -1929,7 +1985,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {secoes.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma seção cadastrada.</td>
+                          <td colSpan={5} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma seção cadastrada.</td>
                         </tr>
                       ) : (
                         secoes.map((s, idx) => (
@@ -1956,6 +2012,7 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                               </div>
                             </td>
                             <td className="px-4 py-3 font-bold text-gray-800">{s.nome}</td>
+                            <td className="px-4 py-3 font-mono text-gray-700">{s.codigo || "—"}</td>
                             <td className="px-4 py-3 text-center">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                 s.ativo !== false ? "bg-green-150 text-green-800" : "bg-red-150 text-red-800"
@@ -1966,7 +2023,10 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                             <td className="px-4 py-3 text-right space-x-1">
                               <button
                                 onClick={() => {
-                                  setCurrentSecao({ ...s });
+                                  setCurrentSecao({
+                                    ...s,
+                                    codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
+                                  });
                                   setSecaoModalOpen(true);
                                 }}
                                 className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
@@ -2721,6 +2781,26 @@ export default function Configuracoes({ usuario, onBack }: ConfiguracoesProps) {
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold disabled:bg-gray-100"
                     required
                   />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Código da OPM *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={currentSecao.codigo ?? ""}
+                    onChange={(e) =>
+                      setCurrentSecao({
+                        ...currentSecao,
+                        codigo: normalizeSecaoCodigo(e.target.value),
+                      })
+                    }
+                    placeholder="Ex: 202002530"
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-mono font-semibold"
+                    required
+                  />
+                  <p className="mt-1 text-[10px] text-gray-400">Identidade numérica da OPM (editável).</p>
                 </div>
 
                 <div className="pt-2">

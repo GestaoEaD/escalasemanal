@@ -66,9 +66,9 @@ export default function FrequenciaMonthSelector({
   }, [year, secao]);
 
   return (
-    <div className="flex-1 bg-gray-50 pb-12">
-      <header className="bg-white border-b border-gray-200 sticky top-14 z-10 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center gap-3">
+    <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">
+      <header className="bg-white border-b border-gray-200 sticky sticky-below-app-header z-10 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center gap-3 w-full min-w-0">
           <button
             type="button"
             onClick={onBack}
@@ -90,7 +90,7 @@ export default function FrequenciaMonthSelector({
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 w-full min-w-0">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione o mês</h2>
         <p className="text-sm text-gray-500 mb-6">
           Controle de Frequência de{" "}

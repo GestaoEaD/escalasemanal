@@ -2085,10 +2085,10 @@ export default function ScheduleEditor({
   };
 
   return (
-    <div className="flex-1 bg-gray-50 pb-16">
+    <div className="flex-1 bg-gray-50 pb-16 w-full max-w-full min-w-0">
       {/* Top bar header */}
-      <header className="bg-[#111827] text-white border-b border-gray-800 sticky top-14 z-20 shadow-md no-print">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+      <header className="bg-[#111827] text-white border-b border-gray-800 sticky sticky-below-app-header z-20 shadow-md no-print">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 w-full min-w-0">
           <div className="flex flex-col gap-3 py-3 sm:flex-row sm:min-h-16 sm:items-center sm:justify-between">
             
             {/* Back & Week details */}
@@ -2145,7 +2145,7 @@ export default function ScheduleEditor({
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6 w-full min-w-0">
         
         {/* Alerts Center */}
         {saveSuccess && (

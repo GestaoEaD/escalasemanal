@@ -6,10 +6,16 @@
 import {
   ControleFrequenciaDocument,
   ControleFrequenciaObservacao,
+  ControleFrequenciaRow,
   MESES_NOMES,
 } from "../types";
 import { dayKey, daysInMonth } from "./frequenciaIds";
 import { displayFrequenciaCelula, isWeekendDay } from "./frequenciaDisplay";
+import {
+  FREQUENCIA_HEADER_PRINT_CSS,
+  buildFrequenciaHeaderHtml,
+} from "./frequenciaHeader";
+import { loadCodigoOpmBySecaoNome } from "./secaoCodigo";
 
 export type FrequenciaExportUser = {
   nome: string;
@@ -52,10 +58,12 @@ function resolveObsNome(
 }
 
 const FREQUENCIA_PRINT_CSS = `
+  ${FREQUENCIA_HEADER_PRINT_CSS}
+
   /* —— Preview na tela (mesma linguagem visual da impressão) —— */
   @page {
     size: A4 landscape;
-    margin: 12mm 10mm;
+    margin: 10mm 8mm;
   }
 
   * {
@@ -108,41 +116,13 @@ const FREQUENCIA_PRINT_CSS = `
   }
   .btn-secondary { background: #64748b; }
 
-  .header {
-    text-align: center;
-    margin: 0 0 14px;
-    padding: 0 4px 10px;
-    border-bottom: 1px solid #d0d5dd;
+  .print-page {
+    page-break-after: always;
+    break-after: page;
   }
-  .header-org {
-    margin: 0;
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.35px;
-    text-transform: uppercase;
-    color: #475569;
-  }
-  .header-org-main {
-    margin: 3px 0 0;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: #111827;
-  }
-  .header-title {
-    margin: 8px 0 3px;
-    font-size: 13px;
-    font-weight: 750;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #0f172a;
-  }
-  .header-meta {
-    margin: 0;
-    font-size: 10px;
-    font-weight: 600;
-    color: #334155;
+  .print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
   }
 
   .freq-table {
@@ -391,15 +371,14 @@ const FREQUENCIA_PRINT_CSS = `
 
     .no-print { display: none !important; }
 
-    .header {
-      margin-bottom: 12px !important;
-      padding-bottom: 8px !important;
-      border-bottom: 1px solid #d0d5dd !important;
+    .print-page {
+      page-break-after: always !important;
+      break-after: page !important;
     }
-    .header-org { font-size: 8.5px !important; color: #475569 !important; }
-    .header-org-main { font-size: 10.5px !important; color: #111827 !important; }
-    .header-title { font-size: 12px !important; margin: 6px 0 2px !important; }
-    .header-meta { font-size: 9.5px !important; }
+    .print-page:last-child {
+      page-break-after: auto !important;
+      break-after: auto !important;
+    }
 
     .freq-table {
       width: 100% !important;
@@ -545,13 +524,84 @@ function dayCellExtraClass(shown: string): string {
   return "";
 }
 
+function renderFreqBodyRows(
+  rows: ControleFrequenciaRow[],
+  dayKeys: string[],
+  weekend: Record<string, boolean>
+): string {
+  if (rows.length === 0) {
+    return `<tr><td colspan="${3 + dayKeys.length + 2}" style="text-align:center;padding:8px;">Nenhum colaborador nesta seção.</td></tr>`;
+  }
+  return rows
+    .map((row) => {
+      const days = dayKeys
+        .map((k) => {
+          const cel = row.dias[k];
+          const shownRaw = displayFrequenciaCelula(cel);
+          const shown = escapeHtml(shownRaw);
+          const wk = weekend[k] ? " weekend" : "";
+          const mark = dayCellExtraClass(shownRaw);
+          return `<td class="col-day${wk}${mark}">${shown}</td>`;
+        })
+        .join("");
+      return `<tr>
+        <td class="col-posto id-cell">${escapeHtml(row.postoGrad || "")}</td>
+        <td class="col-re id-cell">${escapeHtml(row.re || "")}</td>
+        <td class="col-nome id-cell">${escapeHtml(row.nome || "")}</td>
+        ${days}
+        <td class="col-meia">${escapeHtml(String(row.meiaDiaria ?? 0))}</td>
+        <td class="col-aa">${escapeHtml(String(row.aa ?? 0))}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function buildFreqTableHtml(
+  dayKeys: string[],
+  dayHeads: string,
+  dayCols: string,
+  bodyRowsHtml: string
+): string {
+  return `<table class="freq-table">
+    <colgroup>
+      <col class="col-posto" />
+      <col class="col-re" />
+      <col class="col-nome" />
+      ${dayCols}
+      <col class="col-meia" />
+      <col class="col-aa" />
+    </colgroup>
+    <thead>
+      <tr class="group-head">
+        <th colspan="3">Identificação</th>
+        <th colspan="${dayKeys.length}">Frequência</th>
+        <th colspan="2">Totais</th>
+      </tr>
+      <tr>
+        <th class="col-posto">Posto/Grad.</th>
+        <th class="col-re">RE</th>
+        <th class="col-nome">Nome</th>
+        ${dayHeads}
+        <th class="col-meia">1/2 Diária</th>
+        <th class="col-aa">A.A.</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${bodyRowsHtml}
+    </tbody>
+  </table>`;
+}
+
+const ROWS_PER_PRINT_PAGE = 14;
+
 /**
  * Abre janela de impressão/PDF do Controle de Frequência (A4 paisagem).
  */
-export function exportFrequenciaToPDF(options: {
+export async function exportFrequenciaToPDF(options: {
   doc: ControleFrequenciaDocument;
   exportedBy?: FrequenciaExportUser | null;
-}): void {
+  codigoOpm?: string;
+}): Promise<void> {
   const { doc, exportedBy } = options;
   const year = doc.ano;
   const month = doc.mes;
@@ -573,31 +623,22 @@ export function exportFrequenciaToPDF(options: {
 
   const dayCols = dayKeys.map(() => `<col class="col-day" />`).join("");
 
-  const bodyRows =
-    doc.rows.length === 0
-      ? `<tr><td colspan="${3 + dayKeys.length + 2}" style="text-align:center;padding:8px;">Nenhum colaborador nesta seção.</td></tr>`
-      : doc.rows
-          .map((row) => {
-            const days = dayKeys
-              .map((k) => {
-                const cel = row.dias[k];
-                const shownRaw = displayFrequenciaCelula(cel);
-                const shown = escapeHtml(shownRaw);
-                const wk = weekend[k] ? " weekend" : "";
-                const mark = dayCellExtraClass(shownRaw);
-                return `<td class="col-day${wk}${mark}">${shown}</td>`;
-              })
-              .join("");
-            return `<tr>
-              <td class="col-posto id-cell">${escapeHtml(row.postoGrad || "")}</td>
-              <td class="col-re id-cell">${escapeHtml(row.re || "")}</td>
-              <td class="col-nome id-cell">${escapeHtml(row.nome || "")}</td>
-              ${days}
-              <td class="col-meia">${escapeHtml(String(row.meiaDiaria ?? 0))}</td>
-              <td class="col-aa">${escapeHtml(String(row.aa ?? 0))}</td>
-            </tr>`;
-          })
-          .join("");
+  const allRows = doc.rows || [];
+  const rowChunks: ControleFrequenciaRow[][] = [];
+  if (allRows.length === 0) {
+    rowChunks.push([]);
+  } else {
+    for (let i = 0; i < allRows.length; i += ROWS_PER_PRINT_PAGE) {
+      rowChunks.push(allRows.slice(i, i + ROWS_PER_PRINT_PAGE));
+    }
+  }
+
+  const totalPaginas = rowChunks.length;
+  const codigoOpm =
+    options.codigoOpm?.trim() ||
+    (await loadCodigoOpmBySecaoNome(doc.secao));
+
+  const brasaoSrc = `${window.location.origin}/brasao-pmsp.png`;
 
   const visibleObs = (doc.observacoes || []).filter((o) => !o.excluido);
   const obsRows =
@@ -639,59 +680,29 @@ export function exportFrequenciaToPDF(options: {
 
   const title = `Controle de Frequência — ${doc.secao} — ${mesNome}/${year}`;
 
-  const html = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <style>${FREQUENCIA_PRINT_CSS}</style>
-</head>
-<body>
-  <div class="print-btn-bar no-print">
-    <span class="print-hint">Pré-visualização A4 paisagem. Use Imprimir / PDF.</span>
-    <div class="print-actions">
-      <button class="btn btn-secondary" type="button" onclick="window.close()">Fechar</button>
-      <button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button>
-    </div>
-  </div>
-
-  <header class="header">
-    <p class="header-org">Polícia Militar do Estado de São Paulo</p>
-    <p class="header-org-main">Divisão de Educação a Distância</p>
-    <h1 class="header-title">Controle de Frequência</h1>
-    <p class="header-meta">OPM: ${escapeHtml(doc.secao)} · ${escapeHtml(mesNome)}/${year}</p>
-  </header>
-
-  <table class="freq-table">
-    <colgroup>
-      <col class="col-posto" />
-      <col class="col-re" />
-      <col class="col-nome" />
-      ${dayCols}
-      <col class="col-meia" />
-      <col class="col-aa" />
-    </colgroup>
-    <thead>
-      <tr class="group-head">
-        <th colspan="3">Identificação</th>
-        <th colspan="${dayKeys.length}">Frequência</th>
-        <th colspan="2">Totais</th>
-      </tr>
-      <tr>
-        <th class="col-posto">Posto/Grad.</th>
-        <th class="col-re">RE</th>
-        <th class="col-nome">Nome</th>
-        ${dayHeads}
-        <th class="col-meia">1/2 Diária</th>
-        <th class="col-aa">A.A.</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${bodyRows}
-    </tbody>
-  </table>
-
+  const pagesHtml = rowChunks
+    .map((chunk, idx) => {
+      const paginaAtual = idx + 1;
+      const isLast = paginaAtual === totalPaginas;
+      const header = buildFrequenciaHeaderHtml(
+        {
+          secaoNome: doc.secao,
+          codigoOpm,
+          mes: month,
+          ano: year,
+          paginaAtual,
+          totalPaginas,
+        },
+        brasaoSrc
+      );
+      const table = buildFreqTableHtml(
+        dayKeys,
+        dayHeads,
+        dayCols,
+        renderFreqBodyRows(chunk, dayKeys, weekend)
+      );
+      const footerBlock = isLast
+        ? `
   <h2 class="section-title">Observações</h2>
   <table class="obs-table">
     <colgroup>
@@ -727,7 +738,31 @@ export function exportFrequenciaToPDF(options: {
   <div class="export-footer">
     <div><b>Exportado por:</b> ${escapeHtml(formatExportUserLabel(exportedBy))}</div>
     <div><b>Data:</b> ${date} &nbsp; <b>Hora:</b> ${time}</div>
+  </div>`
+        : "";
+
+      return `<section class="print-page">${header}${table}${footerBlock}</section>`;
+    })
+    .join("\n");
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>${FREQUENCIA_PRINT_CSS}</style>
+</head>
+<body>
+  <div class="print-btn-bar no-print">
+    <span class="print-hint">Pré-visualização A4 paisagem. Use Imprimir / PDF.</span>
+    <div class="print-actions">
+      <button class="btn btn-secondary" type="button" onclick="window.close()">Fechar</button>
+      <button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button>
+    </div>
   </div>
+
+  ${pagesHtml}
 
   <script>
     window.addEventListener("load", function () {
@@ -746,3 +781,4 @@ export function exportFrequenciaToPDF(options: {
   printWindow.document.write(html);
   printWindow.document.close();
 }
+

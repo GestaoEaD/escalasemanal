@@ -46,9 +46,9 @@ export default function PendenciasAprovacaoPage({
   }, [reload]);
 
   return (
-    <div className="flex-1 bg-gray-50 pb-12">
-      <header className="bg-white border-b border-gray-200 sticky top-14 z-10 shadow-xs">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+    <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">
+      <header className="bg-white border-b border-gray-200 sticky sticky-below-app-header z-10 shadow-xs">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3 w-full min-w-0">
           <button
             type="button"
             onClick={onBack}
@@ -81,7 +81,7 @@ export default function PendenciasAprovacaoPage({
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 mt-6 space-y-3">
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 mt-6 space-y-3 w-full min-w-0">
         <p className="text-sm text-gray-500">
           Selecione um documento para abrir a tela de aprovação. Somente solicitações
           ativas e válidas são listadas.

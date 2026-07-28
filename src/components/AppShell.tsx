@@ -1,7 +1,7 @@
 /**
  * Shell global autenticado: cabeçalho persistente + rodapé institucional.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Usuario } from "../types";
 import { canAccessConfig, canApproveScales } from "../utils/permissions";
 import { loadPendingApprovalsForGestor } from "../utils/pendingApprovalsService";
@@ -48,14 +48,14 @@ function UserAvatar({ usuario }: { usuario: Usuario }) {
         alt=""
         referrerPolicy="no-referrer"
         onError={() => setImgFailed(true)}
-        className="h-9 w-9 rounded-full object-cover border border-gray-200 bg-gray-100 shrink-0"
+        className="h-8 w-8 sm:h-9 sm:w-9 rounded-full object-cover border border-gray-200 bg-gray-100 shrink-0"
       />
     );
   }
 
   return (
     <div
-      className="h-9 w-9 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0 border border-blue-700/20"
+      className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-blue-600 text-white text-[10px] sm:text-[11px] font-bold flex items-center justify-center shrink-0 border border-blue-700/20"
       aria-hidden
     >
       {avatarInitials(usuario)}
@@ -75,6 +75,7 @@ export default function AppShell({
   const canApprove = canApproveScales(usuario);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [onlineCount, setOnlineCount] = useState(1);
+  const headerRef = useRef<HTMLElement | null>(null);
 
   const refreshPendencias = useCallback(async () => {
     if (!canApprove) {
@@ -112,6 +113,28 @@ export default function AppShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuario.re]);
 
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+
+    const applyHeight = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty(
+        "--app-header-height",
+        `${Math.max(h, 48)}px`
+      );
+    };
+
+    applyHeight();
+    const ro = new ResizeObserver(applyHeight);
+    ro.observe(el);
+    window.addEventListener("orientationchange", applyHeight);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("orientationchange", applyHeight);
+    };
+  }, []);
+
   const onlineLabel = useMemo(() => {
     const n = Math.max(0, onlineCount);
     return n === 1 ? "1 online" : `${n} online`;
@@ -124,23 +147,26 @@ export default function AppShell({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-xs print:hidden">
-        <div className="max-w-[1600px] mx-auto px-3 sm:px-4 lg:px-6">
-          <div className="flex justify-between gap-2 min-h-14 py-2 sm:py-0 sm:h-14 items-center">
+    <div className="min-h-[100dvh] min-h-screen bg-gray-50 flex flex-col w-full max-w-full min-w-0">
+      <header
+        ref={headerRef}
+        className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-xs print:hidden pt-[env(safe-area-inset-top)]"
+      >
+        <div className="max-w-[1600px] mx-auto px-2 sm:px-4 lg:px-6 w-full min-w-0">
+          <div className="flex justify-between gap-1.5 sm:gap-2 min-h-12 sm:min-h-14 py-1.5 sm:py-0 sm:h-14 items-center w-full min-w-0">
             <button
               type="button"
               id="app-home-btn"
               onClick={onHome}
-              className="flex items-center space-x-2 sm:space-x-3 min-w-0 text-left cursor-pointer rounded-lg hover:bg-gray-50 px-1 py-1 -ml-1 transition-colors"
+              className="flex items-center space-x-1.5 sm:space-x-3 min-w-0 flex-1 text-left cursor-pointer rounded-lg hover:bg-gray-50 px-0.5 sm:px-1 py-1 -ml-0.5 transition-colors"
               title="Voltar à tela principal"
             >
-              <div className="bg-blue-600 p-2 rounded-lg text-white shrink-0">
-                <Calendar size={20} />
+              <div className="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white shrink-0">
+                <Calendar className="w-[18px] h-[18px] sm:w-5 sm:h-5" />
               </div>
-              <div className="min-w-0">
-                <div className="text-sm sm:text-base font-bold text-gray-900 tracking-tight leading-none truncate">
-                  Sistema de Escala de Serviço
+              <div className="min-w-0 overflow-hidden">
+                <div className="text-xs sm:text-base font-bold text-gray-900 tracking-tight leading-tight truncate">
+                  Escala de Serviço
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">
                   Divisão de Educação a Distância
@@ -148,10 +174,10 @@ export default function AppShell({
               </div>
             </button>
 
-            <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="flex items-center gap-1 sm:gap-3 shrink-0 max-w-[58%] sm:max-w-none">
+              <div className="flex items-center gap-1 sm:gap-2.5 min-w-0">
                 <UserAvatar usuario={usuario} />
-                <div className="min-w-0 hidden sm:block text-right">
+                <div className="min-w-0 hidden md:block text-right">
                   <div className="text-sm font-semibold text-gray-800 truncate">
                     {usuario.postoGrad} {usuario.nome}
                   </div>
@@ -169,9 +195,9 @@ export default function AppShell({
                     </span>
                   </div>
                 </div>
-                <div className="sm:hidden flex flex-col items-end">
+                <div className="md:hidden flex flex-col items-end min-w-0">
                   <span
-                    className="inline-flex items-center gap-1 text-[10px] tabular-nums text-emerald-700 font-bold"
+                    className="inline-flex items-center gap-1 text-[10px] tabular-nums text-emerald-700 font-bold whitespace-nowrap"
                     title="Usuários online"
                   >
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -180,13 +206,13 @@ export default function AppShell({
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                 {canApprove && onOpenPendencias && !hidePendenciasBtn && (
                   <button
                     id="aprovacoes-pendentes-btn"
                     type="button"
                     onClick={onOpenPendencias}
-                    className="relative inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors cursor-pointer border border-amber-200"
+                    className="relative inline-flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors cursor-pointer border border-amber-200"
                     title="Aprovações pendentes"
                   >
                     <Bell size={14} />
@@ -204,7 +230,8 @@ export default function AppShell({
                     id="config-btn"
                     type="button"
                     onClick={onOpenConfig}
-                    className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer border border-blue-100"
+                    className="inline-flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer border border-blue-100"
+                    title="Configurações"
                   >
                     <Settings size={14} />
                     <span className="hidden sm:inline">Configurações</span>
@@ -215,7 +242,8 @@ export default function AppShell({
                   id="logout-btn"
                   type="button"
                   onClick={handleLogoutClick}
-                  className="inline-flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
+                  title="Sair"
                 >
                   <LogOut size={14} />
                   <span className="hidden sm:inline">Sair</span>
@@ -226,9 +254,11 @@ export default function AppShell({
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col min-h-0">{children}</div>
+      <div className="flex-1 flex flex-col min-h-0 w-full max-w-full min-w-0">
+        {children}
+      </div>
 
-      <footer className="mt-auto border-t border-gray-200 bg-white print:hidden">
+      <footer className="mt-auto border-t border-gray-200 bg-white print:hidden pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-[1600px] mx-auto px-3 sm:px-4 lg:px-6 py-3 text-center">
           <p className="text-[11px] font-semibold text-gray-500 tracking-wide">
             Criado por Gestão Educacional - 2026

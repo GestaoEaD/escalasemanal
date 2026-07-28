@@ -136,12 +136,67 @@ export const OFFICIAL_LEGENDAS = [
   { ordem: 15, sigla: "OBS", descricao: "OBSERVAÇÃO", cor: "cinza-escuro", ativo: true },
 ];
 
+/** Códigos institucionais conhecidos — aplicados em seed e migração. */
+export const KNOWN_SECAO_CODIGOS: Record<string, string> = {
+  "Seç Gest Educ": "202002530",
+  "Seç Plan Ead": "202002510",
+  "Seç Ted Educ": "202002520",
+};
+
 export const OFFICIAL_SECOES = [
-  { nome: "Seç Gest Educ", ativo: true, ordem: 1 },
-  { nome: "Comando", ativo: true, ordem: 2 },
-  { nome: "Seção de Pessoal", ativo: true, ordem: 3 },
-  { nome: "Seção de Operações", ativo: true, ordem: 4 }
+  { nome: "Seç Gest Educ", codigo: "202002530", ativo: true, ordem: 1 },
+  { nome: "Comando", codigo: "", ativo: true, ordem: 2 },
+  { nome: "Seção de Pessoal", codigo: "", ativo: true, ordem: 3 },
+  { nome: "Seção de Operações", codigo: "", ativo: true, ordem: 4 },
 ];
+
+function secaoDocId(nome: string): string {
+  return nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+}
+
+/** Garante `codigo` nas seções conhecidas quando ainda estiver vazio (e cria Plan/Ted se faltarem). */
+async function ensureSecoesCodigos() {
+  const statusDocRef = doc(db, "configuracoes", "status");
+  const batch = writeBatch(db);
+  let touched = false;
+
+  for (const [nome, codigo] of Object.entries(KNOWN_SECAO_CODIGOS)) {
+    const docId = secaoDocId(nome);
+    const ref = doc(db, "secoes", docId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      batch.set(ref, {
+        nome,
+        codigo,
+        ativo: true,
+        ordem: nome === "Seç Gest Educ" ? 1 : nome === "Seç Plan Ead" ? 5 : 6,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      touched = true;
+      continue;
+    }
+    const data = snap.data();
+    if (!String(data.codigo || "").trim()) {
+      batch.set(
+        ref,
+        { codigo, updatedAt: Timestamp.now() },
+        { merge: true }
+      );
+      touched = true;
+    }
+  }
+
+  if (touched) {
+    await batch.commit();
+    console.log("Códigos de seção institucionais sincronizados.");
+  }
+  await setDoc(
+    statusDocRef,
+    { secoes_codigos_institucionais_seeded: true },
+    { merge: true }
+  );
+}
 
 /**
  * Seed initial official data into Firestore
@@ -160,6 +215,7 @@ export async function seedDatabaseIfEmpty() {
     // Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
     await ensureInitialGestores();
     await ensureLegendaAfastamento();
+    await ensureSecoesCodigos();
 
     if (needsSeeding) {
       console.log("Semeadura oficial necessária. Iniciando limpeza e cadastro de dados oficiais...");
@@ -229,10 +285,11 @@ export async function seedDatabaseIfEmpty() {
       console.log("Inserindo seções oficiais...");
       const secoesBatch = writeBatch(db);
       OFFICIAL_SECOES.forEach((s) => {
-        const docId = s.nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+        const docId = secaoDocId(s.nome);
         const secaoDocRef = doc(db, "secoes", docId);
         secoesBatch.set(secaoDocRef, {
           nome: s.nome,
+          codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
           ativo: s.ativo,
           ordem: s.ordem,
           createdAt: Timestamp.now()
