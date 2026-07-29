@@ -17,6 +17,7 @@ export type GoogleAuthErrorKind =
   | "network"
   | "temporary"
   | "not_registered"
+  | "auth_not_provisioned"
   | "provider_disabled"
   | "unauthorized_domain"
   | "unknown";
@@ -43,6 +44,13 @@ export function getGoogleAuthErrorMessage(kind: GoogleAuthErrorKind): FriendlyAu
         kind,
         title: "Problema de conexão",
         body: "Não foi possível verificar seus dados neste momento. Verifique sua conexão com a internet e tente novamente.",
+        actionLabel: "Tentar novamente",
+      };
+    case "auth_not_provisioned":
+      return {
+        kind,
+        title: "Autenticação não configurada no projeto",
+        body: "O Firebase Authentication ainda não foi ativado neste projeto. O administrador precisa abrir o Console do Firebase, iniciar o Authentication e habilitar o provedor Google. Não é um problema da sua conexão.",
         actionLabel: "Tentar novamente",
       };
     case "provider_disabled":
@@ -101,6 +109,9 @@ function mapFirebaseAuthError(err: unknown): GoogleAuthErrorKind {
     code === "auth/timeout"
   ) {
     return "network";
+  }
+  if (code === "auth/configuration-not-found" || code === "auth/invalid-api-key") {
+    return "auth_not_provisioned";
   }
   if (code === "auth/operation-not-allowed") {
     return "provider_disabled";
