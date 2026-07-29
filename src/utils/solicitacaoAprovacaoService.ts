@@ -11,6 +11,9 @@ import {
   Usuario,
 } from "../types";
 import { prepareFirestoreWrite } from "./firestoreSanitize";
+import { parseEscalaDocId } from "./divisaoIds";
+import { parseControleFrequenciaId } from "./frequenciaIds";
+import { resolveActiveDivisaoId } from "./divisaoContext";
 
 export const SOLICITACOES_COLLECTION = "solicitacoes_aprovacao";
 export const APPROVAL_LINK_EXPIRY_DAYS = 30;
@@ -78,14 +81,15 @@ export function getTokenApprovalUrl(token: string): string {
 }
 
 function parseAnoSemana(escalaId: string): { ano: number; semana: number } {
-  // Controle de Frequência: 2026_01_Secao...
-  const freq = String(escalaId || "").match(/^(\d{4})_(\d{1,2})_/);
-  if (freq) {
-    return { ano: Number(freq[1]), semana: Number(freq[2]) };
+  const parsed = parseEscalaDocId(escalaId);
+  if (parsed) {
+    return { ano: parsed.ano, semana: parsed.semana };
   }
-  const m = String(escalaId || "").match(/^(\d{4})_(\d{1,2})$/);
-  if (!m) return { ano: new Date().getFullYear(), semana: 1 };
-  return { ano: Number(m[1]), semana: Number(m[2]) };
+  const freq = parseControleFrequenciaId(escalaId);
+  if (freq) {
+    return { ano: freq.ano, semana: freq.mes };
+  }
+  return { ano: new Date().getFullYear(), semana: 1 };
 }
 
 export async function createSolicitacaoAprovacao(options: {
@@ -100,6 +104,7 @@ export async function createSolicitacaoAprovacao(options: {
   const days = options.expiryDays ?? APPROVAL_LINK_EXPIRY_DAYS;
   const expira = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   const { ano, semana } = parseAnoSemana(options.escalaId);
+  const divisaoId = resolveActiveDivisaoId(options.usuario);
 
   const sol: SolicitacaoAprovacao = {
     token: options.token,
@@ -107,6 +112,7 @@ export async function createSolicitacaoAprovacao(options: {
     semana,
     ano,
     escalaId: options.escalaId,
+    divisaoId,
     versao: options.versao,
     status: "AGUARDANDO",
     criadoPor: {

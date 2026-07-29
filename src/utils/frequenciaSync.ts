@@ -6,6 +6,7 @@ import {
   ControleFrequenciaDocument,
   ControleFrequenciaObservacao,
   ControleFrequenciaRow,
+  DIVISAO_EAD_ID,
   EscalaDocument,
   FrequenciaCelula,
   FrequenciaCelulaOrigem,
@@ -366,9 +367,11 @@ export function buildEmptyControleDocument(options: {
   ano: number;
   mes: number;
   secao: string;
+  divisaoId?: string;
 }): ControleFrequenciaDocument {
   return {
     id: options.id,
+    divisaoId: options.divisaoId || DIVISAO_EAD_ID,
     ano: options.ano,
     mes: options.mes,
     secao: options.secao,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp } from "../firebase";
-import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao } from "../types";
+import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp, query, where } from "../firebase";
+import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, Divisao, DIVISAO_EAD_ID } from "../types";
 import {
   Users,
   Shield,
@@ -24,6 +24,7 @@ import {
   FileText,
   FileSpreadsheet,
   FlaskConical,
+  Building2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
@@ -49,6 +50,20 @@ import { normalizeAtivoFlag } from "../utils/ativoFlag";
 import { toSessionUser, writeSession } from "../utils/sessionService";
 import { upsertAuthIndex, removeAuthIndex } from "../utils/authIndex";
 import { cascadeSecaoRename } from "../utils/secaoCascade";
+import {
+  canAccessConfig,
+  canManageDivisoes,
+  canAssignGerente,
+  canManageUsuarioInDivisao,
+  isGerente,
+  isAdministrador,
+} from "../utils/permissions";
+import {
+  resolveActiveDivisaoId,
+  filterByDivisaoId,
+  sortDivisoes,
+} from "../utils/divisaoContext";
+import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -57,13 +72,14 @@ function normalizeSecaoCodigo(value: unknown): string {
   return String(value ?? "").replace(/\D/g, "");
 }
 
-function withSecaoCodigo(s: Record<string, unknown>): Secao {
+function withSecaoCodigo(s: Record<string, unknown>, activeDivisaoId: string = DIVISAO_EAD_ID): Secao {
   const nome = String(s.nome || "");
   const raw = normalizeSecaoCodigo(s.codigo);
   return {
     ...(s as unknown as Secao),
     nome,
     codigo: raw || KNOWN_SECAO_CODIGOS[nome] || "",
+    divisaoId: String(s.divisaoId || activeDivisaoId),
     ativo: s.ativo !== false,
     ordem: typeof s.ordem === "number" ? s.ordem : Number(s.ordem) || 0,
   };
@@ -75,8 +91,9 @@ interface ConfiguracoesProps {
   onUsuarioUpdate?: (usuario: Usuario) => void;
 }
 
-type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "gerais" | "registros" | "testes";
+type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "divisoes" | "gerais" | "registros" | "testes";
 type LegendaModalSection = "basicas" | "representacoes" | "regras";
+type TenantLegenda = Legenda & { divisaoId?: string };
 
 function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colaborador {
   const src = raw as Colaborador;
@@ -87,6 +104,7 @@ function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colab
     nome: String(src.nome || ""),
     nomeCompleto: src.nomeCompleto,
     secao: normalizeSecaoNome(src.secao),
+    divisaoId: String(src.divisaoId || DIVISAO_EAD_ID),
     email: normalizeEmail(src.email),
     observacao: src.observacao || "",
     ativo: normalizeAtivoFlag(src.ativo),
@@ -216,6 +234,10 @@ const translateColorToHex = (color: string): string => {
 };
 
 export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: ConfiguracoesProps) {
+  const activeDivisaoId = resolveActiveDivisaoId(usuario);
+  const canConfig = canAccessConfig(usuario);
+  const canDivisoes = canManageDivisoes(usuario);
+
   // Active module tab
   const [activeTab, setActiveTab] = useState<MenuTab>("colaboradores");
 
@@ -235,6 +257,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [origPostos, setOrigPostos] = useState<any[]>([]);
   const [origSecoes, setOrigSecoes] = useState<any[]>([]);
   const [origLegendas, setOrigLegendas] = useState<Legenda[]>([]);
+  const [origDivisoes, setOrigDivisoes] = useState<Divisao[]>([]);
   const [origGerais, setOrigGerais] = useState<any>({
     nomeOrganizacao: "Polícia Militar do Estado de São Paulo",
     unidade: "CPI-1 / 1º BPM/I",
@@ -249,7 +272,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [postos, setPostos] = useState<any[]>([]);
   const [secoes, setSecoes] = useState<any[]>([]);
-  const [legendas, setLegendas] = useState<Legenda[]>([]);
+  const [legendas, setLegendas] = useState<TenantLegenda[]>([]);
+  const [divisoesList, setDivisoesList] = useState<Divisao[]>([]);
   const [gerais, setGerais] = useState<any>({
     nomeOrganizacao: "",
     unidade: "",
@@ -265,6 +289,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [removedPostos, setRemovedPostos] = useState<string[]>([]);
   const [removedSecoes, setRemovedSecoes] = useState<string[]>([]);
   const [removedLegendas, setRemovedLegendas] = useState<string[]>([]);
+  const [removedDivisoes, setRemovedDivisoes] = useState<string[]>([]);
 
   // Search and Pagination local states
   const [colSearch, setColSearch] = useState("");
@@ -303,6 +328,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   // Sigla original da legenda em edição (null = inclusão de nova legenda)
   const [legendaOriginalSigla, setLegendaOriginalSigla] = useState<string | null>(null);
   const [legendaModalSection, setLegendaModalSection] = useState<LegendaModalSection>("basicas");
+  const [divisaoModalOpen, setDivisaoModalOpen] = useState(false);
+  const [currentDivisao, setCurrentDivisao] = useState<Divisao | null>(null);
+  const [divisaoOriginalCodigo, setDivisaoOriginalCodigo] = useState<string | null>(null);
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -312,17 +340,28 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Collaborators
-      const colSnap = await getDocs(collection(db, "colaboradores"));
+      // 1. Fetch Collaborators (tenant)
+      const colSnap = await getDocs(
+        query(collection(db, "colaboradores"), where("divisaoId", "==", activeDivisaoId))
+      );
       const colList: Colaborador[] = [];
       colSnap.forEach((docSnap) => {
-        colList.push(normalizeColaborador(docSnap.data() as Colaborador));
+        const data = docSnap.data() as Colaborador;
+        colList.push(
+          normalizeColaborador({
+            ...data,
+            divisaoId: String(data.divisaoId || activeDivisaoId),
+          })
+        );
       });
+      const tenantColList = filterByDivisaoId(colList, activeDivisaoId, usuario);
       // Sort by order or name
-      colList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      tenantColList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 2. Fetch Users
-      const userSnap = await getDocs(collection(db, "usuarios"));
+      // 2. Fetch Users (tenant)
+      const userSnap = await getDocs(
+        query(collection(db, "usuarios"), where("divisaoId", "==", activeDivisaoId))
+      );
       const userList: Usuario[] = [];
       userSnap.forEach((d) => {
         const data = d.data() as Usuario;
@@ -331,36 +370,69 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             ...data,
             re: data.re || d.id,
             uid: d.id,
+            divisaoId: String(data.divisaoId || activeDivisaoId),
           })
         );
       });
-      userList.sort((a, b) => a.nome.localeCompare(b.nome));
+      const tenantUserList = filterByDivisaoId(userList, activeDivisaoId, usuario);
+      tenantUserList.sort((a, b) => a.nome.localeCompare(b.nome));
 
-      // 3. Fetch Postos
-      const postosSnap = await getDocs(collection(db, "postos"));
+      // 3. Fetch Postos (tenant)
+      const postosSnap = await getDocs(
+        query(collection(db, "postos"), where("divisaoId", "==", activeDivisaoId))
+      );
       const postosList: any[] = [];
       postosSnap.forEach((doc) => {
-        postosList.push(doc.data());
+        const data = doc.data();
+        postosList.push({ ...data, divisaoId: String(data.divisaoId || activeDivisaoId) });
       });
-      postosList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const tenantPostosList = filterByDivisaoId(postosList, activeDivisaoId, usuario);
+      tenantPostosList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 4. Fetch Secoes
-      const secoesSnap = await getDocs(collection(db, "secoes"));
+      // 4. Fetch Secoes (tenant)
+      const secoesSnap = await getDocs(
+        query(collection(db, "secoes"), where("divisaoId", "==", activeDivisaoId))
+      );
       const secoesList: any[] = [];
       secoesSnap.forEach((doc) => {
-        secoesList.push(withSecaoCodigo(doc.data() as Record<string, unknown>));
+        secoesList.push(
+          withSecaoCodigo(doc.data() as Record<string, unknown>, activeDivisaoId)
+        );
       });
-      secoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const tenantSecoesList = filterByDivisaoId(secoesList, activeDivisaoId, usuario);
+      tenantSecoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 5. Fetch Legendas (normaliza documentos legados sem novos campos)
-      const legendasSnap = await getDocs(collection(db, "legendas"));
-      const legendasList: Legenda[] = [];
+      // 5. Fetch Legendas (tenant)
+      const legendasSnap = await getDocs(
+        query(collection(db, "legendas"), where("divisaoId", "==", activeDivisaoId))
+      );
+      const legendasList: TenantLegenda[] = [];
       legendasSnap.forEach((docSnap) => {
-        legendasList.push(normalizeLegenda(docSnap.data()));
+        const data = docSnap.data() as Record<string, unknown>;
+        legendasList.push({
+          ...normalizeLegenda(data),
+          divisaoId: String(data.divisaoId || activeDivisaoId),
+        });
       });
-      legendasList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const tenantLegendasList = filterByDivisaoId(legendasList, activeDivisaoId, usuario);
+      tenantLegendasList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 6. Fetch Gerais config
+      // 6. Fetch Divisões (Gerente administra a lista global)
+      const divisoesSnap = await getDocs(collection(db, "divisoes"));
+      const loadedDivisoes: Divisao[] = [];
+      divisoesSnap.forEach((docSnap) => {
+        const data = docSnap.data() as Divisao;
+        loadedDivisoes.push({
+          ...data,
+          codigo: normalizeDivisaoId(data.codigo || docSnap.id),
+          nome: String(data.nome || ""),
+          descricao: data.descricao || "",
+          ativo: data.ativo !== false,
+        });
+      });
+      const sortedDivisoes = sortDivisoes(loadedDivisoes);
+
+      // 7. Fetch Gerais config
       const geraisSnap = await getDocs(collection(db, "configuracoes"));
       let geraisData = {
         nomeOrganizacao: "Polícia Militar do Estado de São Paulo",
@@ -377,19 +449,21 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       });
 
       // Set original states
-      setOrigColaboradores(JSON.parse(JSON.stringify(colList)));
-      setOrigUsuarios(JSON.parse(JSON.stringify(userList)));
-      setOrigPostos(JSON.parse(JSON.stringify(postosList)));
-      setOrigSecoes(JSON.parse(JSON.stringify(secoesList)));
-      setOrigLegendas(JSON.parse(JSON.stringify(legendasList)));
+      setOrigColaboradores(JSON.parse(JSON.stringify(tenantColList)));
+      setOrigUsuarios(JSON.parse(JSON.stringify(tenantUserList)));
+      setOrigPostos(JSON.parse(JSON.stringify(tenantPostosList)));
+      setOrigSecoes(JSON.parse(JSON.stringify(tenantSecoesList)));
+      setOrigLegendas(JSON.parse(JSON.stringify(tenantLegendasList)));
+      setOrigDivisoes(JSON.parse(JSON.stringify(sortedDivisoes)));
       setOrigGerais(JSON.parse(JSON.stringify(geraisData)));
 
       // Set working states
-      setColaboradores(colList);
-      setUsuarios(userList);
-      setPostos(postosList);
-      setSecoes(secoesList);
-      setLegendas(legendasList);
+      setColaboradores(tenantColList);
+      setUsuarios(tenantUserList);
+      setPostos(tenantPostosList);
+      setSecoes(tenantSecoesList);
+      setLegendas(tenantLegendasList);
+      setDivisoesList(sortedDivisoes);
       setGerais(geraisData);
 
       // Reset removed logs
@@ -398,6 +472,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setRemovedDivisoes([]);
       setSecaoRenames([]);
 
     } catch (err: any) {
@@ -410,13 +485,20 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
   useEffect(() => {
     loadAllData();
-  }, []);
+  }, [activeDivisaoId]);
 
   const loadLogs = async () => {
     setLogsLoading(true);
     try {
       const list = await loadAuditOperations();
-      setLogsList(list);
+      setLogsList(
+        isGerente(usuario)
+          ? list
+          : list.filter(
+              (log) =>
+                normalizeDivisaoId(log.divisaoId) === normalizeDivisaoId(activeDivisaoId)
+            )
+      );
     } catch (err) {
       console.error("Erro ao carregar logs:", err);
     } finally {
@@ -438,12 +520,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       JSON.stringify(postos) !== JSON.stringify(origPostos) ||
       JSON.stringify(secoes) !== JSON.stringify(origSecoes) ||
       JSON.stringify(legendas) !== JSON.stringify(origLegendas) ||
+      JSON.stringify(divisoesList) !== JSON.stringify(origDivisoes) ||
       JSON.stringify(gerais) !== JSON.stringify(origGerais) ||
       removedColaboradores.length > 0 ||
       removedUsuarios.length > 0 ||
       removedPostos.length > 0 ||
       removedSecoes.length > 0 ||
       removedLegendas.length > 0 ||
+      removedDivisoes.length > 0 ||
       secaoRenames.length > 0
     );
   }, [
@@ -451,9 +535,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     usuarios, origUsuarios,
     postos, origPostos,
     secoes, origSecoes,
-    legendas, origLegendas,
+    legendas, origLegendas, divisoesList, origDivisoes,
     gerais, origGerais,
-    removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas,
+    removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas, removedDivisoes,
     secaoRenames
   ]);
 
@@ -465,6 +549,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setPostos(JSON.parse(JSON.stringify(origPostos)));
       setSecoes(JSON.parse(JSON.stringify(origSecoes)));
       setLegendas(JSON.parse(JSON.stringify(origLegendas)));
+      setDivisoesList(JSON.parse(JSON.stringify(origDivisoes)));
       setGerais(JSON.parse(JSON.stringify(origGerais)));
 
       setRemovedColaboradores([]);
@@ -472,6 +557,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setRemovedDivisoes([]);
       setSecaoRenames([]);
 
       setSaveError(null);
@@ -561,6 +647,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         return updateOrderFields(filtered);
       });
       setRemovedLegendas((prev) => [...prev, id]);
+    } else if (type === "divisoes") {
+      setDivisoesList((prev) => prev.filter((d) => d.codigo !== id));
+      setRemovedDivisoes((prev) => [...prev, id]);
     }
 
     setConfirmDeleteOpen(null);
@@ -616,10 +705,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       const colsToSave = reconciled.colaboradores.map((c) => ({
         ...c,
         secao: normalizeSecaoNome(resolveSecaoRenamed(c.secao)),
+        divisaoId: String(c.divisaoId || activeDivisaoId),
       }));
       const usersToSave = reconciled.usuarios.map((u) => ({
         ...u,
         secao: normalizeSecaoNome(resolveSecaoRenamed(u.secao)),
+        divisaoId: String(u.divisaoId || activeDivisaoId),
       }));
       setColaboradores(colsToSave);
       setUsuarios(usersToSave);
@@ -639,6 +730,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         const normalized = normalizeColaborador(col);
         batch.set(docRef, prepareFirestoreWrite(`colaboradores/${col.re}`, {
           ...normalized,
+          divisaoId: String(normalized.divisaoId || activeDivisaoId),
           ativo: normalized.ativo, // boolean explícito (false deve persistir)
           updatedAt: timestamp,
           createdAt: col.createdAt || timestamp
@@ -709,7 +801,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       }
       // B. Creations and edits
       for (const usr of usersToSave) {
-        const prepared = prepareUsuarioDocument(usr);
+        const prepared = prepareUsuarioDocument({
+          ...usr,
+          divisaoId: String(usr.divisaoId || activeDivisaoId),
+        });
         const original = origUsuarios.find((u) => u.re === prepared.re);
         const emailCheck = validateUsuarioEmail({
           email: prepared.email,
@@ -788,7 +883,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         const original = origPostos.find((op) => op.sigla === p.sigla);
         const docId = p.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
         const docRef = doc(db, "postos", docId);
-        batch.set(docRef, prepareFirestoreWrite(`postos/${docId}`, p as unknown as Record<string, unknown>));
+        batch.set(
+          docRef,
+          prepareFirestoreWrite(`postos/${docId}`, {
+            ...p,
+            divisaoId: String(p.divisaoId || activeDivisaoId),
+          } as Record<string, unknown>)
+        );
 
         if (!original) {
           createAuditLog("Postos e Graduações", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`);
@@ -827,6 +928,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         const payload = {
           ...s,
           codigo: normalizeSecaoCodigo(s.codigo) || KNOWN_SECAO_CODIGOS[s.nome] || "",
+          divisaoId: String(s.divisaoId || activeDivisaoId),
         };
         batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, payload as unknown as Record<string, unknown>));
 
@@ -874,7 +976,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         const original = origLegendas.find((ol) => ol.sigla === l.sigla);
         const docId = legendaDocId(l.sigla);
         const docRef = doc(db, "legendas", docId);
-        batch.set(docRef, prepareLegendaForFirestore(l));
+        batch.set(
+          docRef,
+          prepareFirestoreWrite(`legendas/${docId}`, {
+            ...prepareLegendaForFirestore(l),
+            divisaoId: String(l.divisaoId || activeDivisaoId),
+          })
+        );
 
         if (!original) {
           createAuditLog(
@@ -924,7 +1032,32 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         }
       }
 
-      // --- 6. AUDIT & SAVE: CONFIGS GERAIS ---
+      // --- 6. AUDIT & SAVE: DIVISÕES (somente Gerente) ---
+      if (canDivisoes) {
+        for (const codigoDel of removedDivisoes) {
+          batch.delete(doc(db, "divisoes", divisaoDocId(codigoDel)));
+          createAuditLog("Divisões", "Exclusão", codigoDel, "Todos", codigoDel, "");
+        }
+        for (const divisao of divisoesList) {
+          const codigo = divisaoDocId(divisao.codigo);
+          const original = origDivisoes.find((d) => d.codigo === divisao.codigo);
+          batch.set(
+            doc(db, "divisoes", codigo),
+            prepareFirestoreWrite(`divisoes/${codigo}`, {
+              ...divisao,
+              codigo,
+              ativo: divisao.ativo !== false,
+              updatedAt: now.toISOString(),
+              createdAt: original?.createdAt || divisao.createdAt || now.toISOString(),
+            })
+          );
+          if (!original) {
+            createAuditLog("Divisões", "Inclusão", codigo, "Todos", "", divisao.nome);
+          }
+        }
+      }
+
+      // --- 7. AUDIT & SAVE: CONFIGS GERAIS ---
       if (JSON.stringify(gerais) !== JSON.stringify(origGerais)) {
         batch.set(
           doc(db, "configuracoes", "gerais"),
@@ -960,7 +1093,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       // Propaga rename de seção em escalas e CF
       for (const rename of secaoRenames) {
         try {
-          const cascade = await cascadeSecaoRename(rename.from, rename.to);
+          const cascade = await cascadeSecaoRename(
+            rename.from,
+            rename.to,
+            activeDivisaoId
+          );
           if (cascade.semanais + cascade.alteracao + cascade.frequencia > 0) {
             createAuditLog(
               "Seções",
@@ -1002,6 +1139,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setOrigPostos(JSON.parse(JSON.stringify(postos)));
       setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
       setOrigLegendas(JSON.parse(JSON.stringify(legendas)));
+      setOrigDivisoes(JSON.parse(JSON.stringify(divisoesList)));
       setOrigGerais(JSON.parse(JSON.stringify(gerais)));
 
       // Reset removed logs
@@ -1010,6 +1148,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedPostos([]);
       setRemovedSecoes([]);
       setRemovedLegendas([]);
+      setRemovedDivisoes([]);
       setSecaoRenames([]);
 
       // Atualiza seção na sessão se o usuário logado foi afetado por rename
@@ -1062,7 +1201,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       }
     }
 
-    const normalized = normalizeColaborador({ ...currentCol, re: novaRe, email });
+    const normalized = normalizeColaborador({
+      ...currentCol,
+      re: novaRe,
+      email,
+      divisaoId: String(currentCol.divisaoId || activeDivisaoId),
+    });
 
     const duplicada = colaboradores.some(
       (c) => c.re === novaRe && c.re !== colOriginalRe
@@ -1115,6 +1259,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
     const novaRe = String(currentUser.re || "").trim();
     const isNew = userOriginalRe === null;
+    const targetDivisaoId = String(currentUser.divisaoId || activeDivisaoId);
+    if (!canManageUsuarioInDivisao(usuario, targetDivisaoId)) {
+      alert("Você não pode gerenciar usuários desta Divisão.");
+      return;
+    }
+    if (currentUser.perfil === "Gerente" && !canAssignGerente(usuario)) {
+      alert("Somente Gerente pode atribuir o perfil Gerente.");
+      return;
+    }
 
     const duplicada = usuarios.some((u) => u.re === novaRe && u.re !== userOriginalRe);
     if (duplicada) {
@@ -1136,6 +1289,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     const prepared = prepareUsuarioDocument({
       ...currentUser,
       re: novaRe,
+      divisaoId: targetDivisaoId,
       email: emailCheck.email,
       perfil: currentUser.perfil || "Operador",
       ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
@@ -1192,7 +1346,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       : -1;
 
     if (editIndex > -1) {
-      updatedList[editIndex] = { ...currentPosto, sigla: novaSigla };
+      updatedList[editIndex] = {
+        ...currentPosto,
+        sigla: novaSigla,
+        divisaoId: String(currentPosto.divisaoId || activeDivisaoId),
+      };
       if (postoOriginalSigla !== null && postoOriginalSigla !== novaSigla) {
         setRemovedPostos((prev) =>
           prev.includes(postoOriginalSigla) ? prev : [...prev, postoOriginalSigla]
@@ -1203,6 +1361,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       updatedList.push({
         ...currentPosto,
         sigla: novaSigla,
+        divisaoId: String(currentPosto.divisaoId || activeDivisaoId),
         ordem: maxOrdem + 1
       });
     }
@@ -1252,6 +1411,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       ...currentSecao,
       nome,
       codigo,
+      divisaoId: String(currentSecao.divisaoId || activeDivisaoId),
       ativo: currentSecao.ativo !== false,
     };
 
@@ -1319,7 +1479,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     // Normaliza: omite campos opcionais vazios (compatível com documentos legados)
-    const cleaned = normalizeLegenda({ ...currentLegenda, sigla: novaSigla });
+    const cleaned: TenantLegenda = {
+      ...normalizeLegenda({ ...currentLegenda, sigla: novaSigla }),
+      divisaoId: String(currentLegenda.divisaoId || activeDivisaoId),
+    };
 
     let updatedList = [...legendas];
     const editIndex =
@@ -1348,6 +1511,49 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setCurrentLegenda(null);
     setLegendaOriginalSigla(null);
     setLegendaModalSection("basicas");
+  };
+
+  const handleDivisaoSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentDivisao || !canDivisoes) return;
+
+    const codigo = divisaoDocId(currentDivisao.codigo);
+    const nome = String(currentDivisao.nome || "").trim();
+    if (!codigo || !nome) {
+      alert("Informe o código e o nome da Divisão.");
+      return;
+    }
+    if (
+      divisoesList.some(
+        (d) => d.codigo === codigo && d.codigo !== divisaoOriginalCodigo
+      )
+    ) {
+      alert("Já existe uma Divisão com este código.");
+      return;
+    }
+
+    const payload: Divisao = {
+      ...currentDivisao,
+      codigo,
+      nome,
+      descricao: String(currentDivisao.descricao || "").trim(),
+      ativo: currentDivisao.ativo !== false,
+    };
+    if (divisaoOriginalCodigo) {
+      setDivisoesList((prev) =>
+        sortDivisoes(
+          prev.map((d) => (d.codigo === divisaoOriginalCodigo ? payload : d))
+        )
+      );
+      if (divisaoOriginalCodigo !== codigo) {
+        setRemovedDivisoes((prev) => [...prev, divisaoOriginalCodigo]);
+      }
+    } else {
+      setDivisoesList((prev) => sortDivisoes([...prev, payload]));
+    }
+    setDivisaoModalOpen(false);
+    setCurrentDivisao(null);
+    setDivisaoOriginalCodigo(null);
   };
 
   // --- LIST COMPUTATIONS (SEARCH, FILTER & PAGINATION) ---
@@ -1545,7 +1751,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 <span>Colaboradores</span>
               </button>
 
-              {usuario.perfil === "Administrador" && (
+              {canConfig && (
                 <button
                   id="tab-usuarios"
                   onClick={() => setActiveTab("usuarios")}
@@ -1560,7 +1766,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 </button>
               )}
 
-              {usuario.perfil === "Administrador" && (
+              {canConfig && (
                 <button
                   id="tab-registros"
                   onClick={() => setActiveTab("registros")}
@@ -1575,7 +1781,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 </button>
               )}
 
-              {usuario.perfil === "Administrador" && (
+              {canConfig && (
                 <button
                   id="tab-testes"
                   onClick={() => setActiveTab("testes")}
@@ -1641,6 +1847,21 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 <Settings size={16} />
                 <span>Configurações Gerais</span>
               </button>
+
+              {canDivisoes && (
+                <button
+                  id="tab-divisoes"
+                  onClick={() => setActiveTab("divisoes")}
+                  className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                    activeTab === "divisoes"
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  <Building2 size={16} />
+                  <span>Divisões</span>
+                </button>
+              )}
             </nav>
           </aside>
 
@@ -1669,6 +1890,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         nome: "",
                         email: "",
                         secao: secoes[0]?.nome || "Seç Gest Educ",
+                        divisaoId: activeDivisaoId,
                         observacao: "",
                         ativo: true
                       });
@@ -1893,6 +2115,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         nome: "",
                         email: "",
                         secao: secoes[0]?.nome || "Seç Gest Educ",
+                        divisaoId: activeDivisaoId,
                         perfil: "Operador",
                         ativo: true,
                         authProvider: "google",
@@ -2363,7 +2586,70 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
               </div>
             )}
 
-            {/* 6. MODULE: CONFIGURAÇÕES GERAIS */}
+            {/* 6. MODULE: DIVISÕES */}
+            {activeTab === "divisoes" && canDivisoes && (
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Divisões</h2>
+                    <p className="text-xs text-gray-500">Cadastre e mantenha as Divisões disponíveis no sistema.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentDivisao({ codigo: "", nome: "", descricao: "", ativo: true });
+                      setDivisaoOriginalCodigo(null);
+                      setDivisaoModalOpen(true);
+                    }}
+                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    <span>Nova Divisão</span>
+                  </button>
+                </div>
+                <div className="table-scroll border border-gray-200 rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
+                    <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                      <tr>
+                        <th className="px-4 py-3">Código</th>
+                        <th className="px-4 py-3">Nome</th>
+                        <th className="px-4 py-3">Descrição</th>
+                        <th className="px-4 py-3 text-center">Situação</th>
+                        <th className="px-4 py-3 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
+                      {divisoesList.length === 0 ? (
+                        <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma Divisão cadastrada.</td></tr>
+                      ) : (
+                        divisoesList.map((divisao) => (
+                          <tr key={divisao.codigo} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-mono font-bold">{divisao.codigo}</td>
+                            <td className="px-4 py-3">{divisao.nome}</td>
+                            <td className="px-4 py-3 text-gray-600">{divisao.descricao || "—"}</td>
+                            <td className="px-4 py-3 text-center">{divisao.ativo !== false ? "ATIVA" : "INATIVA"}</td>
+                            <td className="px-4 py-3 text-right space-x-1">
+                              <button type="button" onClick={() => {
+                                setCurrentDivisao({ ...divisao });
+                                setDivisaoOriginalCodigo(divisao.codigo);
+                                setDivisaoModalOpen(true);
+                              }} className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded cursor-pointer" title="Editar">
+                                <Edit2 size={13} />
+                              </button>
+                              <button type="button" onClick={() => requestDelete("divisoes", divisao.codigo, divisao.nome)} className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded cursor-pointer" title="Excluir">
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 7. MODULE: CONFIGURAÇÕES GERAIS */}
             {activeTab === "gerais" && (
               <div>
                 <div className="mb-6 pb-4 border-b border-gray-150">
@@ -2455,7 +2741,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 7. MODULE: REGISTROS DE AUDITORIA (LOGS) */}
-            {activeTab === "registros" && usuario.perfil === "Administrador" && (
+            {activeTab === "registros" && canConfig && (
               <LogsAuditPanel
                 logs={logsList}
                 loading={logsLoading}
@@ -2465,7 +2751,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 8. MODULE: CENTRAL DE TESTES */}
-            {activeTab === "testes" && usuario.perfil === "Administrador" && (
+            {activeTab === "testes" && canConfig && (
               <CentralTestes usuario={usuario} />
             )}
           </main>
@@ -2806,6 +3092,29 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Divisão *</label>
+                    <select
+                      value={currentUser.divisaoId || activeDivisaoId}
+                      onChange={(e) => setCurrentUser({ ...currentUser, divisaoId: e.target.value })}
+                      disabled={isAdministrador(usuario)}
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-500"
+                      required
+                    >
+                      {isGerente(usuario) ? (
+                        divisoesList.map((divisao) => (
+                          <option key={divisao.codigo} value={divisao.codigo}>
+                            {divisao.codigo} — {divisao.nome}
+                          </option>
+                        ))
+                      ) : (
+                        <option value={activeDivisaoId}>
+                          {activeDivisaoId} — {divisoesList.find((d) => d.codigo === activeDivisaoId)?.nome || "Divisão ativa"}
+                        </option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Perfil de Acesso *</label>
                     <select
                       value={currentUser.perfil || "Operador"}
@@ -2816,6 +3125,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       <option value="Operador">Operador</option>
                       <option value="Administrador">Administrador</option>
                       <option value="Gestor">Gestor</option>
+                      {canAssignGerente(usuario) && <option value="Gerente">Gerente</option>}
                     </select>
                   </div>
 
@@ -2866,6 +3176,66 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   >
                     Confirmar
                   </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* DIVISÃO ADD/EDIT MODAL */}
+        {divisaoModalOpen && currentDivisao && canDivisoes && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-sm w-full overflow-hidden"
+            >
+              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  {divisaoOriginalCodigo ? "Editar Divisão" : "Nova Divisão"}
+                </h3>
+                <button type="button" onClick={() => setDivisaoModalOpen(false)} className="text-gray-400 hover:text-white cursor-pointer">
+                  <X size={18} />
+                </button>
+              </div>
+              <form onSubmit={handleDivisaoSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Código *</label>
+                  <input
+                    type="text"
+                    value={currentDivisao.codigo}
+                    onChange={(e) => setCurrentDivisao({ ...currentDivisao, codigo: normalizeDivisaoId(e.target.value) })}
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-mono font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Nome *</label>
+                  <input
+                    type="text"
+                    value={currentDivisao.nome}
+                    onChange={(e) => setCurrentDivisao({ ...currentDivisao, nome: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Descrição</label>
+                  <input
+                    type="text"
+                    value={currentDivisao.descricao || ""}
+                    onChange={(e) => setCurrentDivisao({ ...currentDivisao, descricao: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
+                  />
+                </div>
+                <label className="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" checked={currentDivisao.ativo !== false} onChange={(e) => setCurrentDivisao({ ...currentDivisao, ativo: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                  <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Divisão Ativa</span>
+                </label>
+                <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
+                  <button type="button" onClick={() => setDivisaoModalOpen(false)} className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">Cancelar</button>
+                  <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-xs cursor-pointer">Confirmar</button>
                 </div>
               </form>
             </motion.div>

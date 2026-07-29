@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { db, doc, getDoc, setDoc, deleteDoc, collection, getDocs, Timestamp } from "../firebase";
+import { db, doc, getDoc, setDoc, deleteDoc, collection, getDocs, Timestamp, query, where } from "../firebase";
 import { 
   Usuario, 
   ScheduleRow, 
@@ -47,6 +47,8 @@ import {
 } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
+import { buildEscalaDocId } from "../utils/divisaoIds";
+import { resolveActiveDivisaoId } from "../utils/divisaoContext";
 import {
   applyWeekendDefault,
   cleanAprovacao,
@@ -154,7 +156,9 @@ export default function ScheduleEditor({
   onOpenApproval,
 }: ScheduleEditorProps) {
   // Document IDs in Firestore
-  const docId = week.id; // Format: "year_week" e.g., "2026_01"
+  const divisaoId = resolveActiveDivisaoId(usuario);
+  // Firestore: `{divisaoId}_{ano}_{semana}` — week.id local permanece `YYYY_WW`
+  const docId = buildEscalaDocId(divisaoId, year, week.numero);
   const dayHeaders = useMemo(
     () => getWeekDayColumnHeaders(week.startDate),
     [week.startDate]
@@ -402,8 +406,13 @@ export default function ScheduleEditor({
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Collaborators Pool
-      const colSnapshot = await getDocs(collection(db, "colaboradores"));
+      // 1. Fetch Collaborators Pool (Divisão ativa)
+      const colSnapshot = await getDocs(
+        query(
+          collection(db, "colaboradores"),
+          where("divisaoId", "==", divisaoId)
+        )
+      );
       const colList: Colaborador[] = [];
       colSnapshot.forEach((docSnap) => {
         colList.push(normalizeColaboradorCadastro(docSnap.data() as Colaborador));
@@ -413,7 +422,9 @@ export default function ScheduleEditor({
       setCollaboratorsPool(sortedCols);
 
       // 2. Fetch Legendas Pool
-      const legSnapshot = await getDocs(collection(db, "legendas"));
+      const legSnapshot = await getDocs(
+        query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
+      );
       const legList: any[] = [];
       legSnapshot.forEach((doc) => {
         legList.push(doc.data());
@@ -517,6 +528,7 @@ export default function ScheduleEditor({
         
         const docData = {
           id: docId,
+          divisaoId,
           ano: year,
           semana: week.numero,
           periodo: week.periodo,
@@ -607,6 +619,7 @@ export default function ScheduleEditor({
           
           const docData = {
             id: docId,
+            divisaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
@@ -696,6 +709,7 @@ export default function ScheduleEditor({
           observacao: col.observacao || "",
           ativo: true,
           ordem: nextOrdem,
+          divisaoId,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
@@ -741,6 +755,7 @@ export default function ScheduleEditor({
         observacao: updated.observacao || "",
         ativo: existing?.ativo !== undefined ? existing.ativo : true,
         ordem: existing?.ordem !== undefined ? existing.ordem : 1,
+        divisaoId: String(existing?.divisaoId || divisaoId),
         createdAt: existing?.createdAt || Timestamp.now(),
         updatedAt: Timestamp.now()
       };
@@ -839,7 +854,7 @@ export default function ScheduleEditor({
     setPreviousWeekInfo(null);
     setPreviousWeekBusy(true);
     try {
-      const result = await fetchPreviousWeeklyScale(year, week.numero);
+      const result = await fetchPreviousWeeklyScale(year, week.numero, divisaoId);
       if (result.status === "error") {
         setPreviousWeekInfo(result.message);
         const ref = result.ref || (() => {
@@ -1404,6 +1419,7 @@ export default function ScheduleEditor({
           doc(db, "escalas_semanais", docId),
           prepareFirestoreWrite(`escalas_semanais/${docId}`, {
             id: docId,
+            divisaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
@@ -1475,6 +1491,7 @@ export default function ScheduleEditor({
           doc(db, "escalas_alteracao", docId),
           prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
             id: docId,
+            divisaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,

@@ -38,6 +38,17 @@ import {
   assertCanSubmitForApproval,
   assertPendingApproval,
 } from "./permissionGuards";
+import { assertDivisaoAccess, resolveActiveDivisaoId } from "./divisaoContext";
+
+function assertDocumentoDivisao(
+  usuario: Usuario,
+  data: { divisaoId?: string }
+): void {
+  assertDivisaoAccess(
+    usuario,
+    String(data.divisaoId || resolveActiveDivisaoId(usuario))
+  );
+}
 
 export type EscalaCollectionName =
   | "escalas_semanais"
@@ -399,6 +410,7 @@ export async function submitScaleForApproval(
     throw new Error(`${label} não encontrada.`);
   }
   const data = snap.data() as EscalaDocument;
+  assertDocumentoDivisao(usuario, data);
   const currentStatus = normalizeEscalaStatus(data.status);
   if (currentStatus === "aguardando_aprovacao") {
     throw new Error(`Esta ${label} já está aguardando aprovação.`);
@@ -502,6 +514,7 @@ export async function approveScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
+  assertDocumentoDivisao(gestor, data);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertPendingApproval(currentStatus, label);
 
@@ -587,6 +600,7 @@ export async function requestRevisionScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
+  assertDocumentoDivisao(gestor, data);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertPendingApproval(currentStatus, label);
 
@@ -672,6 +686,7 @@ export async function cancelApprovalRequest(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
+  assertDocumentoDivisao(usuario, data);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertCanCancelApproval(usuario, currentStatus);
 
@@ -740,6 +755,7 @@ export async function reopenApprovedScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
+  assertDocumentoDivisao(gestor, data);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertCanReopen(gestor, currentStatus);
 

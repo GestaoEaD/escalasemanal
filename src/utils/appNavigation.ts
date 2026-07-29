@@ -8,6 +8,7 @@ import { parseApprovalPath } from "./approvalService";
 import { buildTokenApprovalPath } from "./solicitacaoAprovacaoService";
 
 export type AppView =
+  | "divisoes"
   | "selector"
   | "editor"
   | "config"
@@ -16,6 +17,7 @@ export type AppView =
   | "pendencias";
 
 export type AppRoute =
+  | { view: "divisoes" }
   | { view: "selector" }
   | { view: "editor"; year: number; weekId: string }
   | { view: "config" }
@@ -40,6 +42,8 @@ export type AppRoute =
 
 export function buildAppPath(route: AppRoute): string {
   switch (route.view) {
+    case "divisoes":
+      return "/divisoes";
     case "selector":
       return "/";
     case "editor":
@@ -83,6 +87,10 @@ export function parseAppPath(pathname: string): AppRoute {
   }
 
   const path = pathname.replace(/\/+$/, "") || "/";
+
+  if (/^\/divisoes\/?$/i.test(path)) {
+    return { view: "divisoes" };
+  }
 
   if (path === "/" || path === "") {
     return { view: "selector" };

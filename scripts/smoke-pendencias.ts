@@ -43,6 +43,7 @@ const op: Usuario = {
   nome: "Op",
   postoGrad: "Sd",
   secao: "X",
+  divisaoId: "202002500",
   perfil: "Operador",
 };
 const adm: Usuario = {
@@ -50,6 +51,7 @@ const adm: Usuario = {
   nome: "Adm",
   postoGrad: "Cb",
   secao: "X",
+  divisaoId: "202002500",
   perfil: "Administrador",
 };
 const gest: Usuario = {
@@ -57,6 +59,7 @@ const gest: Usuario = {
   nome: "Gest",
   postoGrad: "Sgt",
   secao: "X",
+  divisaoId: "202002500",
   perfil: "Gestor",
 };
 

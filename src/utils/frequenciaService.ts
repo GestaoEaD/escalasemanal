@@ -6,6 +6,7 @@ import {
   CONTROLE_FREQUENCIA_COLLECTION,
   ControleFrequenciaDocument,
   Colaborador,
+  DIVISAO_EAD_ID,
   EscalaDocument,
   EscalaStatus,
   FrequenciaResponsavel,
@@ -46,6 +47,8 @@ import {
 } from "./frequenciaSync";
 import { normalizeSecaoNome } from "./secaoMatch";
 import { normalizeAtivoFlag } from "./ativoFlag";
+import { resolveActiveDivisaoId } from "./divisaoContext";
+import { buildEscalaDocId } from "./divisaoIds";
 
 function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
   const { data, hora } = formatNowParts();
@@ -58,16 +61,24 @@ function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
   };
 }
 
-export async function loadLegendas(): Promise<Legenda[]> {
-  const snap = await getDocs(collection(db, "legendas"));
+export async function loadLegendas(
+  divisaoId: string = DIVISAO_EAD_ID
+): Promise<Legenda[]> {
+  const snap = await getDocs(
+    query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
+  );
   const list: Legenda[] = [];
   snap.forEach((d) => list.push(normalizeLegenda(d.data())));
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   return list;
 }
 
-export async function loadColaboradores(): Promise<Colaborador[]> {
-  const snap = await getDocs(collection(db, "colaboradores"));
+export async function loadColaboradores(
+  divisaoId: string = DIVISAO_EAD_ID
+): Promise<Colaborador[]> {
+  const snap = await getDocs(
+    query(collection(db, "colaboradores"), where("divisaoId", "==", divisaoId))
+  );
   const list: Colaborador[] = [];
   snap.forEach((d) => {
     const raw = d.data() as Colaborador;
@@ -78,31 +89,46 @@ export async function loadColaboradores(): Promise<Colaborador[]> {
       nome: String(raw.nome || "").trim(),
       postoGrad: String(raw.postoGrad || "").trim(),
       ativo: normalizeAtivoFlag(raw.ativo),
+      divisaoId: String(raw.divisaoId || divisaoId),
     });
   });
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   return list;
 }
 
-export async function loadSecoes(): Promise<{ nome: string; ativo?: boolean; ordem?: number }[]> {
-  const snap = await getDocs(collection(db, "secoes"));
-  const list: { nome: string; ativo?: boolean; ordem?: number }[] = [];
-  snap.forEach((d) => list.push(d.data() as { nome: string; ativo?: boolean; ordem?: number }));
+export async function loadSecoes(
+  divisaoId: string = DIVISAO_EAD_ID
+): Promise<{ nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[]> {
+  const snap = await getDocs(
+    query(collection(db, "secoes"), where("divisaoId", "==", divisaoId))
+  );
+  const list: { nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[] = [];
+  snap.forEach((d) =>
+    list.push(d.data() as { nome: string; ativo?: boolean; ordem?: number; divisaoId?: string })
+  );
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   return list.filter((s) => s.ativo !== false);
 }
 
 export async function loadScaleDocsForMonth(
   ano: number,
-  mes: number
+  mes: number,
+  divisaoId: string = DIVISAO_EAD_ID
 ): Promise<ScaleDocsByWeek> {
   const weeks = getWeeksOverlappingMonth(ano, mes);
   const out: ScaleDocsByWeek = {};
   await Promise.all(
     weeks.map(async (w) => {
+      const parts = String(w.id).split("_");
+      const yearFromId = Number(parts[0]);
+      const firestoreId = buildEscalaDocId(
+        divisaoId,
+        Number.isFinite(yearFromId) ? yearFromId : ano,
+        w.numero
+      );
       const [semSnap, altSnap] = await Promise.all([
-        getDoc(doc(db, "escalas_semanais", w.id)),
-        getDoc(doc(db, "escalas_alteracao", w.id)),
+        getDoc(doc(db, "escalas_semanais", firestoreId)),
+        getDoc(doc(db, "escalas_alteracao", firestoreId)),
       ]);
       out[w.id] = {
         semanal: semSnap.exists() ? (semSnap.data() as EscalaDocument) : null,
@@ -116,15 +142,17 @@ export async function loadScaleDocsForMonth(
 export async function loadControleFrequencia(
   ano: number,
   mes: number,
-  secao: string
+  secao: string,
+  divisaoId: string = DIVISAO_EAD_ID
 ): Promise<ControleFrequenciaDocument | null> {
-  const id = buildControleFrequenciaId(ano, mes, secao);
+  const id = buildControleFrequenciaId(ano, mes, secao, divisaoId);
   const snap = await getDoc(doc(db, CONTROLE_FREQUENCIA_COLLECTION, id));
   if (!snap.exists()) return null;
   const data = snap.data() as ControleFrequenciaDocument;
   return {
     ...data,
     id: data.id || id,
+    divisaoId: data.divisaoId || divisaoId,
     status: normalizeEscalaStatus(data.status),
     rows: Array.isArray(data.rows) ? data.rows : [],
     observacoes: Array.isArray(data.observacoes) ? data.observacoes : [],
@@ -135,10 +163,15 @@ export async function loadControleFrequencia(
  *  Se `secao` for informada, filtra apenas documentos daquela seção. */
 export async function loadFrequenciaMonthStatuses(
   ano: number,
-  secao?: string
+  secao?: string,
+  divisaoId: string = DIVISAO_EAD_ID
 ): Promise<Record<number, { count: number; statuses: EscalaStatus[] }>> {
   const snap = await getDocs(
-    query(collection(db, CONTROLE_FREQUENCIA_COLLECTION), where("ano", "==", ano))
+    query(
+      collection(db, CONTROLE_FREQUENCIA_COLLECTION),
+      where("ano", "==", ano),
+      where("divisaoId", "==", divisaoId)
+    )
   );
   const map: Record<number, { count: number; statuses: EscalaStatus[] }> = {};
   snap.forEach((d) => {
@@ -161,16 +194,30 @@ export async function ensureAndSyncControleFrequencia(options: {
   /** Quando true (padrão), reaplica o cadastro de colaboradores da seção em docs editáveis. */
   syncCadastro?: boolean;
 }): Promise<{ doc: ControleFrequenciaDocument; created: boolean; synced: boolean }> {
-  const id = buildControleFrequenciaId(options.ano, options.mes, options.secao);
-  let existing = await loadControleFrequencia(options.ano, options.mes, options.secao);
+  const divisaoId = resolveActiveDivisaoId(options.usuario);
+  const id = buildControleFrequenciaId(
+    options.ano,
+    options.mes,
+    options.secao,
+    divisaoId
+  );
+  let existing = await loadControleFrequencia(
+    options.ano,
+    options.mes,
+    options.secao,
+    divisaoId
+  );
   const created = !existing;
   if (!existing) {
-    existing = buildEmptyControleDocument({
-      id,
-      ano: options.ano,
-      mes: options.mes,
-      secao: options.secao,
-    });
+    existing = {
+      ...buildEmptyControleDocument({
+        id,
+        ano: options.ano,
+        mes: options.mes,
+        secao: options.secao,
+      }),
+      divisaoId,
+    };
   }
 
   const status = normalizeEscalaStatus(existing.status);
@@ -187,9 +234,9 @@ export async function ensureAndSyncControleFrequencia(options: {
   }
 
   const [cols, legendas, scaleDocs] = await Promise.all([
-    loadColaboradores(),
-    loadLegendas(),
-    loadScaleDocsForMonth(options.ano, options.mes),
+    loadColaboradores(divisaoId),
+    loadLegendas(divisaoId),
+    loadScaleDocsForMonth(options.ano, options.mes, divisaoId),
   ]);
 
   const { rows, sourceWeeks } = syncFrequenciaRows({
@@ -235,7 +282,12 @@ export async function saveControleFrequencia(
     throw new Error("Este Controle de Frequência não pode ser editado no status atual.");
   }
 
-  const legendasSnap = await getDocs(collection(db, "legendas"));
+  const divisaoId =
+    String(docData.divisaoId || "").trim() ||
+    resolveActiveDivisaoId(usuario);
+  const legendasSnap = await getDocs(
+    query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
+  );
   const legendas = legendasSnap.docs.map((d) =>
     normalizeLegenda(d.data() as Record<string, unknown>)
   );
@@ -244,6 +296,10 @@ export async function saveControleFrequencia(
   const timestamp = Timestamp.now();
   const next: ControleFrequenciaDocument = {
     ...docData,
+    id:
+      docData.id ||
+      buildControleFrequenciaId(docData.ano, docData.mes, docData.secao, divisaoId),
+    divisaoId,
     rows: rowsRecalc,
     status: status || "em_edicao",
     versao: docData.versao && docData.versao > 0 ? docData.versao : 1,

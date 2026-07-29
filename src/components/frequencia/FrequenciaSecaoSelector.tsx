@@ -41,6 +41,7 @@ function iconForSecao(nome: string, index: number): LucideIcon {
 }
 
 export default function FrequenciaSecaoSelector({
+  usuario,
   year,
   onBack,
   onSelectSecao,
@@ -53,7 +54,8 @@ export default function FrequenciaSecaoSelector({
     (async () => {
       setLoading(true);
       try {
-        const list = await loadSecoes();
+        const { resolveActiveDivisaoId } = await import("../../utils/divisaoContext");
+        const list = await loadSecoes(resolveActiveDivisaoId(usuario));
         if (!cancelled) setSecoes(list);
       } catch (e) {
         console.error(e);
@@ -64,7 +66,7 @@ export default function FrequenciaSecaoSelector({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [usuario]);
 
   return (
     <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">

@@ -58,6 +58,7 @@ const admin: Usuario = {
   nome: "A",
   postoGrad: "CB PM",
   secao: "X",
+  divisaoId: "202002500",
   perfil: "Administrador",
 };
 const op: Usuario = { ...admin, perfil: "Operador" };
@@ -85,7 +86,7 @@ assert(
   ),
   "Limpar escala ausente na Alteração"
 );
-assert(canSubmitForApproval(admin) && !canSubmitForApproval(op), "envio aprovação");
+assert(canSubmitForApproval(admin) && canSubmitForApproval(op), "envio aprovação");
 assert(canApproveScales(gestor) && !canApproveScales(admin), "aprovação gestor");
 assert(canAccessConfig(admin) && !canAccessConfig(gestor), "config admin");
 assert(canEditScale(op, future, "em_edicao") === true, "op edita futura");
@@ -295,6 +296,7 @@ assert(
     nome: "A",
     postoGrad: "CB",
     secao: "X",
+    divisaoId: "202002500",
     perfil: "Administrador",
   }).perfil === "Administrador",
   "toSessionUser preserva perfil"

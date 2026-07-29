@@ -31,6 +31,12 @@ export function readSession(): Usuario | null {
 
 export function toSessionUser(user: Usuario): Usuario {
   const authPhoto = getCurrentAuthPhotoURL();
+  const divisaoId = String(user.divisaoId || "").trim();
+  const activeRaw = user.activeDivisaoId;
+  const active =
+    activeRaw === undefined || activeRaw === null
+      ? undefined
+      : String(activeRaw).trim();
   return {
     uid: user.uid || user.re,
     re: user.re,
@@ -38,6 +44,9 @@ export function toSessionUser(user: Usuario): Usuario {
     nomeCompleto: user.nomeCompleto,
     postoGrad: user.postoGrad,
     secao: user.secao,
+    divisaoId,
+    // Só mantém Divisão ativa se foi escolhida explicitamente (não copia cadastro).
+    ...(active ? { activeDivisaoId: active } : { activeDivisaoId: "" }),
     perfil: user.perfil || "Operador",
     ativo: user.ativo,
     email: normalizeEmail(user.email) || undefined,
@@ -48,6 +57,19 @@ export function toSessionUser(user: Usuario): Usuario {
 
 export function writeSession(user: Usuario): void {
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(toSessionUser(user)));
+}
+
+/** Define a Divisão ativa na sessão (Gerente ou entrada na própria). */
+export function setActiveDivisaoInSession(
+  user: Usuario,
+  divisaoId: string
+): Usuario {
+  const next = toSessionUser({
+    ...user,
+    activeDivisaoId: String(divisaoId || "").trim(),
+  });
+  writeSession(next);
+  return next;
 }
 
 export function clearSession(): void {

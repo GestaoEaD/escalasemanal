@@ -18,6 +18,7 @@ import {
   tipoEscalaFromDocumento,
 } from "./solicitacaoAprovacaoService";
 import { parseControleFrequenciaId } from "./frequenciaIds";
+import { resolveActiveDivisaoId } from "./divisaoContext";
 
 export type PendingApprovalItem = {
   token: string;
@@ -83,10 +84,12 @@ export async function loadPendingApprovalsForGestor(
     return { ...EMPTY_SUMMARY, byTipo: { ...EMPTY_SUMMARY.byTipo } };
   }
 
+  const divisaoId = resolveActiveDivisaoId(usuario);
   const snap = await getDocs(
     query(
       collection(db, SOLICITACOES_COLLECTION),
-      where("status", "==", "AGUARDANDO")
+      where("status", "==", "AGUARDANDO"),
+      where("divisaoId", "==", divisaoId)
     )
   );
 
@@ -98,7 +101,7 @@ export async function loadPendingApprovalsForGestor(
   };
 
   snap.forEach((d) => {
-    const raw = d.data() as SolicitacaoAprovacao;
+    const raw = d.data() as SolicitacaoAprovacao & { divisaoId?: string };
     const sol: SolicitacaoAprovacao = { ...raw, token: raw.token || d.id };
     const access = evaluateSolicitacaoAccess(sol);
     if (!access.ok) return;

@@ -10,7 +10,7 @@ import {
   writeBatch,
   Timestamp 
 } from "../firebase";
-import { Colaborador } from "../types";
+import { Colaborador, DIVISAO_EAD_ID } from "../types";
 
 export const OFFICIAL_COLLABORATORS = [
   { ordem: 1, postoGrad: "MAJ PM", re: "104585-7", nome: "AUGUSTO", secao: "Seç Gest Educ", ativo: true },
@@ -205,6 +205,10 @@ export async function seedDatabaseIfEmpty() {
   try {
     console.log("Iniciando verificação e semeadura oficial do banco de dados...");
 
+    // Multi-tenant Divisão (idempotente)
+    const { ensureDivisaoTenantMigration } = await import("./migrateDivisaoTenant");
+    await ensureDivisaoTenantMigration();
+
     // Check status document
     const statusDocRef = doc(db, "configuracoes", "status");
     const statusSnap = await getDoc(statusDocRef);
@@ -240,6 +244,7 @@ export async function seedDatabaseIfEmpty() {
         colBatch.set(colDocRef, {
           ...col,
           observacao: "",
+          divisaoId: DIVISAO_EAD_ID,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
@@ -257,6 +262,7 @@ export async function seedDatabaseIfEmpty() {
           sigla: p.sigla,
           descricao: p.descricao,
           ordem: p.ordem,
+          divisaoId: DIVISAO_EAD_ID,
           createdAt: Timestamp.now()
         });
       });
@@ -274,6 +280,7 @@ export async function seedDatabaseIfEmpty() {
           cor: l.cor,
           ativo: l.ativo,
           ordem: l.ordem,
+          divisaoId: DIVISAO_EAD_ID,
           ...(("nome" in l && l.nome) ? { nome: l.nome } : {}),
           ...(("representacoes" in l && l.representacoes) ? { representacoes: l.representacoes } : {}),
           createdAt: Timestamp.now()
@@ -292,6 +299,7 @@ export async function seedDatabaseIfEmpty() {
           codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
           ativo: s.ativo,
           ordem: s.ordem,
+          divisaoId: DIVISAO_EAD_ID,
           createdAt: Timestamp.now()
         });
       });

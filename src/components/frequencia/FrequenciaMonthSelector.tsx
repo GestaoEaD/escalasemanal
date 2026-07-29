@@ -36,6 +36,7 @@ function monthCardStatus(
 }
 
 export default function FrequenciaMonthSelector({
+  usuario,
   year,
   secao,
   onBack,
@@ -52,7 +53,12 @@ export default function FrequenciaMonthSelector({
     (async () => {
       setLoading(true);
       try {
-        const map = await loadFrequenciaMonthStatuses(year, secao);
+        const { resolveActiveDivisaoId } = await import("../../utils/divisaoContext");
+        const map = await loadFrequenciaMonthStatuses(
+          year,
+          secao,
+          resolveActiveDivisaoId(usuario)
+        );
         if (!cancelled) setByMonth(map);
       } catch (e) {
         console.error(e);
@@ -63,7 +69,7 @@ export default function FrequenciaMonthSelector({
     return () => {
       cancelled = true;
     };
-  }, [year, secao]);
+  }, [year, secao, usuario]);
 
   return (
     <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">

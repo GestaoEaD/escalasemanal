@@ -24,6 +24,8 @@ import {
   Usuario,
 } from "../types";
 import { prepareFirestoreWrite } from "./firestoreSanitize";
+import { parseEscalaDocId } from "./divisaoIds";
+import { resolveActiveDivisaoId } from "./divisaoContext";
 
 const LOGS_COLLECTION = "logs";
 
@@ -52,6 +54,13 @@ export function toAuditUsuario(usuario: Usuario | null | undefined): AuditUsuari
     posto: usuario?.postoGrad || "",
     perfil: usuario?.perfil || "Operador",
     ...(usuario?.secao ? { secao: String(usuario.secao) } : {}),
+    ...(usuario?.divisaoId || usuario?.activeDivisaoId
+      ? {
+          divisaoId: String(
+            usuario.activeDivisaoId || usuario.divisaoId || ""
+          ).trim(),
+        }
+      : {}),
   };
 }
 
@@ -76,7 +85,10 @@ async function allocateLogId(): Promise<string> {
 }
 
 function parseAnoSemana(anoSemana?: string): { ano?: number; semana?: number } {
-  if (!anoSemana || !/^\d{4}_\d{1,2}$/.test(anoSemana)) return {};
+  if (!anoSemana) return {};
+  const parsed = parseEscalaDocId(anoSemana);
+  if (parsed) return { ano: parsed.ano, semana: parsed.semana };
+  if (!/^\d{4}_\d{1,2}$/.test(anoSemana)) return {};
   const [anoStr, semStr] = anoSemana.split("_");
   return { ano: Number(anoStr), semana: Number(semStr) };
 }
@@ -121,6 +133,8 @@ export async function registerAuditOperation(
 
   if (input.escala) op.escala = input.escala;
   if (input.anoSemana) op.anoSemana = input.anoSemana;
+  const divisaoId = resolveActiveDivisaoId(input.usuario);
+  if (divisaoId) op.divisaoId = divisaoId;
   if (typeof input.ano === "number") op.ano = input.ano;
   else if (typeof parsed.ano === "number") op.ano = parsed.ano;
   if (typeof input.semana === "number") op.semana = input.semana;
@@ -312,6 +326,10 @@ export function normalizeAuditOperation(
         re: raw.usuario.re || "",
         posto: raw.usuario.posto || "",
         perfil: raw.usuario.perfil || "Operador",
+        ...(raw.usuario.secao ? { secao: String(raw.usuario.secao) } : {}),
+        ...(raw.usuario.divisaoId
+          ? { divisaoId: String(raw.usuario.divisaoId) }
+          : {}),
       },
       versao: raw.versao,
       statusAnterior: raw.statusAnterior,
@@ -325,6 +343,7 @@ export function normalizeAuditOperation(
       solicitacaoId: raw.solicitacaoId,
       motivo: raw.motivo,
       legado: !!raw.legado,
+      ...(raw.divisaoId ? { divisaoId: String(raw.divisaoId) } : {}),
     };
   }
 

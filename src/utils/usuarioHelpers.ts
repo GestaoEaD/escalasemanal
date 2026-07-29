@@ -30,6 +30,7 @@ export function prepareUsuarioDocument(user: Usuario): Usuario {
   return {
     ...user,
     email,
+    divisaoId: String(user.divisaoId || "").trim(),
     authProvider: user.authProvider || (email ? "google" : "local"),
     ultimoLogin: user.ultimoLogin ?? null,
     emailVerificado: user.emailVerificado === true,

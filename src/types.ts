@@ -2,13 +2,32 @@
  * Types for the Weekly Schedule System (Sistema de Escala de Serviço)
  */
 
-export type PerfilUsuario = "Administrador" | "Operador" | "Gestor";
+export type PerfilUsuario = "Administrador" | "Operador" | "Gestor" | "Gerente";
+
+/** Divisão organizacional (tenant multi-tenant). ID do documento = codigo. */
+export interface Divisao {
+  /** Código único — também usado como document ID / divisaoId. */
+  codigo: string;
+  nome: string;
+  descricao?: string;
+  ativo?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Código/ID da Divisão EaD (seed/migração). */
+export const DIVISAO_EAD_ID = "202002500";
+export const DIVISAO_EAD_NOME = "Divisão EaD";
+export const DIVISAO_EAD_DESCRICAO = "Divisão de Educação a Distância";
+export const GERENTE_INICIAL_RE = "124342-0";
 
 /** Seção administrativa (cadastro em `secoes`). */
 export interface Secao {
   nome: string;
   /** Código da OPM — identidade numérica institucional (editável). */
   codigo: string;
+  /** Tenant — obrigatório. */
+  divisaoId: string;
   ativo?: boolean;
   ordem?: number;
 }
@@ -35,6 +54,13 @@ export interface Usuario {
   nome: string; // Nome de Guerra
   postoGrad: string;
   secao: string;
+  /** Tenant — Divisão do usuário (cadastro). */
+  divisaoId: string;
+  /**
+   * Divisão ativa na sessão (Gerente pode navegar entre Divisões).
+   * Para demais perfis, deve coincidir com divisaoId.
+   */
+  activeDivisaoId?: string;
   /** Perfil carregado exclusivamente do Firestore. */
   perfil?: PerfilUsuario;
   ativo?: boolean;
@@ -114,6 +140,8 @@ export interface Colaborador {
   nome: string; // Nome de Guerra
   nomeCompleto?: string;
   secao: string;
+  /** Tenant — obrigatório. */
+  divisaoId: string;
   /** E-mail Google de acesso (minúsculas). Usado ao conceder permissão. */
   email?: string;
   observacao?: string;
@@ -145,7 +173,9 @@ export interface LastSaved {
 }
 
 export interface EscalaDocument {
-  id: string; // Format: "year_week" e.g., "2026_01"
+  id: string; // Format: "{divisaoId}_{year}_{week}" e.g., "202002500_2026_01"
+  /** Tenant — obrigatório. */
+  divisaoId: string;
   ano: number;
   semana: number;
   periodo: string;
@@ -189,6 +219,8 @@ export interface SolicitacaoAprovacao {
   semana: number;
   ano: number;
   escalaId: string;
+  /** Tenant. */
+  divisaoId: string;
   versao: number;
   status: SolicitacaoAprovacaoStatus;
   criadoPor: {
@@ -267,6 +299,7 @@ export interface AuditUsuarioSnapshot {
   posto: string;
   perfil: string;
   secao?: string;
+  divisaoId?: string;
 }
 
 /** Documento de auditoria — uma operação com N alterações internas. */
@@ -277,6 +310,8 @@ export interface AuditOperation {
   semana?: number;
   ano?: number;
   anoSemana?: string;
+  /** Tenant do evento. */
+  divisaoId?: string;
   usuario: AuditUsuarioSnapshot;
   versao?: number;
   statusAnterior?: string;
@@ -436,6 +471,8 @@ export interface Legenda {
   cor: string;
   ativo: boolean;
   ordem: number;
+  /** Tenant — obrigatório em novos docs. */
+  divisaoId?: string;
   representacoes?: LegendaRepresentacoes;
   regras?: LegendaRegras;
   createdAt?: unknown;
@@ -524,9 +561,11 @@ export interface FrequenciaResponsavel {
   hora: string;
 }
 
-/** Documento Firestore `controle_frequencia/{ano}_{mes}_{secao}`. */
+/** Documento Firestore `controle_frequencia/{divisaoId}_{ano}_{mes}_{secao}`. */
 export interface ControleFrequenciaDocument {
   id: string;
+  /** Tenant — obrigatório. */
+  divisaoId: string;
   ano: number;
   mes: number;
   secao: string;

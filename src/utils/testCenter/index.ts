@@ -1,14 +1,19 @@
-import { Usuario } from "../../types";
+import { DIVISAO_EAD_ID, Usuario } from "../../types";
 import {
+  canAccessAnyDivisao,
   canAccessConfig,
   canApproveScales,
   canEditFrequencia,
   canEditScale,
   canExportScale,
+  canManageDivisoes,
   canReopenApprovedScale,
   canSubmitForApproval,
   confirmGestorRe,
+  isGerente,
 } from "../permissions";
+import { canEnterDivisao, resolveActiveDivisaoId } from "../divisaoContext";
+import { buildEscalaDocId, parseEscalaDocId } from "../divisaoIds";
 import { WeekInfo } from "../dateUtils";
 import { normalizeRe, reEquals } from "../reUtils";
 import { findUndefinedPaths, prepareFirestoreWrite } from "../firestoreSanitize";
@@ -65,6 +70,8 @@ const adminUser: Usuario = {
   nome: "TESTE_ADMIN",
   postoGrad: "CB PM",
   secao: "TESTE",
+  divisaoId: DIVISAO_EAD_ID,
+  activeDivisaoId: DIVISAO_EAD_ID,
   perfil: "Administrador",
   ativo: true,
 };
@@ -81,6 +88,13 @@ const gestorUser: Usuario = {
   re: "000003-0",
   nome: "TESTE_GESTOR",
   perfil: "Gestor",
+};
+
+const gerenteUser: Usuario = {
+  ...adminUser,
+  re: "124342-0",
+  nome: "TESTE_GERENTE",
+  perfil: "Gerente",
 };
 
 const futureWeek: WeekInfo = {
@@ -206,7 +220,7 @@ export function buildAllTestCases(opts: {
     acao: "Validar objeto Usuario da sessão (login Google)",
     run: async () => {
       const perfil = currentUser.perfil || "Operador";
-      if (!["Administrador", "Operador", "Gestor"].includes(perfil)) {
+      if (!["Administrador", "Operador", "Gestor", "Gerente"].includes(perfil)) {
         return fail("Perfil inválido", perfil);
       }
       const email = normalizeEmail(currentUser.email);
@@ -265,15 +279,56 @@ export function buildAllTestCases(opts: {
     acao: "canSubmitForApproval / canApproveScales / canAccessConfig",
     run: async () => {
       if (!canSubmitForApproval(adminUser)) return fail("Admin deveria enviar aprovação");
-      if (canSubmitForApproval(operadorUser)) return fail("Operador não deveria enviar aprovação");
+      if (!canSubmitForApproval(operadorUser)) return fail("Operador deveria enviar aprovação");
+      if (!canSubmitForApproval(gerenteUser)) return fail("Gerente deveria enviar aprovação");
       if (canSubmitForApproval(gestorUser)) return fail("Gestor não deveria enviar aprovação");
       if (!canApproveScales(gestorUser)) return fail("Gestor deveria aprovar");
+      if (!canApproveScales(gerenteUser)) return fail("Gerente deveria aprovar");
       if (canApproveScales(adminUser)) return fail("Admin não deveria aprovar");
       if (!canAccessConfig(adminUser)) return fail("Admin deveria acessar config");
+      if (!canAccessConfig(gerenteUser)) return fail("Gerente deveria acessar config");
       if (canAccessConfig(operadorUser) || canAccessConfig(gestorUser)) {
-        return fail("Somente Admin acessa configurações");
+        return fail("Operador/Gestor não acessam configurações");
       }
-      return ok("Matriz de envio/aprovação/config correta");
+      if (!canManageDivisoes(gerenteUser)) return fail("Gerente gerencia Divisões");
+      if (canManageDivisoes(adminUser)) return fail("Admin não gerencia Divisões");
+      return ok("Matriz de envio/aprovação/config/Divisões correta");
+    },
+  });
+
+  cases.push({
+    id: "perm-div-001",
+    nome: "Isolamento de Divisão e acesso Gerente",
+    categoria: "Permissões",
+    perfil: "Todos",
+    acao: "canEnterDivisao / resolveActiveDivisaoId / buildEscalaDocId",
+    run: async () => {
+      const outra = "999999999";
+      if (!canEnterDivisao(adminUser, DIVISAO_EAD_ID)) {
+        return fail("Admin deveria entrar na própria Divisão");
+      }
+      if (canEnterDivisao(adminUser, outra)) {
+        return fail("Admin não deveria entrar em outra Divisão");
+      }
+      if (canEnterDivisao(operadorUser, outra)) {
+        return fail("Operador não deveria entrar em outra Divisão");
+      }
+      if (!canAccessAnyDivisao(gerenteUser) || !isGerente(gerenteUser)) {
+        return fail("Gerente deveria acessar qualquer Divisão");
+      }
+      if (!canEnterDivisao(gerenteUser, outra)) {
+        return fail("Gerente deveria entrar em qualquer Divisão");
+      }
+      const id = buildEscalaDocId(DIVISAO_EAD_ID, 2026, 1);
+      if (id !== `${DIVISAO_EAD_ID}_2026_01`) return fail("ID de escala inválido", id);
+      const parsed = parseEscalaDocId(id);
+      if (!parsed || parsed.ano !== 2026 || parsed.semana !== 1) {
+        return fail("parseEscalaDocId falhou", JSON.stringify(parsed));
+      }
+      if (resolveActiveDivisaoId(adminUser) !== DIVISAO_EAD_ID) {
+        return fail("resolveActiveDivisaoId incorreto");
+      }
+      return ok("Isolamento de Divisão e IDs tenant ok");
     },
   });
 
@@ -307,13 +362,16 @@ export function buildAllTestCases(opts: {
       if (!confirmGestorRe(gestorUser, "000003")) return fail("RE sem dígito deveria confirmar");
       if (confirmGestorRe(gestorUser, "111111")) return fail("RE errado não deveria confirmar");
       if (confirmGestorRe(adminUser, adminUser.re)) return fail("Admin não é gestor para confirmação");
+      if (!confirmGestorRe(gerenteUser, gerenteUser.re)) {
+        return fail("Gerente deveria confirmar RE de aprovação");
+      }
       return ok("confirmGestorRe respeita perfil e normalização");
     },
   });
 
   cases.push({
     id: "perm-004",
-    nome: "Acesso à Central de Testes (somente Admin)",
+    nome: "Acesso à Central de Testes (Admin ou Gerente)",
     categoria: "Permissões",
     perfil: currentUser.perfil || "Operador",
     acao: "Gate canAccessConfig no usuário atual",
@@ -322,10 +380,10 @@ export function buildAllTestCases(opts: {
       if (!allowed) {
         return {
           status: "BLOQUEADO_POR_PERMISSAO" as TestStatus,
-          mensagem: "Usuário atual não é Administrador — Central de Testes bloqueada corretamente",
+          mensagem: "Usuário atual sem acesso a config — Central de Testes bloqueada corretamente",
         };
       }
-      return ok("Administrador autorizado a usar a Central de Testes");
+      return ok("Admin/Gerente autorizado a usar a Central de Testes");
     },
   });
 
@@ -1024,9 +1082,10 @@ export function buildAllTestCases(opts: {
         return fail("Não-gestor não deveria receber pendências");
       }
       if (canApproveScales(operadorUser) || canApproveScales(adminUser)) {
-        return fail("Só Gestor aprova");
+        return fail("Só Gestor/Gerente aprova");
       }
       if (!canApproveScales(gestorUser)) return fail("Gestor deveria aprovar");
+      if (!canApproveScales(gerenteUser)) return fail("Gerente deveria aprovar");
       const gest = await loadPendingApprovalsForGestor(gestorUser);
       if (gest.total < 0 || !gest.byTipo) {
         return fail("Resumo inválido para Gestor");
@@ -1073,7 +1132,13 @@ export function buildAllTestCases(opts: {
       if (buildAppPath({ view: "pendencias" }) !== "/aprovacoes") {
         return fail("buildAppPath(pendencias) incorreto");
       }
-      return ok("Rota /aprovacoes ↔ view pendencias");
+      if (parseAppPath("/divisoes").view !== "divisoes") {
+        return fail("parseAppPath(/divisoes) incorreto");
+      }
+      if (buildAppPath({ view: "divisoes" }) !== "/divisoes") {
+        return fail("buildAppPath(divisoes) incorreto");
+      }
+      return ok("Rotas /aprovacoes e /divisoes ok");
     },
   });
 
@@ -1200,10 +1265,10 @@ export function buildAllTestCases(opts: {
     perfil: "Sistema",
     acao: "buildControleFrequenciaId / convertEscalaValorToFrequencia",
     run: async () => {
-      const id = buildControleFrequenciaId(2026, 3, "Sec Gest Educ");
-      if (id !== "2026_03_Sec_Gest_Educ") return fail("ID inválido", id);
+      const id = buildControleFrequenciaId(2026, 3, "Sec Gest Educ", DIVISAO_EAD_ID);
+      if (id !== `${DIVISAO_EAD_ID}_2026_03_Sec_Gest_Educ`) return fail("ID inválido", id);
       const parsed = parseControleFrequenciaId(id);
-      if (!parsed || parsed.ano !== 2026 || parsed.mes !== 3) {
+      if (!parsed || parsed.ano !== 2026 || parsed.mes !== 3 || parsed.divisaoId !== DIVISAO_EAD_ID) {
         return fail("Parse do ID falhou", JSON.stringify(parsed));
       }
       const en = normalizeLegenda({

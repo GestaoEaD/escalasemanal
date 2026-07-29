@@ -196,13 +196,16 @@ function ReadOnlyFrequenciaTable({
 
   useEffect(() => {
     let cancelled = false;
-    void loadCodigoOpmBySecaoNome(docData.secao).then((c) => {
+    void loadCodigoOpmBySecaoNome(
+      docData.secao,
+      String(docData.divisaoId || "").trim() || undefined
+    ).then((c) => {
       if (!cancelled) setCodigoOpm(c);
     });
     return () => {
       cancelled = true;
     };
-  }, [docData.secao]);
+  }, [docData.secao, docData.divisaoId]);
 
   const resolveObsIdent = (o: ControleFrequenciaObservacao) => {
     const row = o.re ? rows.find((r) => r.re === o.re) : undefined;

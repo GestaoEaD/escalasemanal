@@ -22,6 +22,8 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { motion } from "motion/react";
+import { resolveActiveDivisaoId } from "../utils/divisaoContext";
+import { escalaWeekKeyFromDocId } from "../utils/divisaoIds";
 
 interface WeekSelectorProps {
   usuario: Usuario;
@@ -60,6 +62,7 @@ export default function WeekSelector({
 
   const today = useMemo(() => new Date(), []);
   const canApprove = canApproveScales(usuario);
+  const divisaoId = resolveActiveDivisaoId(usuario);
 
   const weeks = useMemo(() => {
     return getWeeksForYear(selectedYear);
@@ -101,20 +104,34 @@ export default function WeekSelector({
     const loadStatuses = async () => {
       try {
         const [weeklySnap, altSnap] = await Promise.all([
-          getDocs(query(collection(db, "escalas_semanais"), where("ano", "==", selectedYear))),
-          getDocs(query(collection(db, "escalas_alteracao"), where("ano", "==", selectedYear))),
+          getDocs(
+            query(
+              collection(db, "escalas_semanais"),
+              where("ano", "==", selectedYear),
+              where("divisaoId", "==", divisaoId)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, "escalas_alteracao"),
+              where("ano", "==", selectedYear),
+              where("divisaoId", "==", divisaoId)
+            )
+          ),
         ]);
         const weeklyMap: Record<string, EscalaStatus> = {};
         weeklySnap.forEach((d) => {
           const data = d.data();
           const id = (data.id as string) || d.id;
-          weeklyMap[id] = normalizeEscalaStatus(data.status);
+          const weekKey = escalaWeekKeyFromDocId(id) || id;
+          weeklyMap[weekKey] = normalizeEscalaStatus(data.status);
         });
         const altMap: Record<string, EscalaStatus> = {};
         altSnap.forEach((d) => {
           const data = d.data();
           const id = (data.id as string) || d.id;
-          altMap[id] = normalizeEscalaStatus(data.status);
+          const weekKey = escalaWeekKeyFromDocId(id) || id;
+          altMap[weekKey] = normalizeEscalaStatus(data.status);
         });
         if (!cancelled) {
           setWeeklyStatusByWeek(weeklyMap);
@@ -128,7 +145,7 @@ export default function WeekSelector({
     return () => {
       cancelled = true;
     };
-  }, [selectedYear]);
+  }, [selectedYear, divisaoId]);
 
   const currentWeekId = useMemo(() => {
     const todayYear = today.getFullYear();

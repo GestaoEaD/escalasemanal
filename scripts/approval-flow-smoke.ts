@@ -34,6 +34,7 @@ const admin: Usuario = {
   nome: "VENTURA",
   postoGrad: "CB PM",
   secao: "Seç Gest Educ",
+  divisaoId: "202002500",
   perfil: "Administrador",
 };
 const operador: Usuario = { ...admin, perfil: "Operador", nome: "OP" };
@@ -78,7 +79,8 @@ assert(canCancelApprovalRequest(admin, "aguardando_aprovacao") === true, "Admin 
 assert(confirmGestorRe(gestor, "104585") === true, "RE gestor");
 
 const awaiting: EscalaDocument = {
-  id: "2026_10",
+  id: "202002500_2026_10",
+  divisaoId: "202002500",
   ano: 2026,
   semana: 10,
   periodo: "x",
@@ -141,6 +143,6 @@ assert(
   "Path legado bare"
 );
 assert(isWeekCurrentOrFuture(futureWeek) === true, "Semana futura");
-assert(canSubmitForApproval(operador) === false, "Operador não envia");
+assert(canSubmitForApproval(operador) === true, "Operador envia aprovação");
 
 console.log("\nTodos os testes de fluxo/permissões passaram.");

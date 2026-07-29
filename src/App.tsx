@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { seedDatabaseIfEmpty } from "./utils/seedData";
-import { TipoEscalaDocumento, Usuario } from "./types";
+import { Divisao, TipoEscalaDocumento, Usuario } from "./types";
 import { WeekInfo } from "./utils/dateUtils";
 import { canAccessConfig, canApproveScales } from "./utils/permissions";
 import { auditAuth } from "./utils/auditService";
@@ -16,12 +16,15 @@ import {
   AuthPhase,
   clearSession,
   restoreSession,
+  setActiveDivisaoInSession,
   toSessionUser,
   writeSession,
 } from "./utils/sessionService";
 import { signOutGoogle } from "./utils/googleAuthService";
 import { markUsuarioGoogleLogin } from "./utils/usuarioHelpers";
+import { resolveActiveDivisaoId } from "./utils/divisaoContext";
 import Login from "./components/Login";
+import DivisaoSelector from "./components/DivisaoSelector";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
 import Configuracoes from "./components/Configuracoes";
@@ -49,9 +52,17 @@ function SessionLoadingScreen() {
   );
 }
 
+function needsDivisaoSelection(usuario: Usuario, route: AppRoute): boolean {
+  if (route.view === "aprovacao") return false;
+  if (route.view === "divisoes") return true;
+  const active = String(usuario.activeDivisaoId || "").trim();
+  return !active;
+}
+
 export default function App() {
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [usuario, setUsuario] = useState<Usuario | null>(null);
+  const [divisaoLabel, setDivisaoLabel] = useState<string>("");
 
   const [route, setRoute] = useState<AppRoute>(() => routeFromLocation());
   const [selectedYear, setSelectedYear] = useState<number>(() => {
@@ -110,8 +121,18 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [applyRoute]);
 
+  // Após auth: se não há Divisão ativa, força /divisoes (exceto aprovação)
+  useEffect(() => {
+    if (authPhase !== "authenticated" || !usuario) return;
+    if (route.view === "aprovacao") return;
+    if (needsDivisaoSelection(usuario, route) && route.view !== "divisoes") {
+      navigate({ view: "divisoes" }, "replace");
+    }
+  }, [authPhase, usuario, route, navigate]);
+
   useEffect(() => {
     if (authPhase !== "authenticated") return;
+    if (route.view === "divisoes") return;
     if (route.view === "editor" && !selectedWeek) {
       navigate({ view: "selector" }, "replace");
       return;
@@ -134,9 +155,56 @@ export default function App() {
     }
   }, [authPhase, route, selectedWeek, usuario, navigate]);
 
+  // Carrega rótulo da Divisão ativa
+  useEffect(() => {
+    if (!usuario?.activeDivisaoId) {
+      setDivisaoLabel("");
+      return;
+    }
+    const id = resolveActiveDivisaoId(usuario);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { db, doc, getDoc } = await import("./firebase");
+        const snap = await getDoc(doc(db, "divisoes", id));
+        if (cancelled) return;
+        if (snap.exists()) {
+          const d = snap.data() as Divisao;
+          setDivisaoLabel(`${d.nome || id} · ${d.codigo || id}`);
+        } else {
+          setDivisaoLabel(id);
+        }
+      } catch {
+        if (!cancelled) setDivisaoLabel(id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [usuario?.activeDivisaoId, usuario?.divisaoId]);
+
   const goHome = useCallback(() => {
+    if (usuario && !usuario.activeDivisaoId) {
+      navigate({ view: "divisoes" });
+      return;
+    }
     navigate({ view: "selector" });
+  }, [navigate, usuario]);
+
+  const goDivisoes = useCallback(() => {
+    navigate({ view: "divisoes" });
   }, [navigate]);
+
+  const handleSelectDivisao = useCallback(
+    (divisao: Divisao) => {
+      if (!usuario) return;
+      const next = setActiveDivisaoInSession(usuario, divisao.codigo);
+      setUsuario(next);
+      setDivisaoLabel(`${divisao.nome} · ${divisao.codigo}`);
+      navigate({ view: "selector" });
+    },
+    [usuario, navigate]
+  );
 
   const openApproval = async (
     escalaIdOrToken: string,
@@ -144,7 +212,13 @@ export default function App() {
     returnTo: "home" | "pendencias" = "home"
   ) => {
     let token = escalaIdOrToken.trim();
-    if (/^\d{4}_\d{1,2}$/.test(token) || /^\d{4}_\d{1,2}_.+/.test(token)) {
+    // Aceita IDs legados YYYY_WW e tenant PREFIX_YYYY_WW / CF
+    if (
+      /^\d{4}_\d{1,2}$/.test(token) ||
+      /^\d{4}_\d{1,2}_.+/.test(token) ||
+      /^.+_\d{4}_\d{1,2}$/.test(token) ||
+      /^.+_\d{4}_\d{1,2}_.+/.test(token)
+    ) {
       const resolved = await resolveActiveApprovalToken(token, tipo);
       if (!resolved) {
         alert("Não há solicitação ativa com link para este documento.");
@@ -180,6 +254,8 @@ export default function App() {
       ...user,
       authProvider: "google",
       emailVerificado: true,
+      // Força escolha de Divisão após login
+      activeDivisaoId: "",
     });
     writeSession(sessionUser);
     setUsuario(sessionUser);
@@ -193,7 +269,7 @@ export default function App() {
     void auditAuth("LOGIN", sessionUser).catch((err) =>
       console.warn("Falha ao registrar login na auditoria:", err)
     );
-    navigate(routeFromLocation(), "replace");
+    navigate({ view: "divisoes" }, "replace");
   };
 
   const handleLogout = () => {
@@ -209,8 +285,8 @@ export default function App() {
     void signOutGoogle();
     const pending = routeFromLocation();
     if (pending.view !== "aprovacao") {
-      commitAppPath({ view: "selector" }, "replace");
-      setRoute({ view: "selector" });
+      commitAppPath({ view: "divisoes" }, "replace");
+      setRoute({ view: "divisoes" });
     }
   };
 
@@ -229,6 +305,7 @@ export default function App() {
   }
 
   let page: React.ReactNode = null;
+  const hideShellChrome = route.view === "divisoes";
 
   if (route.view === "aprovacao") {
     const token = route.mode === "token" ? route.token : null;
@@ -248,6 +325,14 @@ export default function App() {
         />
       );
     }
+  } else if (route.view === "divisoes" || needsDivisaoSelection(usuario, route)) {
+    page = (
+      <DivisaoSelector
+        usuario={usuario}
+        onSelectDivisao={handleSelectDivisao}
+        onLogout={handleLogout}
+      />
+    );
   } else if (route.view === "pendencias") {
     if (!canApproveScales(usuario)) {
       page = <SessionLoadingScreen />;
@@ -330,11 +415,18 @@ export default function App() {
   return (
     <AppShell
       usuario={usuario}
-      onHome={goHome}
+      divisaoLabel={hideShellChrome ? undefined : divisaoLabel}
+      onHome={hideShellChrome ? goDivisoes : goHome}
+      onTrocarDivisao={hideShellChrome ? undefined : goDivisoes}
       onLogout={handleLogout}
-      onOpenConfig={() => navigate({ view: "config" })}
-      onOpenPendencias={() => navigate({ view: "pendencias" })}
-      hidePendenciasBtn={route.view === "pendencias"}
+      onOpenConfig={
+        hideShellChrome ? undefined : () => navigate({ view: "config" })
+      }
+      onOpenPendencias={
+        hideShellChrome ? undefined : () => navigate({ view: "pendencias" })
+      }
+      hidePendenciasBtn={route.view === "pendencias" || hideShellChrome}
+      hideConfigBtn={hideShellChrome}
     >
       {page}
     </AppShell>

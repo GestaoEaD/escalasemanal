@@ -143,6 +143,7 @@ export default function CollaboratorModal({
       nome: cleanNome,
       secao: cleanSecao,
       observacao: observacao.trim() || "",
+      divisaoId: String(editCollaborator?.divisaoId || ""),
     };
 
     if (editCollaborator) {

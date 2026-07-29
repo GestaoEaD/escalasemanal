@@ -27,6 +27,7 @@ import {
 import { exportFrequenciaToPDF } from "../../utils/frequenciaExport";
 import { exportFrequenciaToExcel } from "../../utils/frequenciaExcelExport";
 import { loadCodigoOpmBySecaoNome } from "../../utils/secaoCodigo";
+import { resolveActiveDivisaoId } from "../../utils/divisaoContext";
 import FrequenciaHeader from "../relatorios/FrequenciaHeader";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
@@ -169,13 +170,13 @@ export default function FrequenciaEditor({
 
   useEffect(() => {
     let cancelled = false;
-    void loadCodigoOpmBySecaoNome(secao).then((codigo) => {
+    void loadCodigoOpmBySecaoNome(secao, resolveActiveDivisaoId(usuario)).then((codigo) => {
       if (!cancelled) setCodigoOpm(codigo);
     });
     return () => {
       cancelled = true;
     };
-  }, [secao]);
+  }, [secao, usuario]);
 
   const setCell = (re: string, key: string, valorRaw: string) => {
     if (!docData || !editable) return;

@@ -1,9 +1,10 @@
 import { db, doc, getDoc } from "../firebase";
-import { EscalaDocument, ScheduleRow, Usuario } from "../types";
+import { DIVISAO_EAD_ID, EscalaDocument, ScheduleRow, Usuario } from "../types";
 import { getPreviousWeekRef } from "./dateUtils";
 import { applyWeekendDefault, cleanScheduleRow } from "./escalaPayload";
 import { findUndefinedPaths } from "./firestoreSanitize";
 import { registerAuditOperation } from "./auditService";
+import { buildEscalaDocId } from "./divisaoIds";
 
 export type PreviousWeekLoadResult =
   | {
@@ -46,7 +47,8 @@ export function preparePreviousWeeklyRowsForEditor(rows: ScheduleRow[]): Schedul
  */
 export async function fetchPreviousWeeklyScale(
   currentYear: number,
-  currentWeekNumber: number
+  currentWeekNumber: number,
+  divisaoId: string = DIVISAO_EAD_ID
 ): Promise<PreviousWeekLoadResult> {
   let ref: ReturnType<typeof getPreviousWeekRef>;
   try {
@@ -59,7 +61,8 @@ export async function fetchPreviousWeeklyScale(
   }
 
   try {
-    const snap = await getDoc(doc(db, "escalas_semanais", ref.id));
+    const firestoreId = buildEscalaDocId(divisaoId, ref.year, ref.weekNumber);
+    const snap = await getDoc(doc(db, "escalas_semanais", firestoreId));
     if (!snap.exists()) {
       return { status: "empty", ref, rows: [] };
     }

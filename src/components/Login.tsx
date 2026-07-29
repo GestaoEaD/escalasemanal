@@ -75,6 +75,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             nome: email,
             postoGrad: "",
             secao: "",
+            divisaoId: "",
             perfil: "Operador",
             ativo: false,
             email,

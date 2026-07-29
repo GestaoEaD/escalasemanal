@@ -10,7 +10,7 @@ import {
   stopPresence,
   subscribeOnlineCount,
 } from "../utils/presenceService";
-import { Bell, Calendar, LogOut, Settings } from "lucide-react";
+import { Bell, Building2, Calendar, LogOut, Settings } from "lucide-react";
 
 export interface AppShellProps {
   usuario: Usuario;
@@ -19,8 +19,13 @@ export interface AppShellProps {
   onLogout: () => void;
   onOpenConfig?: () => void;
   onOpenPendencias?: () => void;
+  /** Trocar Divisão (volta à home de cartões). */
+  onTrocarDivisao?: () => void;
+  /** Rótulo da Divisão ativa (nome · código). */
+  divisaoLabel?: string;
   /** Esconde o botão de aprovações (ex.: já na lista). */
   hidePendenciasBtn?: boolean;
+  hideConfigBtn?: boolean;
 }
 
 function avatarInitials(usuario: Usuario): string {
@@ -70,7 +75,10 @@ export default function AppShell({
   onLogout,
   onOpenConfig,
   onOpenPendencias,
+  onTrocarDivisao,
+  divisaoLabel,
   hidePendenciasBtn = false,
+  hideConfigBtn = false,
 }: AppShellProps) {
   const canApprove = canApproveScales(usuario);
   const [pendingTotal, setPendingTotal] = useState(0);
@@ -109,7 +117,6 @@ export default function AppShell({
       unsub();
       void stopPresence(usuario.re);
     };
-    // Presença amarrada ao RE da sessão; photoURL atualiza no próximo heartbeat.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuario.re]);
 
@@ -168,8 +175,8 @@ export default function AppShell({
                 <div className="text-xs sm:text-base font-bold text-gray-900 tracking-tight leading-tight truncate">
                   Escala de Serviço
                 </div>
-                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block">
-                  Divisão de Educação a Distância
+                <p className="text-[11px] text-gray-500 mt-1 hidden sm:block truncate">
+                  {divisaoLabel || "Selecione a Divisão"}
                 </p>
               </div>
             </button>
@@ -223,6 +230,19 @@ export default function AppShell({
               </div>
 
               <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                {onTrocarDivisao && (
+                  <button
+                    id="trocar-divisao-btn"
+                    type="button"
+                    onClick={onTrocarDivisao}
+                    className="relative inline-flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-md transition-colors cursor-pointer border border-slate-200"
+                    title="Trocar Divisão"
+                  >
+                    <Building2 size={14} />
+                    <span className="hidden sm:inline">Trocar Divisão</span>
+                  </button>
+                )}
+
                 {canApprove && onOpenPendencias && !hidePendenciasBtn && (
                   <button
                     id="aprovacoes-pendentes-btn"
@@ -241,7 +261,7 @@ export default function AppShell({
                   </button>
                 )}
 
-                {canAccessConfig(usuario) && onOpenConfig && (
+                {!hideConfigBtn && canAccessConfig(usuario) && onOpenConfig && (
                   <button
                     id="config-btn"
                     type="button"

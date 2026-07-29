@@ -636,7 +636,10 @@ export async function exportFrequenciaToPDF(options: {
   const totalPaginas = rowChunks.length;
   const codigoOpm =
     options.codigoOpm?.trim() ||
-    (await loadCodigoOpmBySecaoNome(doc.secao));
+    (await loadCodigoOpmBySecaoNome(
+      doc.secao,
+      String(doc.divisaoId || "").trim() || undefined
+    ));
 
   const brasaoSrc = `${window.location.origin}/brasao-pmsp.png`;
 
