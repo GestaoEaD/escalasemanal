@@ -48,6 +48,7 @@ function buildPayload(usuario: Usuario): Record<string, unknown> {
     email: email || null,
     photoURL: usuario.photoURL || null,
     divisaoId: String(usuario.activeDivisaoId || usuario.divisaoId || "").trim() || null,
+    secaoId: String(usuario.activeSecaoId || usuario.secaoId || "").trim() || null,
     lastSeen: serverTimestamp(),
   };
 }

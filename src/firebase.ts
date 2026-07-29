@@ -24,14 +24,29 @@ import {
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
+function requiredEnv(name: string, value: string | undefined): string {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    throw new Error(
+      `Configuração Firebase ausente: ${name}. Defina-a no ambiente de build.`
+    );
+  }
+  return normalized;
+}
+
 const firebaseConfig = {
-  projectId: "escalaead",
-  appId: "1:273620416234:web:6cca13b7fbcf941bd7c993",
-  apiKey: "AIzaSyAuAZO0L8ifpGDFqybvIlsuzNxMclW79o0",
-  authDomain: "escalaead.firebaseapp.com",
-  storageBucket: "escalaead.firebasestorage.app",
-  messagingSenderId: "273620416234",
-  measurementId: ""
+  projectId: requiredEnv("VITE_FIREBASE_PROJECT_ID", import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  appId: requiredEnv("VITE_FIREBASE_APP_ID", import.meta.env.VITE_FIREBASE_APP_ID),
+  apiKey: requiredEnv("VITE_FIREBASE_API_KEY", import.meta.env.VITE_FIREBASE_API_KEY),
+  authDomain: requiredEnv("VITE_FIREBASE_AUTH_DOMAIN", import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
+  storageBucket: requiredEnv(
+    "VITE_FIREBASE_STORAGE_BUCKET",
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET
+  ),
+  messagingSenderId: requiredEnv(
+    "VITE_FIREBASE_MESSAGING_SENDER_ID",
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID
+  ),
 };
 
 // Initialize Firebase

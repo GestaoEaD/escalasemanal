@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { db, collection, getDocs, doc, setDoc, deleteDoc, writeBatch, Timestamp, query, where } from "../firebase";
+﻿import React, { useState, useEffect, useMemo } from "react";
+import { db, collection, getDocs, getDoc, doc, setDoc, deleteDoc, writeBatch, Timestamp, query, where } from "../firebase";
 import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, Divisao, DIVISAO_EAD_ID } from "../types";
 import {
   Users,
@@ -25,6 +25,7 @@ import {
   FileSpreadsheet,
   FlaskConical,
   Building2,
+  type LucideIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
@@ -51,10 +52,15 @@ import { toSessionUser, writeSession } from "../utils/sessionService";
 import { upsertAuthIndex, removeAuthIndex } from "../utils/authIndex";
 import { cascadeSecaoRename } from "../utils/secaoCascade";
 import {
-  canAccessConfig,
+  canAccessTestCenter,
+  canEditConfigGerais,
   canManageDivisoes,
-  canAssignGerente,
+  canManageCadastrosDivisao,
+  canManageUsuarios,
+  canManageLegendasGlobais,
   canManageUsuarioInDivisao,
+  canViewLogs,
+  assignablePerfis,
   isGerente,
   isAdministrador,
 } from "../utils/permissions";
@@ -64,6 +70,8 @@ import {
   sortDivisoes,
 } from "../utils/divisaoContext";
 import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
+import { tenantDocId, colaboradorDocId } from "../utils/tenantDocIds";
+import { ensureCatalogoBaseDivisao } from "../utils/seedCatalogoDivisao";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -72,11 +80,17 @@ function normalizeSecaoCodigo(value: unknown): string {
   return String(value ?? "").replace(/\D/g, "");
 }
 
-function withSecaoCodigo(s: Record<string, unknown>, activeDivisaoId: string = DIVISAO_EAD_ID): Secao {
+function withSecaoCodigo(
+  s: Record<string, unknown>,
+  activeDivisaoId: string = DIVISAO_EAD_ID,
+  id: string = ""
+): Secao {
+  const src = s as Partial<Secao>;
   const nome = String(s.nome || "");
   const raw = normalizeSecaoCodigo(s.codigo);
   return {
     ...(s as unknown as Secao),
+    id: String(id || src.id || "").trim(),
     nome,
     codigo: raw || KNOWN_SECAO_CODIGOS[nome] || "",
     divisaoId: String(s.divisaoId || activeDivisaoId),
@@ -92,6 +106,10 @@ interface ConfiguracoesProps {
 }
 
 type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "divisoes" | "gerais" | "registros" | "testes";
+/** Item de catálogo removido: a chave sozinha não identifica o documento. */
+type RemocaoCatalogo = { chave: string };
+/** Seção editada dentro do modal de Divisão. */
+type SecaoDivisaoForm = { id: string; nome: string; codigo: string; ordem: number; ativo: boolean; divisaoId: string };
 type LegendaModalSection = "basicas" | "representacoes" | "regras";
 type TenantLegenda = Legenda & { divisaoId?: string };
 
@@ -235,11 +253,36 @@ const translateColorToHex = (color: string): string => {
 
 export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: ConfiguracoesProps) {
   const activeDivisaoId = resolveActiveDivisaoId(usuario);
-  const canConfig = canAccessConfig(usuario);
   const canDivisoes = canManageDivisoes(usuario);
+  const canCadastrosDivisao = canManageCadastrosDivisao(usuario);
+  const canUsuarios = canManageUsuarios(usuario);
+  const canLegendas = canManageLegendasGlobais(usuario);
+  const canGerais = canEditConfigGerais(usuario);
+  const canTestes = canAccessTestCenter(usuario);
+  const canLogs = canViewLogs(usuario);
+  const perfilOptions = assignablePerfis(usuario);
+  const listSecoesDaDivisao = (divisaoId: string): Secao[] =>
+    secoes
+      .filter((s) => normalizeDivisaoId(s.divisaoId) === normalizeDivisaoId(divisaoId))
+      .slice()
+      .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+  // Ordem final do menu lateral, respeitando a matriz de permissões.
+  const MENU_ITENS: { id: MenuTab; label: string; icone: LucideIcon; visivel: boolean }[] = [
+    { id: "divisoes", label: "Divisões", icone: Building2, visivel: canDivisoes },
+    { id: "secoes", label: "Seções", icone: Layers, visivel: canCadastrosDivisao },
+    { id: "colaboradores", label: "Colaboradores", icone: Users, visivel: canCadastrosDivisao },
+    { id: "usuarios", label: "Permissão", icone: Shield, visivel: canUsuarios },
+    { id: "postos", label: "Postos", icone: Briefcase, visivel: canCadastrosDivisao },
+    { id: "legendas", label: "Legendas", icone: Activity, visivel: canLegendas },
+    { id: "registros", label: "Logs", icone: FileText, visivel: canLogs },
+    { id: "testes", label: "Central de Testes", icone: FlaskConical, visivel: canTestes },
+    { id: "gerais", label: "Gerais", icone: Settings, visivel: canGerais },
+  ];
 
   // Active module tab
-  const [activeTab, setActiveTab] = useState<MenuTab>("colaboradores");
+  const [activeTab, setActiveTab] = useState<MenuTab>(() => (isGerente(usuario) ? "divisoes" : "secoes"));
+  const visibleMenuItems = MENU_ITENS.filter((item) => item.visivel);
 
   // Audit Logs Tab States
   const [logsList, setLogsList] = useState<AuditOperation[]>([]);
@@ -271,7 +314,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [postos, setPostos] = useState<any[]>([]);
-  const [secoes, setSecoes] = useState<any[]>([]);
+  const [secoes, setSecoes] = useState<Secao[]>([]);
   const [legendas, setLegendas] = useState<TenantLegenda[]>([]);
   const [divisoesList, setDivisoesList] = useState<Divisao[]>([]);
   const [gerais, setGerais] = useState<any>({
@@ -286,9 +329,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   // Track removed documents keys to delete from Firestore on save
   const [removedColaboradores, setRemovedColaboradores] = useState<string[]>([]);
   const [removedUsuarios, setRemovedUsuarios] = useState<string[]>([]);
-  const [removedPostos, setRemovedPostos] = useState<string[]>([]);
-  const [removedSecoes, setRemovedSecoes] = useState<string[]>([]);
-  const [removedLegendas, setRemovedLegendas] = useState<string[]>([]);
+  // Catálogos guardam a Divisão junto da chave: o ID do documento depende dela.
+  const [removedPostos, setRemovedPostos] = useState<RemocaoCatalogo[]>([]);
+  const [removedSecoes, setRemovedSecoes] = useState<RemocaoCatalogo[]>([]);
+  const [removedLegendas, setRemovedLegendas] = useState<RemocaoCatalogo[]>([]);
   const [removedDivisoes, setRemovedDivisoes] = useState<string[]>([]);
 
   // Search and Pagination local states
@@ -318,10 +362,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [postoOriginalSigla, setPostoOriginalSigla] = useState<string | null>(null);
 
   const [secaoModalOpen, setSecaoModalOpen] = useState(false);
-  const [currentSecao, setCurrentSecao] = useState<any | null>(null);
+  const [currentSecao, setCurrentSecao] = useState<Secao | null>(null);
   // Nome original da seção em edição (null = inclusão de nova seção)
   const [secaoOriginalNome, setSecaoOriginalNome] = useState<string | null>(null);
-  const [secaoRenames, setSecaoRenames] = useState<{ from: string; to: string }[]>([]);
+  const [secaoRenames, setSecaoRenames] = useState<{ id: string; from: string; to: string; divisaoId: string }[]>([]);
 
   const [legendaModalOpen, setLegendaModalOpen] = useState(false);
   const [currentLegenda, setCurrentLegenda] = useState<Legenda | null>(null);
@@ -331,6 +375,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [divisaoModalOpen, setDivisaoModalOpen] = useState(false);
   const [currentDivisao, setCurrentDivisao] = useState<Divisao | null>(null);
   const [divisaoOriginalCodigo, setDivisaoOriginalCodigo] = useState<string | null>(null);
+  // Seções da Divisão aberta no modal, e as alterações ainda não salvas por Divisão.
+  const [divisaoSecoes, setDivisaoSecoes] = useState<SecaoDivisaoForm[]>([]);
+  const [divisaoSecoesRemovidas, setDivisaoSecoesRemovidas] = useState<string[]>([]);
+  const [divisaoSecoesCarregando, setDivisaoSecoesCarregando] = useState(false);
+  const [novaSecaoNome, setNovaSecaoNome] = useState("");
+  const [novaSecaoCodigo, setNovaSecaoCodigo] = useState("");
+  const [secoesPendentesPorDivisao, setSecoesPendentesPorDivisao] = useState<
+    Record<string, { secoes: SecaoDivisaoForm[]; removidas: string[] }>
+  >({});
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -340,36 +393,62 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Collaborators (tenant)
+      // 1. Fetch Secoes (tenant)
+      const secoesSnap = await getDocs(
+        query(collection(db, "secoes"), where("divisaoId", "==", activeDivisaoId))
+      );
+      const secoesList: Secao[] = [];
+      secoesSnap.forEach((docSnap) => {
+        secoesList.push(
+          withSecaoCodigo(docSnap.data() as Record<string, unknown>, activeDivisaoId, docSnap.id)
+        );
+      });
+      const tenantSecoesList = filterByDivisaoId(secoesList, activeDivisaoId, usuario);
+      tenantSecoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const secaoPorId = new Map(tenantSecoesList.map((s) => [String(s.id || "").trim(), s]));
+      const secaoPorNome = new Map(
+        tenantSecoesList.map((s) => [normalizeSecaoNome(s.nome), s])
+      );
+
+      // 2. Fetch Collaborators (tenant)
       const colSnap = await getDocs(
         query(collection(db, "colaboradores"), where("divisaoId", "==", activeDivisaoId))
       );
       const colList: Colaborador[] = [];
       colSnap.forEach((docSnap) => {
         const data = docSnap.data() as Colaborador;
+        const secaoInfo =
+          secaoPorId.get(String(data.secaoId || "").trim()) ||
+          secaoPorNome.get(normalizeSecaoNome(data.secao));
         colList.push(
           normalizeColaborador({
             ...data,
+            secao: String(data.secao || secaoInfo?.nome || ""),
+            secaoId: String(data.secaoId || secaoInfo?.id || ""),
             divisaoId: String(data.divisaoId || activeDivisaoId),
           })
         );
       });
       const tenantColList = filterByDivisaoId(colList, activeDivisaoId, usuario);
-      // Sort by order or name
       tenantColList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 2. Fetch Users (tenant)
+      // 3. Fetch Users (tenant)
       const userSnap = await getDocs(
         query(collection(db, "usuarios"), where("divisaoId", "==", activeDivisaoId))
       );
       const userList: Usuario[] = [];
       userSnap.forEach((d) => {
         const data = d.data() as Usuario;
+        const secaoInfo =
+          secaoPorId.get(String(data.secaoId || "").trim()) ||
+          secaoPorNome.get(normalizeSecaoNome(data.secao));
         userList.push(
           prepareUsuarioDocument({
             ...data,
             re: data.re || d.id,
             uid: d.id,
+            secao: String(data.secao || secaoInfo?.nome || ""),
+            secaoId: String(data.secaoId || secaoInfo?.id || ""),
             divisaoId: String(data.divisaoId || activeDivisaoId),
           })
         );
@@ -377,7 +456,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       const tenantUserList = filterByDivisaoId(userList, activeDivisaoId, usuario);
       tenantUserList.sort((a, b) => a.nome.localeCompare(b.nome));
 
-      // 3. Fetch Postos (tenant)
+      // 4. Fetch Postos (tenant)
       const postosSnap = await getDocs(
         query(collection(db, "postos"), where("divisaoId", "==", activeDivisaoId))
       );
@@ -389,47 +468,45 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       const tenantPostosList = filterByDivisaoId(postosList, activeDivisaoId, usuario);
       tenantPostosList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 4. Fetch Secoes (tenant)
-      const secoesSnap = await getDocs(
-        query(collection(db, "secoes"), where("divisaoId", "==", activeDivisaoId))
-      );
-      const secoesList: any[] = [];
-      secoesSnap.forEach((doc) => {
-        secoesList.push(
-          withSecaoCodigo(doc.data() as Record<string, unknown>, activeDivisaoId)
-        );
-      });
-      const tenantSecoesList = filterByDivisaoId(secoesList, activeDivisaoId, usuario);
-      tenantSecoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-
       // 5. Fetch Legendas (tenant)
-      const legendasSnap = await getDocs(
-        query(collection(db, "legendas"), where("divisaoId", "==", activeDivisaoId))
-      );
+      const legendasSnap = await getDocs(collection(db, "legendas"));
       const legendasList: TenantLegenda[] = [];
       legendasSnap.forEach((docSnap) => {
         const data = docSnap.data() as Record<string, unknown>;
         legendasList.push({
           ...normalizeLegenda(data),
-          divisaoId: String(data.divisaoId || activeDivisaoId),
         });
       });
-      const tenantLegendasList = filterByDivisaoId(legendasList, activeDivisaoId, usuario);
+      const tenantLegendasList = [...legendasList];
       tenantLegendasList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 6. Fetch Divisões (Gerente administra a lista global)
-      const divisoesSnap = await getDocs(collection(db, "divisoes"));
+      // 6. Fetch Divisões (Gerente vê todas; Admin só a própria)
       const loadedDivisoes: Divisao[] = [];
-      divisoesSnap.forEach((docSnap) => {
-        const data = docSnap.data() as Divisao;
-        loadedDivisoes.push({
-          ...data,
-          codigo: normalizeDivisaoId(data.codigo || docSnap.id),
-          nome: String(data.nome || ""),
-          descricao: data.descricao || "",
-          ativo: data.ativo !== false,
+      if (canDivisoes) {
+        const divisoesSnap = await getDocs(collection(db, "divisoes"));
+        divisoesSnap.forEach((docSnap) => {
+          const data = docSnap.data() as Divisao;
+          loadedDivisoes.push({
+            ...data,
+            codigo: normalizeDivisaoId(data.codigo || docSnap.id),
+            nome: String(data.nome || ""),
+            descricao: data.descricao || "",
+            ativo: data.ativo !== false,
+          });
         });
-      });
+      } else {
+        const ownSnap = await getDoc(doc(db, "divisoes", activeDivisaoId));
+        if (ownSnap.exists()) {
+          const data = ownSnap.data() as Divisao;
+          loadedDivisoes.push({
+            ...data,
+            codigo: normalizeDivisaoId(data.codigo || ownSnap.id),
+            nome: String(data.nome || ""),
+            descricao: data.descricao || "",
+            ativo: data.ativo !== false,
+          });
+        }
+      }
       const sortedDivisoes = sortDivisoes(loadedDivisoes);
 
       // 7. Fetch Gerais config
@@ -473,6 +550,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedSecoes([]);
       setRemovedLegendas([]);
       setRemovedDivisoes([]);
+      setSecoesPendentesPorDivisao({});
       setSecaoRenames([]);
 
     } catch (err: any) {
@@ -488,17 +566,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   }, [activeDivisaoId]);
 
   const loadLogs = async () => {
+    if (!canLogs) {
+      setLogsList([]);
+      return;
+    }
     setLogsLoading(true);
     try {
-      const list = await loadAuditOperations();
-      setLogsList(
-        isGerente(usuario)
-          ? list
-          : list.filter(
-              (log) =>
-                normalizeDivisaoId(log.divisaoId) === normalizeDivisaoId(activeDivisaoId)
-            )
-      );
+      const list = await loadAuditOperations(isGerente(usuario) ? undefined : activeDivisaoId);
+      setLogsList(list);
     } catch (err) {
       console.error("Erro ao carregar logs:", err);
     } finally {
@@ -507,10 +582,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   };
 
   useEffect(() => {
-    if (activeTab === "registros") {
+    if (activeTab === "registros" && canLogs) {
       loadLogs();
     }
-  }, [activeTab]);
+  }, [activeTab, canLogs]);
+
+  useEffect(() => {
+    if (!loading && isGerente(usuario) && activeTab === "divisoes" && divisoesList.length === 0) {
+      setActiveTab("secoes");
+    }
+  }, [activeTab, divisoesList.length, loading, usuario]);
+
+  useEffect(() => {
+    if (visibleMenuItems.length === 0) return;
+    if (!visibleMenuItems.some((item) => item.id === activeTab)) {
+      setActiveTab(isGerente(usuario) ? "divisoes" : visibleMenuItems[0].id);
+    }
+  }, [activeTab, usuario, visibleMenuItems]);
 
   // Determine if there are unsaved changes
   const isDirty = useMemo(() => {
@@ -528,6 +616,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       removedSecoes.length > 0 ||
       removedLegendas.length > 0 ||
       removedDivisoes.length > 0 ||
+      Object.keys(secoesPendentesPorDivisao).length > 0 ||
       secaoRenames.length > 0
     );
   }, [
@@ -538,6 +627,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     legendas, origLegendas, divisoesList, origDivisoes,
     gerais, origGerais,
     removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas, removedDivisoes,
+    secoesPendentesPorDivisao,
     secaoRenames
   ]);
 
@@ -558,6 +648,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedSecoes([]);
       setRemovedLegendas([]);
       setRemovedDivisoes([]);
+      setSecoesPendentesPorDivisao({});
       setSecaoRenames([]);
 
       setSaveError(null);
@@ -629,24 +720,41 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setUsuarios((prev) => prev.filter((u) => u.re !== id));
       setRemovedUsuarios((prev) => [...prev, id]);
     } else if (type === "postos") {
+      const divisaoId = String(postos.find((p) => p.sigla === id)?.divisaoId || activeDivisaoId);
       setPostos((prev) => {
         const filtered = prev.filter((p) => p.sigla !== id);
         return updateOrderFields(filtered);
       });
-      setRemovedPostos((prev) => [...prev, id]);
+      setRemovedPostos((prev) => [...prev, { chave: id, divisaoId }]);
     } else if (type === "secoes") {
-      setSecoes((prev) => {
-        const filtered = prev.filter((s) => s.nome !== id);
-        return updateOrderFields(filtered);
-      });
-      setRemovedSecoes((prev) => [...prev, id]);
-      setSecaoRenames((prev) => prev.filter((r) => !secoesIguais(r.from, id) && !secoesIguais(r.to, id)));
+      const target = secoes.find((s) => s.id === id);
+      if (!target) return;
+      const referenced =
+        colaboradores.some((c) => c.secaoId === target.id || secoesIguais(c.secao, target.nome)) ||
+        usuarios.some((u) => u.secaoId === target.id || secoesIguais(u.secao, target.nome));
+      if (referenced) {
+        setSecoes((prev) =>
+          prev.map((s) => (s.id === target.id ? { ...s, ativo: false } : s))
+        );
+        alert("Esta seção está em uso por colaboradores ou permissões e foi inativada em vez de excluída.");
+      } else {
+        const divisaoId = String(target.divisaoId || activeDivisaoId);
+        setSecoes((prev) => {
+          const filtered = prev.filter((s) => s.id !== id);
+          return updateOrderFields(filtered);
+        });
+        setRemovedSecoes((prev) => [...prev, { chave: id, divisaoId }]);
+      }
     } else if (type === "legendas") {
+      if (!canLegendas) {
+        setConfirmDeleteOpen(null);
+        return;
+      }
       setLegendas((prev) => {
         const filtered = prev.filter((l) => l.sigla !== id);
         return updateOrderFields(filtered);
       });
-      setRemovedLegendas((prev) => [...prev, id]);
+      setRemovedLegendas((prev) => [...prev, { chave: id }]);
     } else if (type === "divisoes") {
       setDivisoesList((prev) => prev.filter((d) => d.codigo !== id));
       setRemovedDivisoes((prev) => [...prev, id]);
@@ -692,342 +800,360 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         origUsuarios
       );
 
-      const resolveSecaoRenamed = (nome: string): string => {
-        let current = nome;
-        for (let i = 0; i < 20; i++) {
-          const hit = secaoRenames.find((r) => secoesIguais(r.from, current));
-          if (!hit) break;
-          current = hit.to;
-        }
-        return current;
+      const resolveSecaoNomeById = (secaoId: string): string => {
+        const match = secoes.find((s) => s.id === String(secaoId || "").trim());
+        return String(match?.nome || "");
       };
 
-      const colsToSave = reconciled.colaboradores.map((c) => ({
-        ...c,
-        secao: normalizeSecaoNome(resolveSecaoRenamed(c.secao)),
-        divisaoId: String(c.divisaoId || activeDivisaoId),
-      }));
-      const usersToSave = reconciled.usuarios.map((u) => ({
-        ...u,
-        secao: normalizeSecaoNome(resolveSecaoRenamed(u.secao)),
-        divisaoId: String(u.divisaoId || activeDivisaoId),
-      }));
+      const colsToSave = reconciled.colaboradores.map((c) => {
+        const secaoId = String(c.secaoId || "").trim();
+        const secaoNome = resolveSecaoNomeById(secaoId) || normalizeSecaoNome(c.secao);
+        return {
+          ...c,
+          secaoId,
+          secao: secaoNome,
+          divisaoId: String(c.divisaoId || activeDivisaoId),
+        };
+      });
+      const usersToSave = reconciled.usuarios.map((u) => {
+        const secaoId = String(u.secaoId || "").trim();
+        const secaoNome = resolveSecaoNomeById(secaoId) || normalizeSecaoNome(u.secao);
+        return {
+          ...u,
+          secaoId,
+          secao: secaoNome,
+          divisaoId: String(u.divisaoId || activeDivisaoId),
+        };
+      });
       setColaboradores(colsToSave);
       setUsuarios(usersToSave);
 
-      // --- 1. AUDIT & SAVE: COLABORADORES ---
-      // A. Handle deletes
-      for (const reDel of removedColaboradores) {
-        const original = origColaboradores.find((c) => c.re === reDel);
-        const colLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
-        batch.delete(doc(db, "colaboradores", reDel));
-        createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, "");
-      }
-      // B. Handle creations and edits
-      for (const col of colsToSave) {
-        const original = origColaboradores.find((c) => c.re === col.re);
-        const docRef = doc(db, "colaboradores", col.re);
-        const normalized = normalizeColaborador(col);
-        batch.set(docRef, prepareFirestoreWrite(`colaboradores/${col.re}`, {
-          ...normalized,
-          divisaoId: String(normalized.divisaoId || activeDivisaoId),
-          ativo: normalized.ativo, // boolean explícito (false deve persistir)
-          updatedAt: timestamp,
-          createdAt: col.createdAt || timestamp
-        }));
+      if (canCadastrosDivisao) {
+        // --- 1. AUDIT & SAVE: COLABORADORES ---
+        // A. Handle deletes
+        for (const reDel of removedColaboradores) {
+          const original = origColaboradores.find((c) => c.re === reDel);
+          const colLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
+          const docId = colaboradorDocId(String(original?.divisaoId || activeDivisaoId), reDel);
+          batch.delete(doc(db, "colaboradores", docId));
+          createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, "");
+        }
+        // B. Handle creations and edits
+        for (const col of colsToSave) {
+          const original = origColaboradores.find((c) => c.re === col.re);
+          const docId = colaboradorDocId(String(col.divisaoId || activeDivisaoId), col.re);
+          const docRef = doc(db, "colaboradores", docId);
+          const normalized = normalizeColaborador(col);
+          batch.set(docRef, prepareFirestoreWrite(`colaboradores/${docId}`, {
+            ...normalized,
+            divisaoId: String(normalized.divisaoId || activeDivisaoId),
+            ativo: normalized.ativo, // boolean explícito (false deve persistir)
+            updatedAt: timestamp,
+            createdAt: col.createdAt || timestamp
+          }));
 
-        const colLabel = `${normalized.postoGrad} ${normalized.nome}`;
+          const colLabel = `${normalized.postoGrad} ${normalized.nome}`;
 
-        if (!original) {
-          // Inclusion
-          createAuditLog(
-            "Colaboradores", 
-            "Inclusão", 
-            colLabel, 
-            "Todos", 
-            "", 
-            `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
-          );
-        } else {
-          // Edits
-          if (normalized.postoGrad !== original.postoGrad) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, normalized.postoGrad);
-          }
-          if (normalized.nome !== original.nome) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, normalized.nome);
-          }
-          if (normalized.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", normalized.nomeCompleto || "");
-          }
-          if (normalizeEmail(normalized.email) !== normalizeEmail(original.email)) {
+          if (!original) {
+            // Inclusion
             createAuditLog(
               "Colaboradores",
-              "Edição",
+              "Inclusão",
               colLabel,
-              "E-mail Google",
-              normalizeEmail(original.email) || "",
-              normalizeEmail(normalized.email) || ""
+              "Todos",
+              "",
+              `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
             );
-          }
-          if (!secoesIguais(normalized.secao, original.secao)) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
-          }
-          if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
-            createAuditLog(
-              "Colaboradores",
-              "Edição",
-              colLabel,
-              "Situação (Ativo)",
-              normalizeAtivoFlag(original.ativo) ? "Ativo" : "Inativo",
-              normalizeAtivoFlag(normalized.ativo) ? "Ativo" : "Inativo"
-            );
-          }
-          if (normalized.ordem !== original.ordem) {
-            createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(normalized.ordem || 0));
-          }
-          if (normalized.observacao !== original.observacao) {
-            createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", normalized.observacao || "");
+          } else {
+            // Edits
+            if (normalized.postoGrad !== original.postoGrad) {
+              createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, normalized.postoGrad);
+            }
+            if (normalized.nome !== original.nome) {
+              createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, normalized.nome);
+            }
+            if (normalized.nomeCompleto !== original.nomeCompleto) {
+              createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", normalized.nomeCompleto || "");
+            }
+            if (normalizeEmail(normalized.email) !== normalizeEmail(original.email)) {
+              createAuditLog(
+                "Colaboradores",
+                "Edição",
+                colLabel,
+                "E-mail Google",
+                normalizeEmail(original.email) || "",
+                normalizeEmail(normalized.email) || ""
+              );
+            }
+            if (!secoesIguais(normalized.secao, original.secao)) {
+              createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
+            }
+            if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
+              createAuditLog(
+                "Colaboradores",
+                "Edição",
+                colLabel,
+                "Situação (Ativo)",
+                normalizeAtivoFlag(original.ativo) ? "Ativo" : "Inativo",
+                normalizeAtivoFlag(normalized.ativo) ? "Ativo" : "Inativo"
+              );
+            }
+            if (normalized.ordem !== original.ordem) {
+              createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(normalized.ordem || 0));
+            }
+            if (normalized.observacao !== original.observacao) {
+              createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", normalized.observacao || "");
+            }
           }
         }
-      }
 
-      // --- 2. AUDIT & SAVE: USUARIOS ---
-      // A. Deletes
-      for (const reDel of removedUsuarios) {
-        const original = origUsuarios.find((u) => u.re === reDel);
-        const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
-        batch.delete(doc(db, "usuarios", reDel));
-        createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
-      }
-      // B. Creations and edits
-      for (const usr of usersToSave) {
-        const prepared = prepareUsuarioDocument({
-          ...usr,
-          divisaoId: String(usr.divisaoId || activeDivisaoId),
-        });
-        const original = origUsuarios.find((u) => u.re === prepared.re);
-        const emailCheck = validateUsuarioEmail({
-          email: prepared.email,
-          re: prepared.re,
-          isNew: !original,
-          existingUsers: usuarios,
-        });
-        if (emailCheck.ok === false) {
-          throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
+        // --- 2. AUDIT & SAVE: USUARIOS ---
+        if (canUsuarios) {
+        // A. Deletes
+        for (const reDel of removedUsuarios) {
+          const original = origUsuarios.find((u) => u.re === reDel);
+          const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
+          batch.delete(doc(db, "usuarios", reDel));
+          createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
         }
+        // B. Creations and edits
+        for (const usr of usersToSave) {
+          const prepared = prepareUsuarioDocument({
+            ...usr,
+            divisaoId: String(usr.divisaoId || activeDivisaoId),
+            secoesResponsaveisIds: [],
+          });
+          const original = origUsuarios.find((u) => u.re === prepared.re);
+          const emailCheck = validateUsuarioEmail({
+            email: prepared.email,
+            re: prepared.re,
+            isNew: !original,
+            existingUsers: usuarios,
+          });
+          if (emailCheck.ok === false) {
+            throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
+          }
 
-        const docRef = doc(db, "usuarios", prepared.re);
-        const { uid: _uid, ...toPersist } = prepared;
-        batch.set(
-          docRef,
-          prepareFirestoreWrite(`usuarios/${prepared.re}`, toPersist as unknown as Record<string, unknown>)
-        );
-
-        const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
-        const emailAntes = normalizeEmail(original?.email);
-        const emailDepois = normalizeEmail(prepared.email);
-
-        if (!original) {
-          createAuditLog(
-            "Permissão",
-            "Inclusão",
-            userLabel,
-            "Todos",
-            "",
-            `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
+          const docRef = doc(db, "usuarios", prepared.re);
+          const { uid: _uid, ...toPersist } = prepared;
+          batch.set(
+            docRef,
+            prepareFirestoreWrite(`usuarios/${prepared.re}`, toPersist as unknown as Record<string, unknown>)
           );
-          if (emailDepois) {
-            createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
-          }
-        } else {
-          if (prepared.postoGrad !== original.postoGrad) {
-            createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
-          }
-          if (prepared.nome !== original.nome) {
-            createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
-          }
-          if (prepared.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
-          }
-          if (emailAntes !== emailDepois) {
+
+          const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
+          const emailAntes = normalizeEmail(original?.email);
+          const emailDepois = normalizeEmail(prepared.email);
+
+          if (!original) {
             createAuditLog(
               "Permissão",
-              emailAntes ? "Edição" : "Inclusão",
+              "Inclusão",
               userLabel,
-              "E-mail Google",
-              emailAntes,
-              emailDepois
+              "Todos",
+              "",
+              `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
             );
-          }
-          if (!secoesIguais(prepared.secao, original.secao)) {
-            createAuditLog("Permissão", "Edição", userLabel, "Seção", original.secao, prepared.secao);
-          }
-          if (prepared.perfil !== original.perfil) {
-            createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
-          }
-          if (prepared.ativo !== original.ativo) {
-            createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
+            if (emailDepois) {
+              createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
+            }
+          } else {
+            if (prepared.postoGrad !== original.postoGrad) {
+              createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
+            }
+            if (prepared.nome !== original.nome) {
+              createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
+            }
+            if (prepared.nomeCompleto !== original.nomeCompleto) {
+              createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
+            }
+            if (emailAntes !== emailDepois) {
+              createAuditLog(
+                "Permissão",
+                emailAntes ? "Edição" : "Inclusão",
+                userLabel,
+                "E-mail Google",
+                emailAntes,
+                emailDepois
+              );
+            }
+            if (!secoesIguais(prepared.secao, original.secao)) {
+              createAuditLog("Permissão", "Edição", userLabel, "Seção", original.secao, prepared.secao);
+            }
+            if (prepared.perfil !== original.perfil) {
+              createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
+            }
+            if (prepared.ativo !== original.ativo) {
+              createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
+            }
           }
         }
-      }
+        } // canUsuarios
 
-      // --- 3. AUDIT & SAVE: POSTOS ---
-      // A. Deletes
-      for (const siglaDel of removedPostos) {
-        const docId = siglaDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
-        batch.delete(doc(db, "postos", docId));
-        createAuditLog("Postos e Graduações", "Exclusão", siglaDel, "Todos", siglaDel, "");
-      }
-      // B. Creations and edits
-      for (const p of postos) {
-        const original = origPostos.find((op) => op.sigla === p.sigla);
-        const docId = p.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
-        const docRef = doc(db, "postos", docId);
-        batch.set(
-          docRef,
-          prepareFirestoreWrite(`postos/${docId}`, {
-            ...p,
-            divisaoId: String(p.divisaoId || activeDivisaoId),
-          } as Record<string, unknown>)
-        );
+        // --- 3. AUDIT & SAVE: POSTOS ---
+        // A. Deletes
+        for (const rem of removedPostos) {
+          batch.delete(doc(db, "postos", tenantDocId(rem.divisaoId, rem.chave)));
+          createAuditLog("Postos", "Exclusão", rem.chave, "Todos", rem.chave, "");
+        }
+        // B. Creations and edits
+        for (const p of postos) {
+          const original = origPostos.find((op) => op.sigla === p.sigla);
+          const docId = tenantDocId(String(p.divisaoId || activeDivisaoId), p.sigla);
+          const docRef = doc(db, "postos", docId);
+          batch.set(
+            docRef,
+            prepareFirestoreWrite(`postos/${docId}`, {
+              ...p,
+              divisaoId: String(p.divisaoId || activeDivisaoId),
+            } as Record<string, unknown>)
+          );
 
-        if (!original) {
-          createAuditLog("Postos e Graduações", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`);
-        } else {
-          if (p.descricao !== original.descricao) {
-            createAuditLog("Postos e Graduações", "Edição", p.sigla, "Descrição", original.descricao, p.descricao);
-          }
-          if (p.ordem !== original.ordem) {
-            createAuditLog("Postos e Graduações", "Ordenação", p.sigla, "Ordem", String(original.ordem || 0), String(p.ordem || 0));
+          if (!original) {
+            createAuditLog("Postos", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`);
+          } else {
+            if (p.descricao !== original.descricao) {
+              createAuditLog("Postos", "Edição", p.sigla, "Descrição", original.descricao, p.descricao);
+            }
+            if (p.ordem !== original.ordem) {
+              createAuditLog("Postos", "Ordenação", p.sigla, "Ordem", String(original.ordem || 0), String(p.ordem || 0));
+            }
           }
         }
       }
 
       // --- 4. AUDIT & SAVE: SECOES ---
-      const renameFromByTo = new Map(
-        secaoRenames.map((r) => [normalizeSecaoNome(r.to), normalizeSecaoNome(r.from)])
-      );
-      const renamedFromSet = new Set(secaoRenames.map((r) => normalizeSecaoNome(r.from)));
+      const secaoRenamesLocal = canDivisoes
+        ? secoes
+        .map((s) => ({
+          current: s,
+          original: origSecoes.find((os) => os.id === s.id),
+        }))
+        .filter((entry) => Boolean(entry.original) && entry.original!.nome !== entry.current.nome)
+        .map((entry) => ({
+          id: entry.current.id,
+          from: entry.original!.nome,
+          to: entry.current.nome,
+          divisaoId: String(entry.current.divisaoId || activeDivisaoId),
+        }))
+        : [];
 
-      // A. Deletes (renomeações só apagam o doc antigo; auditoria fica no bloco de edição)
-      for (const nomeDel of removedSecoes) {
-        const docId = nomeDel.replace(/\s+/g, "_").replace(/[ºª]/g, "");
-        batch.delete(doc(db, "secoes", docId));
-        if (!renamedFromSet.has(normalizeSecaoNome(nomeDel))) {
-          createAuditLog("Seções", "Exclusão", nomeDel, "Todos", nomeDel, "");
+      if (canCadastrosDivisao) {
+        // A. Deletes
+        for (const rem of removedSecoes) {
+          batch.delete(doc(db, "secoes", rem.chave));
+          createAuditLog("Seções", "Exclusão", rem.chave, "Todos", rem.chave, "");
         }
-      }
-      // B. Creations and edits
-      for (const s of secoes) {
-        const renameFrom = renameFromByTo.get(normalizeSecaoNome(s.nome));
-        const original = renameFrom
-          ? origSecoes.find((os) => secoesIguais(os.nome, renameFrom))
-          : origSecoes.find((os) => secoesIguais(os.nome, s.nome));
-        const docId = s.nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
-        const docRef = doc(db, "secoes", docId);
-        const payload = {
-          ...s,
-          codigo: normalizeSecaoCodigo(s.codigo) || KNOWN_SECAO_CODIGOS[s.nome] || "",
-          divisaoId: String(s.divisaoId || activeDivisaoId),
-        };
-        batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, payload as unknown as Record<string, unknown>));
+        // B. Creations and edits
+        for (const s of secoes) {
+          const original = origSecoes.find((os) => os.id === s.id);
+          const docId = String(s.id || "").trim();
+          const docRef = doc(db, "secoes", docId);
+          const payload = {
+            ...s,
+            id: docId,
+            codigo: normalizeSecaoCodigo(s.codigo) || KNOWN_SECAO_CODIGOS[s.nome] || "",
+            divisaoId: String(s.divisaoId || activeDivisaoId),
+          };
+          batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, payload as unknown as Record<string, unknown>));
 
-        if (!original) {
-          createAuditLog(
-            "Seções",
-            "Inclusão",
-            s.nome,
-            "Todos",
-            "",
-            `Nome: ${payload.nome}, Código: ${payload.codigo || "—"}, Ordem: ${payload.ordem}, Ativo: ${payload.ativo ? "Sim" : "Não"}`
-          );
-        } else {
-          if (renameFrom && !secoesIguais(String(renameFrom), s.nome)) {
-            createAuditLog("Seções", "Edição", s.nome, "Nome", String(renameFrom), s.nome);
-          }
-          if (s.ordem !== original.ordem) {
-            createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
-          }
-          if (s.ativo !== original.ativo) {
-            createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não");
-          }
-          if (String(payload.codigo || "") !== String(original.codigo || "")) {
+          if (!original) {
             createAuditLog(
               "Seções",
-              "Edição",
+              "Inclusão",
               s.nome,
-              "Código da OPM",
-              String(original.codigo || ""),
-              String(payload.codigo || "")
+              "Todos",
+              "",
+              `Nome: ${payload.nome}, Código: ${payload.codigo || "—"}, Ordem: ${payload.ordem}, Ativo: ${payload.ativo ? "Sim" : "Não"}`
             );
+          } else {
+            if (!secoesIguais(original.nome, s.nome)) {
+              createAuditLog("Seções", "Edição", s.nome, "Nome", original.nome, s.nome);
+            }
+            if (s.ordem !== original.ordem) {
+              createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
+            }
+            if (s.ativo !== original.ativo) {
+              createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não");
+            }
+            if (String(payload.codigo || "") !== String(original.codigo || "")) {
+              createAuditLog(
+                "Seções",
+                "Edição",
+                s.nome,
+                "Código da OPM",
+                String(original.codigo || ""),
+                String(payload.codigo || "")
+              );
+            }
           }
         }
       }
 
       // --- 5. AUDIT & SAVE: LEGENDAS ---
-      // A. Deletes
-      for (const siglaDel of removedLegendas) {
-        const docId = legendaDocId(siglaDel);
-        batch.delete(doc(db, "legendas", docId));
-        createAuditLog("Legendas da Escala", "Exclusão", siglaDel, "Todos", siglaDel, "");
-      }
-      // B. Creations and edits
-      for (const l of legendas) {
-        const original = origLegendas.find((ol) => ol.sigla === l.sigla);
-        const docId = legendaDocId(l.sigla);
-        const docRef = doc(db, "legendas", docId);
-        batch.set(
-          docRef,
-          prepareFirestoreWrite(`legendas/${docId}`, {
-            ...prepareLegendaForFirestore(l),
-            divisaoId: String(l.divisaoId || activeDivisaoId),
-          })
-        );
-
-        if (!original) {
-          createAuditLog(
-            "Legendas da Escala",
-            "Inclusão",
-            l.sigla,
-            "Todos",
-            "",
-            `Sigla: ${l.sigla}, Nome: ${l.nome || "—"}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`
+      if (canLegendas) {
+        // A. Deletes
+        for (const rem of removedLegendas) {
+          batch.delete(doc(db, "legendas", legendaDocId(rem.chave)));
+          createAuditLog("Legendas", "Exclusão", rem.chave, "Todos", rem.chave, "");
+        }
+        // B. Creations and edits
+        for (const l of legendas) {
+          const original = origLegendas.find((ol) => ol.sigla === l.sigla);
+          const docId = legendaDocId(l.sigla);
+          const docRef = doc(db, "legendas", docId);
+          batch.set(
+            docRef,
+            prepareFirestoreWrite(`legendas/${docId}`, {
+              ...prepareLegendaForFirestore(l),
+            })
           );
-        } else {
-          if ((l.nome || "") !== (original.nome || "")) {
-            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Nome", original.nome || "", l.nome || "");
-          }
-          if (l.descricao !== original.descricao) {
-            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Descrição", original.descricao, l.descricao);
-          }
-          if (l.cor !== original.cor) {
-            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Cor", original.cor, l.cor);
-          }
-          if (l.ordem !== original.ordem) {
-            createAuditLog("Legendas da Escala", "Ordenação", l.sigla, "Ordem", String(original.ordem || 0), String(l.ordem || 0));
-          }
-          if (l.ativo !== original.ativo) {
-            createAuditLog("Legendas da Escala", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não");
-          }
-          if (JSON.stringify(l.representacoes || null) !== JSON.stringify(original.representacoes || null)) {
+
+          if (!original) {
             createAuditLog(
-              "Legendas da Escala",
-              "Edição",
+              "Legendas",
+              "Inclusão",
               l.sigla,
-              "Representações",
-              JSON.stringify(original.representacoes || {}),
-              JSON.stringify(l.representacoes || {})
+              "Todos",
+              "",
+              `Sigla: ${l.sigla}, Nome: ${l.nome || "—"}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`
             );
-          }
-          if (JSON.stringify(l.regras || null) !== JSON.stringify(original.regras || null)) {
-            createAuditLog(
-              "Legendas da Escala",
-              "Edição",
-              l.sigla,
-              "Regras",
-              JSON.stringify(original.regras || {}),
-              JSON.stringify(l.regras || {})
-            );
+          } else {
+            if ((l.nome || "") !== (original.nome || "")) {
+              createAuditLog("Legendas", "Edição", l.sigla, "Nome", original.nome || "", l.nome || "");
+            }
+            if (l.descricao !== original.descricao) {
+              createAuditLog("Legendas", "Edição", l.sigla, "Descrição", original.descricao, l.descricao);
+            }
+            if (l.cor !== original.cor) {
+              createAuditLog("Legendas", "Edição", l.sigla, "Cor", original.cor, l.cor);
+            }
+            if (l.ordem !== original.ordem) {
+              createAuditLog("Legendas", "Ordenação", l.sigla, "Ordem", String(original.ordem || 0), String(l.ordem || 0));
+            }
+            if (l.ativo !== original.ativo) {
+              createAuditLog("Legendas", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não");
+            }
+            if (JSON.stringify(l.representacoes || null) !== JSON.stringify(original.representacoes || null)) {
+              createAuditLog(
+                "Legendas",
+                "Edição",
+                l.sigla,
+                "Representações",
+                JSON.stringify(original.representacoes || {}),
+                JSON.stringify(l.representacoes || {})
+              );
+            }
+            if (JSON.stringify(l.regras || null) !== JSON.stringify(original.regras || null)) {
+              createAuditLog(
+                "Legendas",
+                "Edição",
+                l.sigla,
+                "Regras",
+                JSON.stringify(original.regras || {}),
+                JSON.stringify(l.regras || {})
+              );
+            }
           }
         }
       }
@@ -1055,10 +1181,46 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             createAuditLog("Divisões", "Inclusão", codigo, "Todos", "", divisao.nome);
           }
         }
+
+        // Seções criadas/removidas dentro do modal de cada Divisão.
+        for (const codigoDivisao of Object.keys(secoesPendentesPorDivisao)) {
+          const pendente = secoesPendentesPorDivisao[codigoDivisao];
+          const idsFinais = new Set(pendente.secoes.map((s) => s.id));
+          for (const nomeRemovido of pendente.removidas) {
+            if (idsFinais.has(nomeRemovido)) continue;
+            batch.delete(doc(db, "secoes", nomeRemovido));
+            createAuditLog("Seções", "Exclusão", nomeRemovido, "Divisão", codigoDivisao, "");
+          }
+          for (const secao of pendente.secoes) {
+            const docIdSecao = String(secao.id || "").trim();
+            batch.set(
+              doc(db, "secoes", docIdSecao),
+              prepareFirestoreWrite(`secoes/${docIdSecao}`, {
+                id: docIdSecao,
+                nome: secao.nome,
+                codigo: secao.codigo || KNOWN_SECAO_CODIGOS[secao.nome] || "",
+                ordem: secao.ordem,
+                ativo: secao.ativo !== false,
+                divisaoId: codigoDivisao,
+                updatedAt: now.toISOString(),
+              })
+            );
+          }
+          if (pendente.secoes.length > 0) {
+            createAuditLog(
+              "Seções",
+              "Inclusão",
+              codigoDivisao,
+              "Seções da Divisão",
+              "",
+              pendente.secoes.map((s) => s.nome).join(", ")
+            );
+          }
+        }
       }
 
       // --- 7. AUDIT & SAVE: CONFIGS GERAIS ---
-      if (JSON.stringify(gerais) !== JSON.stringify(origGerais)) {
+      if (canGerais && JSON.stringify(gerais) !== JSON.stringify(origGerais)) {
         batch.set(
           doc(db, "configuracoes", "gerais"),
           prepareFirestoreWrite("configuracoes/gerais", {
@@ -1090,13 +1252,28 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       // Commit the database batch
       await batch.commit();
 
+      if (canDivisoes) {
+        // Divisões novas precisam do catálogo base de postos (legendas são globais).
+        const divisoesNovas = divisoesList
+          .map((d) => divisaoDocId(d.codigo))
+          .filter((codigo) => !origDivisoes.some((o) => o.codigo === codigo));
+        for (const codigo of divisoesNovas) {
+          try {
+            await ensureCatalogoBaseDivisao(codigo);
+          } catch (err) {
+            console.warn(`Falha ao semear catálogo da Divisão ${codigo}:`, err);
+          }
+        }
+      }
+
       // Propaga rename de seção em escalas e CF
-      for (const rename of secaoRenames) {
+      for (const rename of secaoRenamesLocal) {
         try {
           const cascade = await cascadeSecaoRename(
             rename.from,
             rename.to,
-            activeDivisaoId
+            rename.divisaoId,
+            rename.id
           );
           if (cascade.semanais + cascade.alteracao + cascade.frequencia > 0) {
             createAuditLog(
@@ -1113,16 +1290,18 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         }
       }
 
-      // Mantém auth_index alinhado aos usuários
-      for (const u of usersToSave) {
-        if (u.email) {
-          await upsertAuthIndex(u).catch((e) => console.warn("auth_index upsert:", e));
+      if (canCadastrosDivisao) {
+        // Mantém auth_index alinhado aos usuários
+        for (const u of usersToSave) {
+          if (u.email) {
+            await upsertAuthIndex(u).catch((e) => console.warn("auth_index upsert:", e));
+          }
         }
-      }
-      for (const reDel of removedUsuarios) {
-        const original = origUsuarios.find((u) => u.re === reDel);
-        if (original?.email) {
-          await removeAuthIndex(original.email).catch(() => undefined);
+        for (const reDel of removedUsuarios) {
+          const original = origUsuarios.find((u) => u.re === reDel);
+          if (original?.email) {
+            await removeAuthIndex(original.email).catch(() => undefined);
+          }
         }
       }
 
@@ -1134,28 +1313,37 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         detalhes: "Salvamento de configurações administrativas",
       }).catch((e) => console.warn("Falha ao registrar auditoria do salvamento:", e));
 
-      // Set original states to the newly saved ones
-      setOrigColaboradores(JSON.parse(JSON.stringify(colsToSave)));
-      setOrigUsuarios(JSON.parse(JSON.stringify(usersToSave)));
-      setOrigPostos(JSON.parse(JSON.stringify(postos)));
-      setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
-      setOrigLegendas(JSON.parse(JSON.stringify(legendas)));
-      setOrigDivisoes(JSON.parse(JSON.stringify(divisoesList)));
-      setOrigGerais(JSON.parse(JSON.stringify(gerais)));
-
-      // Reset removed logs
-      setRemovedColaboradores([]);
-      setRemovedUsuarios([]);
-      setRemovedPostos([]);
-      setRemovedSecoes([]);
-      setRemovedLegendas([]);
-      setRemovedDivisoes([]);
-      setSecaoRenames([]);
+      // Set original states only for what was actually saved.
+      if (canCadastrosDivisao) {
+        setOrigColaboradores(JSON.parse(JSON.stringify(colsToSave)));
+        setOrigUsuarios(JSON.parse(JSON.stringify(usersToSave)));
+        setOrigPostos(JSON.parse(JSON.stringify(postos)));
+        setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
+        setRemovedColaboradores([]);
+        setRemovedUsuarios([]);
+        setRemovedPostos([]);
+        setRemovedSecoes([]);
+      }
+      if (canLegendas) {
+        setOrigLegendas(JSON.parse(JSON.stringify(legendas)));
+        setRemovedLegendas([]);
+      }
+      if (canDivisoes) {
+        setOrigDivisoes(JSON.parse(JSON.stringify(divisoesList)));
+        setRemovedDivisoes([]);
+        setSecoesPendentesPorDivisao({});
+        setSecaoRenames([]);
+      }
+      if (canGerais) {
+        setOrigGerais(JSON.parse(JSON.stringify(gerais)));
+      }
 
       // Atualiza seção na sessão se o usuário logado foi afetado por rename
-      const sessaoSecao = normalizeSecaoNome(resolveSecaoRenamed(usuario.secao));
-      if (!secoesIguais(sessaoSecao, usuario.secao)) {
-        const updated = toSessionUser({ ...usuario, secao: sessaoSecao });
+      const renameSessao = secaoRenamesLocal.find(
+        (r) => String(r.id || "").trim() === String(usuario.secaoId || "").trim() || secoesIguais(r.from, usuario.secao)
+      );
+      if (renameSessao) {
+        const updated = toSessionUser({ ...usuario, secao: renameSessao.to, secaoId: renameSessao.id });
         writeSession(updated);
         onUsuarioUpdate?.(updated);
       }
@@ -1202,11 +1390,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       }
     }
 
+    const targetDivisaoId = String(currentCol.divisaoId || activeDivisaoId);
+    const targetSecaoId = String(currentCol.secaoId || "").trim();
+    const targetSecao = secoes.find(
+      (s) => s.id === targetSecaoId && String(s.divisaoId || targetDivisaoId) === targetDivisaoId
+    );
+    if (!targetSecao) {
+      alert("Selecione uma seção válida desta Divisão.");
+      return;
+    }
+
     const normalized = normalizeColaborador({
       ...currentCol,
       re: novaRe,
       email,
-      divisaoId: String(currentCol.divisaoId || activeDivisaoId),
+      secao: targetSecao.nome,
+      secaoId: targetSecao.id,
+      divisaoId: targetDivisaoId,
     });
 
     const duplicada = colaboradores.some(
@@ -1261,12 +1461,22 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     const novaRe = String(currentUser.re || "").trim();
     const isNew = userOriginalRe === null;
     const targetDivisaoId = String(currentUser.divisaoId || activeDivisaoId);
+    const targetSecaoId = String(currentUser.secaoId || "").trim();
     if (!canManageUsuarioInDivisao(usuario, targetDivisaoId)) {
       alert("Você não pode gerenciar usuários desta Divisão.");
       return;
     }
-    if (currentUser.perfil === "Gerente" && !canAssignGerente(usuario)) {
-      alert("Somente Gerente pode atribuir o perfil Gerente.");
+    const targetSecao = secoes.find(
+      (s) => s.id === targetSecaoId && String(s.divisaoId || targetDivisaoId) === targetDivisaoId
+    );
+    if (!targetSecao) {
+      alert("Selecione uma seção válida desta Divisão.");
+      return;
+    }
+
+    const allowedPerfis = assignablePerfis(usuario);
+    if (!allowedPerfis.includes(currentUser.perfil as any)) {
+      alert("Perfil não permitido para o seu nível de acesso.");
       return;
     }
 
@@ -1291,6 +1501,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       ...currentUser,
       re: novaRe,
       divisaoId: targetDivisaoId,
+      secao: targetSecao.nome,
+      secaoId: targetSecao.id,
       email: emailCheck.email,
       perfil: currentUser.perfil || "Operador",
       ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
@@ -1353,8 +1565,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         divisaoId: String(currentPosto.divisaoId || activeDivisaoId),
       };
       if (postoOriginalSigla !== null && postoOriginalSigla !== novaSigla) {
+        const divisaoId = String(currentPosto.divisaoId || activeDivisaoId);
         setRemovedPostos((prev) =>
-          prev.includes(postoOriginalSigla) ? prev : [...prev, postoOriginalSigla]
+          prev.some((r) => r.chave === postoOriginalSigla)
+            ? prev
+            : [...prev, { chave: postoOriginalSigla, divisaoId }]
         );
       }
     } else {
@@ -1379,6 +1594,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
     const nome = normalizeSecaoNome(currentSecao.nome);
     const codigo = normalizeSecaoCodigo(currentSecao.codigo);
+    const secaoId = String(currentSecao.id || "").trim() || doc(collection(db, "secoes")).id;
 
     if (!nome) {
       alert("Por favor, preencha o nome da seção.");
@@ -1390,7 +1606,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     const duplicateNome = secoes.some(
-      (s) => secoesIguais(s.nome, nome) && !secoesIguais(s.nome, secaoOriginalNome || "")
+      (s) => secoesIguais(s.nome, nome) && s.id !== secaoId
     );
     if (duplicateNome) {
       alert("Já existe uma seção com este nome.");
@@ -1400,7 +1616,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     const duplicateCodigo = secoes.find(
       (s) =>
         normalizeSecaoCodigo(s.codigo) === codigo &&
-        !secoesIguais(s.nome, secaoOriginalNome || nome)
+        s.id !== secaoId
     );
     if (duplicateCodigo) {
       alert(`O código ${codigo} já está em uso pela seção "${duplicateCodigo.nome}".`);
@@ -1408,40 +1624,45 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     let updatedList = [...secoes];
+    const originalNome = secoes.find((s) => s.id === secaoId)?.nome || secaoOriginalNome || "";
     const payload = {
       ...currentSecao,
+      id: secaoId,
       nome,
       codigo,
       divisaoId: String(currentSecao.divisaoId || activeDivisaoId),
       ativo: currentSecao.ativo !== false,
     };
 
-    const editIndex =
-      secaoOriginalNome !== null
-        ? secoes.findIndex((s) => secoesIguais(s.nome, secaoOriginalNome))
-        : -1;
+    const editIndex = secoes.findIndex((s) => s.id === secaoId);
 
     if (editIndex > -1) {
       updatedList[editIndex] = {
         ...payload,
         ordem: secoes[editIndex].ordem ?? payload.ordem,
       };
-      if (secaoOriginalNome && !secoesIguais(secaoOriginalNome, nome)) {
-        setRemovedSecoes((prev) =>
-          prev.includes(secaoOriginalNome) ? prev : [...prev, secaoOriginalNome]
-        );
+      if (!secoesIguais(originalNome, nome)) {
         setSecaoRenames((prev) => [
-          ...prev.filter((r) => !secoesIguais(r.from, secaoOriginalNome)),
-          { from: secaoOriginalNome, to: nome },
+          ...prev.filter((r) => r.id !== secaoId),
+          {
+            id: secaoId,
+            from: originalNome,
+            to: nome,
+            divisaoId: String(payload.divisaoId || activeDivisaoId),
+          },
         ]);
         setColaboradores((prev) =>
           prev.map((c) =>
-            secoesIguais(c.secao, secaoOriginalNome) ? { ...c, secao: nome } : c
+            String(c.secaoId || "").trim() === secaoId || secoesIguais(c.secao, originalNome)
+              ? { ...c, secao: nome, secaoId }
+              : c
           )
         );
         setUsuarios((prev) =>
           prev.map((u) =>
-            secoesIguais(u.secao, secaoOriginalNome) ? { ...u, secao: nome } : u
+            String(u.secaoId || "").trim() === secaoId || secoesIguais(u.secao, originalNome)
+              ? { ...u, secao: nome, secaoId }
+              : u
           )
         );
       }
@@ -1454,7 +1675,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       });
     }
 
-    setSecoes(updatedList);
+    setSecoes(updateOrderFields(updatedList));
     setSecaoModalOpen(false);
     setCurrentSecao(null);
     setSecaoOriginalNome(null);
@@ -1463,6 +1684,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const handleLegendaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentLegenda) return;
+    if (!canLegendas) {
+      alert("Somente Gerente pode cadastrar, editar ou excluir legendas globais.");
+      return;
+    }
 
     const novaSigla = String(currentLegenda.sigla || "").trim();
     if (!novaSigla || !String(currentLegenda.descricao || "").trim()) {
@@ -1480,10 +1705,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     // Normaliza: omite campos opcionais vazios (compatível com documentos legados)
-    const cleaned: TenantLegenda = {
-      ...normalizeLegenda({ ...currentLegenda, sigla: novaSigla }),
-      divisaoId: String(currentLegenda.divisaoId || activeDivisaoId),
-    };
+    const cleaned: TenantLegenda = normalizeLegenda({ ...currentLegenda, sigla: novaSigla });
 
     let updatedList = [...legendas];
     const editIndex =
@@ -1495,7 +1717,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       updatedList[editIndex] = { ...cleaned, ordem: legendas[editIndex].ordem };
       if (legendaOriginalSigla !== null && legendaOriginalSigla !== novaSigla) {
         setRemovedLegendas((prev) =>
-          prev.includes(legendaOriginalSigla) ? prev : [...prev, legendaOriginalSigla]
+          prev.some((r) => r.chave === legendaOriginalSigla)
+            ? prev
+            : [...prev, { chave: legendaOriginalSigla }]
         );
       }
     } else {
@@ -1512,6 +1736,86 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setCurrentLegenda(null);
     setLegendaOriginalSigla(null);
     setLegendaModalSection("basicas");
+  };
+
+  /**
+   * Abre o modal de Divisão já com as seções dela carregadas. Divisão nova começa
+   * vazia; edição busca no Firestore, salvo quando há alteração pendente na sessão.
+   */
+  const abrirModalDivisao = async (divisao: Divisao | null) => {
+    setCurrentDivisao(divisao ? { ...divisao } : { codigo: "", nome: "", descricao: "", ativo: true });
+    setDivisaoOriginalCodigo(divisao?.codigo || null);
+    setNovaSecaoNome("");
+    setNovaSecaoCodigo("");
+    setDivisaoModalOpen(true);
+
+    if (!divisao?.codigo) {
+      setDivisaoSecoes([]);
+      setDivisaoSecoesRemovidas([]);
+      return;
+    }
+
+    const pendente = secoesPendentesPorDivisao[divisao.codigo];
+    if (pendente) {
+      setDivisaoSecoes(pendente.secoes);
+      setDivisaoSecoesRemovidas(pendente.removidas);
+      return;
+    }
+
+    setDivisaoSecoesCarregando(true);
+    setDivisaoSecoes([]);
+    setDivisaoSecoesRemovidas([]);
+    try {
+      const snap = await getDocs(
+        query(collection(db, "secoes"), where("divisaoId", "==", divisao.codigo))
+      );
+      const lista: SecaoDivisaoForm[] = snap.docs.map((d, idx) => {
+        const data = d.data() as Record<string, unknown>;
+        return {
+          id: d.id,
+          nome: normalizeSecaoNome(String(data.nome || "")),
+          codigo: normalizeSecaoCodigo(String(data.codigo || "")),
+          ordem: typeof data.ordem === "number" ? data.ordem : idx + 1,
+          ativo: data.ativo !== false,
+          divisaoId: String(data.divisaoId || divisao.codigo),
+        };
+      });
+      lista.sort((a, b) => a.ordem - b.ordem);
+      setDivisaoSecoes(lista);
+    } catch (err) {
+      console.warn("Falha ao carregar seções da Divisão:", err);
+      setSaveError("Não foi possível carregar as seções desta Divisão.");
+    } finally {
+      setDivisaoSecoesCarregando(false);
+    }
+  };
+
+  const adicionarSecaoDivisao = () => {
+    const nome = normalizeSecaoNome(novaSecaoNome);
+    if (!nome) return;
+    if (divisaoSecoes.some((s) => secoesIguais(s.nome, nome))) {
+      alert("Esta Divisão já possui uma seção com este nome.");
+      return;
+    }
+    const maxOrdem = divisaoSecoes.reduce((max, s) => (s.ordem > max ? s.ordem : max), 0);
+    setDivisaoSecoes((prev) => [
+      ...prev,
+      {
+        id: doc(collection(db, "secoes")).id,
+        nome,
+        codigo: normalizeSecaoCodigo(novaSecaoCodigo),
+        ordem: maxOrdem + 1,
+        ativo: true,
+        divisaoId: String(currentDivisao?.codigo || activeDivisaoId),
+      },
+    ]);
+    setNovaSecaoNome("");
+    setNovaSecaoCodigo("");
+  };
+
+  const removerSecaoDivisao = (id: string) => {
+    setDivisaoSecoes((prev) => prev.filter((s) => s.id !== id));
+    setDivisaoSecoesRemovidas((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   const handleDivisaoSubmit = (e: React.FormEvent) => {
@@ -1552,6 +1856,35 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     } else {
       setDivisoesList((prev) => sortDivisoes([...prev, payload]));
     }
+
+    if (codigo === activeDivisaoId) {
+      // Divisão ativa já é a fonte da aba Seções: aplica lá para não gravar duas vezes.
+      setSecoes(
+        updateOrderFields(
+          divisaoSecoes.map((s) => ({ ...s, divisaoId: codigo }))
+        )
+      );
+      setRemovedSecoes((prev) => [
+        ...prev,
+        ...divisaoSecoesRemovidas
+          .filter((secaoId) => !prev.some((r) => r.chave === secaoId))
+          .map((secaoId) => ({ chave: secaoId, divisaoId: codigo })),
+      ]);
+    } else {
+      setSecoesPendentesPorDivisao((prev) => {
+        const proximo = { ...prev };
+        // Renomear o código move as seções junto: o divisaoId delas é o código.
+        if (divisaoOriginalCodigo && divisaoOriginalCodigo !== codigo) {
+          delete proximo[divisaoOriginalCodigo];
+        }
+        proximo[codigo] = {
+          secoes: divisaoSecoes.map((s) => ({ ...s, divisaoId: codigo })),
+          removidas: divisaoSecoesRemovidas,
+        };
+        return proximo;
+      });
+    }
+
     setDivisaoModalOpen(false);
     setCurrentDivisao(null);
     setDivisaoOriginalCodigo(null);
@@ -1738,131 +2071,22 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
           <aside className="lg:col-span-3 mb-6 lg:mb-0">
             <nav className="space-y-1 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mb-2">Módulos Administrativos</p>
-              
-              <button
-                id="tab-colaboradores"
-                onClick={() => setActiveTab("colaboradores")}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  activeTab === "colaboradores"
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Users size={16} />
-                <span>Colaboradores</span>
-              </button>
 
-              {canConfig && (
+              {MENU_ITENS.filter((item) => item.visivel).map((item) => (
                 <button
-                  id="tab-usuarios"
-                  onClick={() => setActiveTab("usuarios")}
+                  key={item.id}
+                  id={`tab-${item.id}`}
+                  onClick={() => setActiveTab(item.id)}
                   className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                    activeTab === "usuarios"
+                    activeTab === item.id
                       ? "bg-blue-50 text-blue-700"
                       : "text-gray-600 hover:bg-gray-50"
                   }`}
                 >
-                  <Shield size={16} />
-                  <span>Permissão</span>
+                  <item.icone size={16} />
+                  <span>{item.label}</span>
                 </button>
-              )}
-
-              {canConfig && (
-                <button
-                  id="tab-registros"
-                  onClick={() => setActiveTab("registros")}
-                  className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                    activeTab === "registros"
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <FileText size={16} />
-                  <span>Registros (Logs)</span>
-                </button>
-              )}
-
-              {canConfig && (
-                <button
-                  id="tab-testes"
-                  onClick={() => setActiveTab("testes")}
-                  className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                    activeTab === "testes"
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <FlaskConical size={16} />
-                  <span>Central de Testes</span>
-                </button>
-              )}
-
-              <button
-                id="tab-postos"
-                onClick={() => setActiveTab("postos")}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  activeTab === "postos"
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Briefcase size={16} />
-                <span>Postos e Graduações</span>
-              </button>
-
-              <button
-                id="tab-secoes"
-                onClick={() => setActiveTab("secoes")}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  activeTab === "secoes"
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Layers size={16} />
-                <span>Seções</span>
-              </button>
-
-              <button
-                id="tab-legendas"
-                onClick={() => setActiveTab("legendas")}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  activeTab === "legendas"
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Activity size={16} />
-                <span>Legendas da Escala</span>
-              </button>
-
-              <button
-                id="tab-gerais"
-                onClick={() => setActiveTab("gerais")}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                  activeTab === "gerais"
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                <Settings size={16} />
-                <span>Configurações Gerais</span>
-              </button>
-
-              {canDivisoes && (
-                <button
-                  id="tab-divisoes"
-                  onClick={() => setActiveTab("divisoes")}
-                  className={`w-full flex items-center space-x-3 px-3 py-2.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                    activeTab === "divisoes"
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-50"
-                  }`}
-                >
-                  <Building2 size={16} />
-                  <span>Divisões</span>
-                </button>
-              )}
+              ))}
             </nav>
           </aside>
 
@@ -1884,13 +2108,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <button
                     id="new-col-btn"
                     onClick={() => {
+                      const secaoInicial = listSecoesDaDivisao(activeDivisaoId)[0];
                       setCurrentCol({
                         re: "",
                         postoGrad: postos[0]?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
                         email: "",
-                        secao: secoes[0]?.nome || "Seç Gest Educ",
+                        secao: secaoInicial?.nome || "",
+                        secaoId: secaoInicial?.id || "",
                         divisaoId: activeDivisaoId,
                         observacao: "",
                         ativo: true
@@ -2032,7 +2258,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                               <td className="px-4 py-3 text-right space-x-1">
                                 <button
                                   onClick={() => {
-                                    setCurrentCol({ ...col });
+                                    setCurrentCol({
+                                      ...col,
+                                      secaoId:
+                                        col.secaoId ||
+                                        listSecoesDaDivisao(String(col.divisaoId || activeDivisaoId)).find((s) =>
+                                          secoesIguais(s.nome, col.secao)
+                                        )?.id ||
+                                        "",
+                                    });
                                     setColOriginalRe(col.re);
                                     setColModalOpen(true);
                                   }}
@@ -2109,16 +2343,19 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <button
                     id="new-user-btn"
                     onClick={() => {
+                      const secaoInicial = listSecoesDaDivisao(activeDivisaoId)[0];
                       setCurrentUser({
                         re: "",
                         postoGrad: postos[0]?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
                         email: "",
-                        secao: secoes[0]?.nome || "Seç Gest Educ",
+                        secao: secaoInicial?.nome || "",
+                        secaoId: secaoInicial?.id || "",
                         divisaoId: activeDivisaoId,
                         perfil: "Operador",
                         ativo: true,
+                        secoesResponsaveisIds: [],
                         authProvider: "google",
                         ultimoLogin: null,
                         emailVerificado: false,
@@ -2217,6 +2454,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                       authProvider: usr.authProvider || "local",
                                       ultimoLogin: usr.ultimoLogin ?? null,
                                       emailVerificado: usr.emailVerificado === true,
+                                    secaoId: usr.secaoId || listSecoesDaDivisao(String(usr.divisaoId || activeDivisaoId)).find((s) => secoesIguais(s.nome, usr.secao))?.id || "",
+                                    secoesResponsaveisIds: [],
                                     });
                                     setUserOriginalRe(usr.re);
                                     setUserModalOpen(true);
@@ -2367,7 +2606,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <button
                     id="new-secao-btn"
                     onClick={() => {
-                      setCurrentSecao({ nome: "", codigo: "", ativo: true });
+                      setCurrentSecao({
+                        id: doc(collection(db, "secoes")).id,
+                        nome: "",
+                        codigo: "",
+                        ativo: true,
+                        divisaoId: activeDivisaoId,
+                      });
                       setSecaoOriginalNome(null);
                       setSecaoModalOpen(true);
                     }}
@@ -2396,7 +2641,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         </tr>
                       ) : (
                         secoes.map((s, idx) => (
-                          <tr key={s.nome} className="hover:bg-gray-50">
+                          <tr key={s.id} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center space-x-1.5">
                                 <span className="font-bold text-gray-500">{s.ordem || idx + 1}</span>
@@ -2432,6 +2677,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 onClick={() => {
                                   setCurrentSecao({
                                     ...s,
+                                    id: s.id,
                                     codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
                                   });
                                   setSecaoOriginalNome(s.nome);
@@ -2443,7 +2689,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 <Edit2 size={13} />
                               </button>
                               <button
-                                onClick={() => requestDelete("secoes", s.nome, s.nome)}
+                                onClick={() => requestDelete("secoes", s.id, s.nome)}
                                 className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center"
                                 title="Excluir"
                               >
@@ -2460,7 +2706,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 5. MODULE: LEGENDAS DA ESCALA */}
-            {activeTab === "legendas" && (
+            {activeTab === "legendas" && canLegendas && (
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
@@ -2472,13 +2718,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   </div>
                   <button
                     id="new-legenda-btn"
+                    disabled={!canLegendas}
                     onClick={() => {
+                      if (!canLegendas) return;
                       setCurrentLegenda(createEmptyLegendaForm());
                       setLegendaOriginalSigla(null);
                       setLegendaModalSection("basicas");
                       setLegendaModalOpen(true);
                     }}
-                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 bg-blue-600 hover:bg-blue-500 text-white"
                   >
                     <Plus size={14} />
                     <span>Nova Legenda</span>
@@ -2559,20 +2807,26 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                             </td>
                             <td className="px-4 py-3 text-right space-x-1">
                               <button
+                                disabled={!canLegendas}
                                 onClick={() => {
+                                  if (!canLegendas) return;
                                   setCurrentLegenda(toLegendaFormState(l));
                                   setLegendaOriginalSigla(l.sigla);
                                   setLegendaModalSection("basicas");
                                   setLegendaModalOpen(true);
                                 }}
-                                className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
+                                className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center disabled:cursor-not-allowed disabled:opacity-50"
                                 title="Editar"
                               >
                                 <Edit2 size={13} />
                               </button>
                               <button
-                                onClick={() => requestDelete("legendas", l.sigla, l.sigla)}
-                                className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center"
+                                disabled={!canLegendas}
+                                onClick={() => {
+                                  if (!canLegendas) return;
+                                  requestDelete("legendas", l.sigla, l.sigla);
+                                }}
+                                className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center disabled:cursor-not-allowed disabled:opacity-50"
                                 title="Excluir"
                               >
                                 <Trash2 size={13} />
@@ -2593,15 +2847,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Divisões</h2>
-                    <p className="text-xs text-gray-500">Cadastre e mantenha as Divisões disponíveis no sistema.</p>
+                    <p className="text-xs text-gray-500">
+                      Cadastre as Divisões e as seções de cada uma. As seções ficam disponíveis
+                      para vincular aos colaboradores daquela Divisão.
+                    </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setCurrentDivisao({ codigo: "", nome: "", descricao: "", ativo: true });
-                      setDivisaoOriginalCodigo(null);
-                      setDivisaoModalOpen(true);
-                    }}
+                    onClick={() => void abrirModalDivisao(null)}
                     className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                   >
                     <Plus size={14} />
@@ -2630,11 +2883,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                             <td className="px-4 py-3 text-gray-600">{divisao.descricao || "—"}</td>
                             <td className="px-4 py-3 text-center">{divisao.ativo !== false ? "ATIVA" : "INATIVA"}</td>
                             <td className="px-4 py-3 text-right space-x-1">
-                              <button type="button" onClick={() => {
-                                setCurrentDivisao({ ...divisao });
-                                setDivisaoOriginalCodigo(divisao.codigo);
-                                setDivisaoModalOpen(true);
-                              }} className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded cursor-pointer" title="Editar">
+                              <button type="button" onClick={() => void abrirModalDivisao(divisao)} className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded cursor-pointer" title="Editar">
                                 <Edit2 size={13} />
                               </button>
                               <button type="button" onClick={() => requestDelete("divisoes", divisao.codigo, divisao.nome)} className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded cursor-pointer" title="Excluir">
@@ -2651,7 +2900,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 7. MODULE: CONFIGURAÇÕES GERAIS */}
-            {activeTab === "gerais" && (
+            {activeTab === "gerais" && canGerais && (
               <div>
                 <div className="mb-6 pb-4 border-b border-gray-150">
                   <h2 className="text-base font-bold text-gray-900">Configurações Gerais da Aplicação</h2>
@@ -2742,7 +2991,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 7. MODULE: REGISTROS DE AUDITORIA (LOGS) */}
-            {activeTab === "registros" && canConfig && (
+            {activeTab === "registros" && canLogs && (
               <LogsAuditPanel
                 logs={logsList}
                 loading={logsLoading}
@@ -2752,7 +3001,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             )}
 
             {/* 8. MODULE: CENTRAL DE TESTES */}
-            {activeTab === "testes" && canConfig && (
+            {activeTab === "testes" && canTestes && (
               <CentralTestes usuario={usuario} />
             )}
           </main>
@@ -2870,17 +3119,43 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção de Serviço *</label>
-                    <select
-                      value={currentCol.secao}
-                      onChange={(e) => setCurrentCol({ ...currentCol, secao: e.target.value })}
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
-                      required
-                    >
-                      {secoes.map((s) => (
-                        <option key={s.nome} value={s.nome}>{s.nome}</option>
-                      ))}
-                    </select>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Seção de Serviço *
+                      <span className="ml-1 normal-case font-semibold text-gray-400">
+                        (Divisão {currentCol.divisaoId || activeDivisaoId})
+                      </span>
+                    </label>
+                    {(() => {
+                      const opcoes = listSecoesDaDivisao(String(currentCol.divisaoId || activeDivisaoId));
+                      return (
+                        <select
+                          value={currentCol.secaoId || ""}
+                          onChange={(e) => {
+                            const nextId = e.target.value;
+                            const secao = opcoes.find((s) => s.id === nextId);
+                            setCurrentCol({
+                              ...currentCol,
+                              secaoId: nextId,
+                              secao: secao?.nome || "",
+                            });
+                          }}
+                          className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100"
+                          required
+                          disabled={opcoes.length === 0}
+                        >
+                          <option value="" disabled>Selecione a seção</option>
+                          {opcoes.map((s) => (
+                            <option key={s.id} value={s.id}>{s.nome}</option>
+                          ))}
+                        </select>
+                      );
+                    })()}
+                    {listSecoesDaDivisao(String(currentCol.divisaoId || activeDivisaoId)).length === 0 && (
+                      <p className="mt-1 text-[11px] text-amber-700 font-semibold">
+                        Esta Divisão ainda não possui seções. Cadastre-as em Divisões antes de
+                        vincular colaboradores.
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex flex-col justify-end h-full pt-4">
@@ -2982,6 +3257,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 nome: col.nome,
                                 nomeCompleto: col.nomeCompleto || "",
                                 secao: col.secao,
+                                secaoId: col.secaoId || "",
                                 email: normalizeEmail(col.email) || prev.email || "",
                               }
                             : prev
@@ -3096,7 +3372,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Divisão *</label>
                     <select
                       value={currentUser.divisaoId || activeDivisaoId}
-                      onChange={(e) => setCurrentUser({ ...currentUser, divisaoId: e.target.value })}
+                      onChange={(e) => {
+                        const nextDivisaoId = e.target.value;
+                        const secoesDaDivisao = listSecoesDaDivisao(nextDivisaoId);
+                        setCurrentUser((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                divisaoId: nextDivisaoId,
+                                secaoId: secoesDaDivisao.find((s) => s.id === prev.secaoId)?.id || secoesDaDivisao[0]?.id || "",
+                                secao:
+                                  secoesDaDivisao.find((s) => s.id === prev.secaoId)?.nome ||
+                                  secoesDaDivisao[0]?.nome ||
+                                  "",
+                              }
+                            : prev
+                        );
+                      }}
                       disabled={isAdministrador(usuario)}
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-500"
                       required
@@ -3119,29 +3411,49 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Perfil de Acesso *</label>
                     <select
                       value={currentUser.perfil || "Operador"}
-                      onChange={(e) => setCurrentUser({ ...currentUser, perfil: e.target.value as any })}
+                      onChange={(e) =>
+                        setCurrentUser({
+                          ...currentUser,
+                          perfil: e.target.value as any,
+                        })
+                      }
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
                       required
                     >
-                      <option value="Operador">Operador</option>
-                      <option value="Administrador">Administrador</option>
-                      <option value="Gestor">Gestor</option>
-                      {canAssignGerente(usuario) && <option value="Gerente">Gerente</option>}
+                      {perfilOptions.map((perfil) => (
+                        <option key={perfil} value={perfil}>
+                          {perfil}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção *</label>
-                    <select
-                      value={currentUser.secao}
-                      onChange={(e) => setCurrentUser({ ...currentUser, secao: e.target.value })}
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
-                      required
-                    >
-                      {secoes.map((s) => (
-                        <option key={s.nome} value={s.nome}>{s.nome}</option>
-                      ))}
-                    </select>
+                    {(() => {
+                      const opcoes = listSecoesDaDivisao(String(currentUser.divisaoId || activeDivisaoId));
+                      return (
+                        <select
+                          value={currentUser.secaoId || ""}
+                          onChange={(e) => {
+                            const nextId = e.target.value;
+                            const secao = opcoes.find((s) => s.id === nextId);
+                            setCurrentUser({
+                              ...currentUser,
+                              secaoId: nextId,
+                              secao: secao?.nome || "",
+                            });
+                          }}
+                          className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                          required
+                        >
+                          <option value="">Selecione a seção</option>
+                          {opcoes.map((s) => (
+                            <option key={s.id} value={s.id}>{s.nome}</option>
+                          ))}
+                        </select>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -3190,9 +3502,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-sm w-full overflow-hidden"
+              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-md w-full overflow-hidden max-h-[90vh] flex flex-col"
             >
-              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
+              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shrink-0">
                 <h3 className="text-sm font-bold uppercase tracking-wider">
                   {divisaoOriginalCodigo ? "Editar Divisão" : "Nova Divisão"}
                 </h3>
@@ -3200,7 +3512,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <X size={18} />
                 </button>
               </div>
-              <form onSubmit={handleDivisaoSubmit} className="p-6 space-y-4">
+              <form onSubmit={handleDivisaoSubmit} className="p-6 space-y-4 overflow-y-auto">
                 <div>
                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Código *</label>
                   <input
@@ -3234,6 +3546,91 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <input type="checkbox" checked={currentDivisao.ativo !== false} onChange={(e) => setCurrentDivisao({ ...currentDivisao, ativo: e.target.checked })} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                   <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Divisão Ativa</span>
                 </label>
+
+                {/* Seções desta Divisão — alimentam o campo Seção do colaborador */}
+                <div className="pt-4 border-t border-gray-150">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Seções desta Divisão
+                  </label>
+                  <p className="text-[11px] text-gray-500 mb-3">
+                    As seções cadastradas aqui ficam disponíveis para vincular aos colaboradores
+                    desta Divisão.
+                  </p>
+
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={novaSecaoNome}
+                      onChange={(e) => setNovaSecaoNome(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          adicionarSecaoDivisao();
+                        }
+                      }}
+                      placeholder="Nome da seção"
+                      className="flex-1 border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
+                    />
+                    <input
+                      type="text"
+                      value={novaSecaoCodigo}
+                      onChange={(e) => setNovaSecaoCodigo(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          adicionarSecaoDivisao();
+                        }
+                      }}
+                      placeholder="Cód. OPM"
+                      className="w-28 border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={adicionarSecaoDivisao}
+                      disabled={!novaSecaoNome.trim()}
+                      className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <Plus size={13} />
+                      Adicionar
+                    </button>
+                  </div>
+
+                  {divisaoSecoesCarregando ? (
+                    <p className="text-[11px] text-gray-400 font-semibold py-2">
+                      Carregando seções...
+                    </p>
+                  ) : divisaoSecoes.length === 0 ? (
+                    <p className="text-[11px] text-gray-400 font-semibold py-2">
+                      Nenhuma seção cadastrada nesta Divisão.
+                    </p>
+                  ) : (
+                    <ul className="border border-gray-200 rounded-lg divide-y divide-gray-200 max-h-48 overflow-y-auto">
+                      {divisaoSecoes.map((secao) => (
+                        <li
+                          key={secao.id}
+                          className="flex items-center justify-between px-3 py-2 text-xs"
+                        >
+                          <span className="font-semibold text-gray-900">
+                            {secao.nome}
+                            {secao.codigo && (
+                              <span className="ml-2 font-mono text-[10px] text-gray-500">
+                                {secao.codigo}
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removerSecaoDivisao(secao.id)}
+                            className="p-1 hover:bg-red-50 text-red-600 rounded cursor-pointer"
+                            title="Remover seção"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
                 <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
                   <button type="button" onClick={() => setDivisaoModalOpen(false)} className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">Cancelar</button>
                   <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-xs cursor-pointer">Confirmar</button>

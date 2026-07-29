@@ -44,9 +44,14 @@ export function toSessionUser(user: Usuario): Usuario {
     nomeCompleto: user.nomeCompleto,
     postoGrad: user.postoGrad,
     secao: user.secao,
+    secaoId: user.secaoId,
     divisaoId,
     // Só mantém Divisão ativa se foi escolhida explicitamente (não copia cadastro).
     ...(active ? { activeDivisaoId: active } : { activeDivisaoId: "" }),
+    activeSecaoId: String(user.activeSecaoId || "").trim() || undefined,
+    secoesResponsaveisIds: (user.secoesResponsaveisIds || []).map((secaoId) =>
+      String(secaoId || "").trim()
+    ),
     perfil: user.perfil || "Operador",
     ativo: user.ativo,
     email: normalizeEmail(user.email) || undefined,
@@ -67,6 +72,19 @@ export function setActiveDivisaoInSession(
   const next = toSessionUser({
     ...user,
     activeDivisaoId: String(divisaoId || "").trim(),
+  });
+  writeSession(next);
+  return next;
+}
+
+/** Define a Seção ativa na sessão. */
+export function setActiveSecaoInSession(
+  user: Usuario,
+  secaoId: string
+): Usuario {
+  const next = toSessionUser({
+    ...user,
+    activeSecaoId: String(secaoId || "").trim(),
   });
   writeSession(next);
   return next;

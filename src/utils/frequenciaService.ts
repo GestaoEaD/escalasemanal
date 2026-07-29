@@ -49,6 +49,8 @@ import { normalizeSecaoNome } from "./secaoMatch";
 import { normalizeAtivoFlag } from "./ativoFlag";
 import { resolveActiveDivisaoId } from "./divisaoContext";
 import { buildEscalaDocId } from "./divisaoIds";
+import { normalizeSecaoId as normalizeFrequenciaSecaoId, parseControleFrequenciaId } from "./frequenciaIds";
+import { accessibleSecaoIds, normalizeSecaoId } from "./secaoContext";
 
 function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
   const { data, hora } = formatNowParts();
@@ -62,11 +64,9 @@ function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
 }
 
 export async function loadLegendas(
-  divisaoId: string = DIVISAO_EAD_ID
+  _divisaoId: string = DIVISAO_EAD_ID
 ): Promise<Legenda[]> {
-  const snap = await getDocs(
-    query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
-  );
+  const snap = await getDocs(collection(db, "legendas"));
   const list: Legenda[] = [];
   snap.forEach((d) => list.push(normalizeLegenda(d.data())));
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
@@ -74,18 +74,26 @@ export async function loadLegendas(
 }
 
 export async function loadColaboradores(
-  divisaoId: string = DIVISAO_EAD_ID
+  divisaoId: string = DIVISAO_EAD_ID,
+  secaoId?: string
 ): Promise<Colaborador[]> {
-  const snap = await getDocs(
-    query(collection(db, "colaboradores"), where("divisaoId", "==", divisaoId))
-  );
+  // Preferir filtro por secaoId (índice simples) para respeitar rules sem composto.
+  const snap = secaoId
+    ? await getDocs(
+        query(collection(db, "colaboradores"), where("secaoId", "==", secaoId))
+      )
+    : await getDocs(
+        query(collection(db, "colaboradores"), where("divisaoId", "==", divisaoId))
+      );
   const list: Colaborador[] = [];
   snap.forEach((d) => {
     const raw = d.data() as Colaborador;
+    if (divisaoId && String(raw.divisaoId || "") !== divisaoId) return;
     list.push({
       ...raw,
       re: String(raw.re || "").trim(),
       secao: normalizeSecaoNome(raw.secao),
+      secaoId: String(raw.secaoId || "").trim(),
       nome: String(raw.nome || "").trim(),
       postoGrad: String(raw.postoGrad || "").trim(),
       ativo: normalizeAtivoFlag(raw.ativo),
@@ -97,23 +105,36 @@ export async function loadColaboradores(
 }
 
 export async function loadSecoes(
-  divisaoId: string = DIVISAO_EAD_ID
-): Promise<{ nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[]> {
+  divisaoId: string = DIVISAO_EAD_ID,
+  usuario?: Usuario | null
+): Promise<{ id: string; nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[]> {
   const snap = await getDocs(
     query(collection(db, "secoes"), where("divisaoId", "==", divisaoId))
   );
-  const list: { nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[] = [];
-  snap.forEach((d) =>
-    list.push(d.data() as { nome: string; ativo?: boolean; ordem?: number; divisaoId?: string })
-  );
+  const list: { id: string; nome: string; ativo?: boolean; ordem?: number; divisaoId?: string }[] = [];
+  snap.forEach((d) => {
+    const data = d.data() as { id?: string; nome: string; ativo?: boolean; ordem?: number; divisaoId?: string };
+    list.push({
+      id: String(data.id || d.id).trim(),
+      nome: String(data.nome || "").trim(),
+      ativo: data.ativo,
+      ordem: data.ordem,
+      divisaoId: String(data.divisaoId || divisaoId),
+    });
+  });
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
-  return list.filter((s) => s.ativo !== false);
+  const active = list.filter((s) => s.ativo !== false);
+  if (!usuario?.re) return active;
+  const allowed = accessibleSecaoIds(usuario, active.map((s) => s.id));
+  if (allowed === "ALL") return active;
+  return active.filter((s) => allowed.includes(normalizeSecaoId(s.id)));
 }
 
 export async function loadScaleDocsForMonth(
   ano: number,
   mes: number,
-  divisaoId: string = DIVISAO_EAD_ID
+  divisaoId: string = DIVISAO_EAD_ID,
+  secaoId: string = ""
 ): Promise<ScaleDocsByWeek> {
   const weeks = getWeeksOverlappingMonth(ano, mes);
   const out: ScaleDocsByWeek = {};
@@ -123,6 +144,7 @@ export async function loadScaleDocsForMonth(
       const yearFromId = Number(parts[0]);
       const firestoreId = buildEscalaDocId(
         divisaoId,
+        secaoId,
         Number.isFinite(yearFromId) ? yearFromId : ano,
         w.numero
       );
@@ -143,15 +165,18 @@ export async function loadControleFrequencia(
   ano: number,
   mes: number,
   secao: string,
-  divisaoId: string = DIVISAO_EAD_ID
+  divisaoId: string = DIVISAO_EAD_ID,
+  secaoId: string = secao
 ): Promise<ControleFrequenciaDocument | null> {
-  const id = buildControleFrequenciaId(ano, mes, secao, divisaoId);
+  const id = buildControleFrequenciaId(ano, mes, secaoId || secao, divisaoId);
   const snap = await getDoc(doc(db, CONTROLE_FREQUENCIA_COLLECTION, id));
   if (!snap.exists()) return null;
   const data = snap.data() as ControleFrequenciaDocument;
+  const parsed = parseControleFrequenciaId(id);
   return {
     ...data,
     id: data.id || id,
+    secaoId: data.secaoId || parsed?.secaoId || normalizeFrequenciaSecaoId(secaoId || secao),
     divisaoId: data.divisaoId || divisaoId,
     status: normalizeEscalaStatus(data.status),
     rows: Array.isArray(data.rows) ? data.rows : [],
@@ -163,7 +188,7 @@ export async function loadControleFrequencia(
  *  Se `secao` for informada, filtra apenas documentos daquela seção. */
 export async function loadFrequenciaMonthStatuses(
   ano: number,
-  secao?: string,
+  secaoId?: string,
   divisaoId: string = DIVISAO_EAD_ID
 ): Promise<Record<number, { count: number; statuses: EscalaStatus[] }>> {
   const snap = await getDocs(
@@ -176,7 +201,7 @@ export async function loadFrequenciaMonthStatuses(
   const map: Record<number, { count: number; statuses: EscalaStatus[] }> = {};
   snap.forEach((d) => {
     const data = d.data() as ControleFrequenciaDocument;
-    if (secao && data.secao !== secao) return;
+    if (secaoId && normalizeFrequenciaSecaoId(data.secaoId || data.secao) !== normalizeFrequenciaSecaoId(secaoId)) return;
     const mes = Number(data.mes);
     if (!map[mes]) map[mes] = { count: 0, statuses: [] };
     map[mes].count += 1;
@@ -189,23 +214,26 @@ export async function ensureAndSyncControleFrequencia(options: {
   ano: number;
   mes: number;
   secao: string;
+  secaoId?: string;
   usuario: Usuario;
   forceResync?: boolean;
   /** Quando true (padrão), reaplica o cadastro de colaboradores da seção em docs editáveis. */
   syncCadastro?: boolean;
 }): Promise<{ doc: ControleFrequenciaDocument; created: boolean; synced: boolean }> {
   const divisaoId = resolveActiveDivisaoId(options.usuario);
+  const secaoId = String(options.secaoId || options.secao || "").trim();
   const id = buildControleFrequenciaId(
     options.ano,
     options.mes,
-    options.secao,
+    secaoId,
     divisaoId
   );
   let existing = await loadControleFrequencia(
     options.ano,
     options.mes,
     options.secao,
-    divisaoId
+    divisaoId,
+    secaoId
   );
   const created = !existing;
   if (!existing) {
@@ -215,8 +243,10 @@ export async function ensureAndSyncControleFrequencia(options: {
         ano: options.ano,
         mes: options.mes,
         secao: options.secao,
+        secaoId,
       }),
       divisaoId,
+      secaoId,
     };
   }
 
@@ -234,9 +264,9 @@ export async function ensureAndSyncControleFrequencia(options: {
   }
 
   const [cols, legendas, scaleDocs] = await Promise.all([
-    loadColaboradores(divisaoId),
+    loadColaboradores(divisaoId, secaoId),
     loadLegendas(divisaoId),
-    loadScaleDocsForMonth(options.ano, options.mes, divisaoId),
+    loadScaleDocsForMonth(options.ano, options.mes, divisaoId, secaoId),
   ]);
 
   const { rows, sourceWeeks } = syncFrequenciaRows({
@@ -261,6 +291,7 @@ export async function ensureAndSyncControleFrequencia(options: {
   const { data, hora } = formatNowParts();
   const docData: ControleFrequenciaDocument = {
     ...existing,
+    secaoId: existing.secaoId || secaoId,
     rows: recalcAllRows(rows, legendas),
     observacoes,
     syncMeta: {
@@ -285,9 +316,7 @@ export async function saveControleFrequencia(
   const divisaoId =
     String(docData.divisaoId || "").trim() ||
     resolveActiveDivisaoId(usuario);
-  const legendasSnap = await getDocs(
-    query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
-  );
+  const legendasSnap = await getDocs(collection(db, "legendas"));
   const legendas = legendasSnap.docs.map((d) =>
     normalizeLegenda(d.data() as Record<string, unknown>)
   );
@@ -298,8 +327,14 @@ export async function saveControleFrequencia(
     ...docData,
     id:
       docData.id ||
-      buildControleFrequenciaId(docData.ano, docData.mes, docData.secao, divisaoId),
+      buildControleFrequenciaId(
+        docData.ano,
+        docData.mes,
+        docData.secaoId || docData.secao,
+        divisaoId
+      ),
     divisaoId,
+    secaoId: String(docData.secaoId || "").trim() || normalizeFrequenciaSecaoId(docData.secao),
     rows: rowsRecalc,
     status: status || "em_edicao",
     versao: docData.versao && docData.versao > 0 ? docData.versao : 1,
@@ -330,6 +365,7 @@ export async function saveControleFrequencia(
     alteracoes: alteracoes || [],
     detalhes: `Seção: ${next.secao} · ${next.rows.length} colaborador(es)`,
     origem: "ui",
+    secaoId: next.secaoId,
   });
 
   return next;
@@ -355,6 +391,7 @@ export async function auditSyncFrequencia(
     semana: docData.mes,
     anoSemana: docData.id,
     detalhes: `Seção: ${docData.secao} · semanas: ${(docData.syncMeta?.sourceWeeks || []).join(", ")}`,
+    secaoId: docData.secaoId,
   });
 }
 
@@ -441,6 +478,7 @@ export async function submitFrequenciaForApproval(
     statusAnterior: statusLabelSafe(status),
     statusAtual: "Aguardando Aprovação",
     solicitacaoId: token,
+    secaoId: next.secaoId,
   });
 
   return { doc: next, url: getTokenApprovalUrl(token), token };
@@ -487,6 +525,7 @@ export async function cancelFrequenciaApproval(
     semana: next.mes,
     anoSemana: next.id,
     solicitacaoId: token,
+    secaoId: next.secaoId,
   });
   return next;
 }
@@ -564,6 +603,7 @@ export async function approveFrequencia(
     statusAnterior: statusLabelSafe(statusAnterior),
     statusAtual: "Aprovada",
     detalhes: observacao || undefined,
+    secaoId: next.secaoId,
   });
   return next;
 }
@@ -643,6 +683,7 @@ export async function requestFrequenciaRevision(
     versao: novaVersao,
     statusAnterior: statusLabelSafe(statusAnterior),
     statusAtual: "Revisão Solicitada",
+    secaoId: next.secaoId,
   });
   return next;
 }
@@ -687,6 +728,7 @@ export async function reopenFrequencia(
     motivo,
     statusAnterior: statusLabelSafe(statusAnterior),
     statusAtual: "Em edição",
+    secaoId: next.secaoId,
   });
   return next;
 }
@@ -700,6 +742,7 @@ export async function loadControleById(
   return {
     ...data,
     id: data.id || id,
+    secaoId: data.secaoId || parseControleFrequenciaId(id)?.secaoId || "",
     status: normalizeEscalaStatus(data.status),
     rows: Array.isArray(data.rows) ? data.rows : [],
     observacoes: Array.isArray(data.observacoes) ? data.observacoes : [],

@@ -17,7 +17,7 @@ import {
   SOLICITACOES_COLLECTION,
   tipoEscalaFromDocumento,
 } from "./solicitacaoAprovacaoService";
-import { parseControleFrequenciaId } from "./frequenciaIds";
+import { parseControleFrequenciaId, normalizeSecaoId } from "./frequenciaIds";
 import { resolveActiveDivisaoId } from "./divisaoContext";
 
 export type PendingApprovalItem = {
@@ -49,13 +49,20 @@ function formatItem(sol: SolicitacaoAprovacao): PendingApprovalItem {
   const ano = Number(sol.ano) || new Date().getFullYear();
   const semanaOuMes = Number(sol.semana) || 1;
   const titulo = TIPO_ESCALA_LABELS[tipo];
+  const parsed =
+    tipo === "frequencia"
+      ? parseControleFrequenciaId(sol.escalaId)
+      : null;
+  const secaoId = String(sol.secaoId || parsed?.secaoId || "").trim();
 
   let subtitulo = "";
   if (tipo === "frequencia") {
-    const parsed = parseControleFrequenciaId(sol.escalaId);
     const mes = parsed?.mes ?? semanaOuMes;
     const mesNome = MESES_NOMES[mes - 1] || `Mês ${mes}`;
-    const secao = parsed?.secaoKey?.replace(/_/g, " ") || sol.escalaId;
+    const secao = normalizeSecaoId(secaoId || parsed?.secaoKey || sol.escalaId).replace(
+      /_/g,
+      " "
+    );
     subtitulo = `${mesNome}/${ano} · ${secao}`;
   } else {
     subtitulo = `Semana ${String(semanaOuMes).padStart(2, "0")}/${ano}`;
@@ -92,6 +99,11 @@ export async function loadPendingApprovalsForGestor(
       where("divisaoId", "==", divisaoId)
     )
   );
+  const sols: SolicitacaoAprovacao[] = [];
+  snap.forEach((d) => {
+    const raw = d.data() as SolicitacaoAprovacao;
+    sols.push({ ...raw, token: raw.token || d.id });
+  });
 
   const items: PendingApprovalItem[] = [];
   const byTipo: Record<TipoEscalaDocumento, number> = {
@@ -100,15 +112,13 @@ export async function loadPendingApprovalsForGestor(
     frequencia: 0,
   };
 
-  snap.forEach((d) => {
-    const raw = d.data() as SolicitacaoAprovacao & { divisaoId?: string };
-    const sol: SolicitacaoAprovacao = { ...raw, token: raw.token || d.id };
+  for (const sol of sols) {
     const access = evaluateSolicitacaoAccess(sol);
-    if (!access.ok) return;
+    if (!access.ok) continue;
     const item = formatItem(access.sol);
     items.push(item);
     byTipo[item.tipo] += 1;
-  });
+  }
 
   items.sort((a, b) => {
     if (a.ano !== b.ano) return b.ano - a.ano;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { EscalaStatus, MESES_NOMES, Usuario } from "../../types";
-import { loadFrequenciaMonthStatuses } from "../../utils/frequenciaService";
+import { loadFrequenciaMonthStatuses, loadSecoes } from "../../utils/frequenciaService";
 import {
   cardBorderStyle,
   resolveMonthCardTone,
@@ -11,7 +11,8 @@ import StatusBadge from "../StatusBadge";
 interface Props {
   usuario: Usuario;
   year: number;
-  secao: string;
+  secaoId: string;
+  secao?: string;
   onBack: () => void;
   onSelectMonth: (mes: number) => void;
 }
@@ -38,13 +39,15 @@ function monthCardStatus(
 export default function FrequenciaMonthSelector({
   usuario,
   year,
-  secao,
+  secaoId,
+  secao = "",
   onBack,
   onSelectMonth,
 }: Props) {
   const [byMonth, setByMonth] = useState<
     Record<number, { count: number; statuses: EscalaStatus[] }>
   >({});
+  const [secaoNome, setSecaoNome] = useState(secao);
   const [loading, setLoading] = useState(true);
   const now = new Date();
 
@@ -54,12 +57,14 @@ export default function FrequenciaMonthSelector({
       setLoading(true);
       try {
         const { resolveActiveDivisaoId } = await import("../../utils/divisaoContext");
-        const map = await loadFrequenciaMonthStatuses(
-          year,
-          secao,
-          resolveActiveDivisaoId(usuario)
-        );
+        const divisaoId = resolveActiveDivisaoId(usuario);
+        const [map, secoes] = await Promise.all([
+          loadFrequenciaMonthStatuses(year, secaoId, divisaoId),
+          loadSecoes(divisaoId, usuario),
+        ]);
+        const secaoDoc = secoes.find((s) => s.id === secaoId);
         if (!cancelled) setByMonth(map);
+        if (!cancelled) setSecaoNome(secaoDoc?.nome || secao || secaoId);
       } catch (e) {
         console.error(e);
       } finally {
@@ -69,7 +74,7 @@ export default function FrequenciaMonthSelector({
     return () => {
       cancelled = true;
     };
-  }, [year, secao, usuario]);
+  }, [year, secao, secaoId, usuario]);
 
   return (
     <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">
@@ -87,7 +92,7 @@ export default function FrequenciaMonthSelector({
           <div className="flex items-center gap-2 min-w-0">
             <Building2 size={16} className="text-blue-600 shrink-0" />
             <h1 className="text-sm font-bold text-gray-900 truncate">
-              {secao}
+              {secaoNome || secaoId}
             </h1>
             <span className="text-gray-300">·</span>
             <CalendarDays size={16} className="text-gray-500 shrink-0" />
@@ -100,7 +105,7 @@ export default function FrequenciaMonthSelector({
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione o mês</h2>
         <p className="text-sm text-gray-500 mb-6">
           Controle de Frequência de{" "}
-          <span className="font-semibold text-gray-700">{secao}</span> · {year}
+          <span className="font-semibold text-gray-700">{secaoNome || secaoId}</span> · {year}
         </p>
 
         {loading ? (

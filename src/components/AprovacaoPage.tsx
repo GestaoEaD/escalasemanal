@@ -44,6 +44,7 @@ import { auditAbrirLinkAprovacao } from "../utils/auditService";
 import { applyWeekendDefault } from "../utils/escalaPayload";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
+import { canAccessSecao } from "../utils/secaoContext";
 import {
   approveFrequencia,
   requestFrequenciaRevision,
@@ -454,6 +455,13 @@ export default function AprovacaoPage({
           return;
         }
 
+        if (!canAccessSecao(usuario, sol.secaoId, sol.divisaoId)) {
+          setSolicitacao(sol);
+          setEscala(null);
+          setGateError("Você não possui acesso a esta seção.");
+          return;
+        }
+
         resolvedId = sol.escalaId;
         resolvedTipo = tipoEscalaFromDocumento(sol.tipoDocumento);
         setSolicitacao(sol);
@@ -466,6 +474,7 @@ export default function AprovacaoPage({
           anoSemana: resolvedId,
           versao: sol.versao,
           solicitacaoId: token,
+          secaoId: sol.secaoId,
           detalhes: access.ok
             ? "Abertura do link (solicitação ativa)"
             : `Abertura em consulta · ${sol.resultado || "FINALIZADA"}`,
@@ -487,6 +496,11 @@ export default function AprovacaoPage({
         setEscala(null);
         setError(`${getEscalaDocumentoLabel(resolvedTipo)} não encontrada.`);
       } else {
+        if (!canAccessSecao(usuario, docData.secaoId, docData.divisaoId)) {
+          setEscala(null);
+          setGateError("Você não possui acesso a esta seção.");
+          return;
+        }
         setEscala(docData);
         if (!isApprovalRequestOpen(docData)) {
           setConsultaOnly(true);

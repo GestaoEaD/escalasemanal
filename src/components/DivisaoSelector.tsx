@@ -3,10 +3,11 @@
  */
 import React, { useEffect, useState } from "react";
 import { Divisao, Usuario } from "../types";
-import { db, collection, getDocs } from "../firebase";
+import { db, collection, getDocs, getDoc, doc } from "../firebase";
 import {
   canEnterDivisao,
   sortDivisoes,
+  usuarioDivisaoCadastro,
 } from "../utils/divisaoContext";
 import { canAccessAnyDivisao } from "../utils/permissions";
 import { Building2, Lock, ChevronRight } from "lucide-react";
@@ -32,17 +33,32 @@ export default function DivisaoSelector({
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDocs(collection(db, "divisoes"));
         const list: Divisao[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as Divisao;
-          list.push({
-            codigo: String(data.codigo || d.id),
-            nome: String(data.nome || d.id),
-            descricao: data.descricao,
-            ativo: data.ativo !== false,
+        if (isGerente) {
+          const snap = await getDocs(collection(db, "divisoes"));
+          snap.forEach((d) => {
+            const data = d.data() as Divisao;
+            list.push({
+              codigo: String(data.codigo || d.id),
+              nome: String(data.nome || d.id),
+              descricao: data.descricao,
+              ativo: data.ativo !== false,
+            });
           });
-        });
+        } else {
+          // Não-Gerente só pode ler o documento da própria Divisão.
+          const codigo = usuarioDivisaoCadastro(usuario);
+          const snap = await getDoc(doc(db, "divisoes", codigo));
+          if (snap.exists()) {
+            const data = snap.data() as Divisao;
+            list.push({
+              codigo: String(data.codigo || snap.id),
+              nome: String(data.nome || snap.id),
+              descricao: data.descricao,
+              ativo: data.ativo !== false,
+            });
+          }
+        }
         if (!cancelled) {
           setDivisoes(sortDivisoes(list.filter((x) => x.ativo !== false)));
           setLoading(false);
@@ -58,7 +74,7 @@ export default function DivisaoSelector({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isGerente, usuario]);
 
   return (
     <div className="bg-gray-50 flex-1 pb-10">

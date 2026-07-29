@@ -30,10 +30,17 @@ const COLLECTIONS = [
   "auth_index",
 ];
 
+const oldApiKey = String(process.env.OLD_FIREBASE_API_KEY || "").trim();
+if (!oldApiKey) {
+  throw new Error(
+    "OLD_FIREBASE_API_KEY não definida. A migração não aceita chaves versionadas."
+  );
+}
+
 const OLD_CONFIG = {
   projectId: "gen-lang-client-0610988869",
   appId: "1:1065970160388:web:c8e86475df7c1998183651",
-  apiKey: "AIzaSyA53oNdbcKh8pAkpPqSGS-bUoXgZju__-8",
+  apiKey: oldApiKey,
   authDomain: "gen-lang-client-0610988869.firebaseapp.com",
   storageBucket: "gen-lang-client-0610988869.firebasestorage.app",
   messagingSenderId: "1065970160388",

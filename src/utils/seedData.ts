@@ -11,6 +11,8 @@ import {
   Timestamp 
 } from "../firebase";
 import { Colaborador, DIVISAO_EAD_ID } from "../types";
+import { legendaDocId } from "./legendaModel";
+import { tenantDocId } from "./tenantDocIds";
 
 export const OFFICIAL_COLLABORATORS = [
   { ordem: 1, postoGrad: "MAJ PM", re: "104585-7", nome: "AUGUSTO", secao: "Seç Gest Educ", ativo: true },
@@ -67,7 +69,7 @@ async function ensureInitialGestores() {
 /** Garante a legenda A (Afastamento) no Firestore — substitui o hífen nas escalas. */
 async function ensureLegendaAfastamento() {
   const statusDocRef = doc(db, "configuracoes", "status");
-  const legendaRef = doc(db, "legendas", "A");
+  const legendaRef = doc(db, "legendas", legendaDocId("A"));
   const snap = await getDoc(legendaRef);
   const payload = {
     sigla: "A",
@@ -151,7 +153,7 @@ export const OFFICIAL_SECOES = [
 ];
 
 function secaoDocId(nome: string): string {
-  return nome.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+  return tenantDocId(DIVISAO_EAD_ID, nome);
 }
 
 /** Garante `codigo` nas seções conhecidas quando ainda estiver vazio (e cria Plan/Ted se faltarem). */
@@ -170,6 +172,7 @@ async function ensureSecoesCodigos() {
         codigo,
         ativo: true,
         ordem: nome === "Seç Gest Educ" ? 1 : nome === "Seç Plan Ead" ? 5 : 6,
+        divisaoId: DIVISAO_EAD_ID,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
@@ -255,8 +258,7 @@ export async function seedDatabaseIfEmpty() {
       console.log("Inserindo postos oficiais...");
       const postosBatch = writeBatch(db);
       OFFICIAL_POSTOS.forEach((p) => {
-        // Document ID can be normalized sigla
-        const docId = p.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+        const docId = tenantDocId(DIVISAO_EAD_ID, p.sigla);
         const postoDocRef = doc(db, "postos", docId);
         postosBatch.set(postoDocRef, {
           sigla: p.sigla,
@@ -272,7 +274,7 @@ export async function seedDatabaseIfEmpty() {
       console.log("Inserindo legendas oficiais...");
       const legendasBatch = writeBatch(db);
       OFFICIAL_LEGENDAS.forEach((l) => {
-        const docId = l.sigla.replace(/\s+/g, "_").replace(/[ºª]/g, "");
+        const docId = legendaDocId(l.sigla);
         const legendaDocRef = doc(db, "legendas", docId);
         legendasBatch.set(legendaDocRef, {
           sigla: l.sigla,
@@ -280,7 +282,6 @@ export async function seedDatabaseIfEmpty() {
           cor: l.cor,
           ativo: l.ativo,
           ordem: l.ordem,
-          divisaoId: DIVISAO_EAD_ID,
           ...(("nome" in l && l.nome) ? { nome: l.nome } : {}),
           ...(("representacoes" in l && l.representacoes) ? { representacoes: l.representacoes } : {}),
           createdAt: Timestamp.now()

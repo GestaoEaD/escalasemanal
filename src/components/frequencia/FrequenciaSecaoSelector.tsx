@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Usuario } from "../../types";
+import { Secao, Usuario } from "../../types";
 import { loadSecoes } from "../../utils/frequenciaService";
 import {
   ArrowLeft,
@@ -18,7 +18,7 @@ interface Props {
   usuario: Usuario;
   year: number;
   onBack: () => void;
-  onSelectSecao: (secao: string) => void;
+  onSelectSecao: (secaoId: string) => void;
 }
 
 const SECTION_ICONS: LucideIcon[] = [
@@ -46,7 +46,7 @@ export default function FrequenciaSecaoSelector({
   onBack,
   onSelectSecao,
 }: Props) {
-  const [secoes, setSecoes] = useState<{ nome: string }[]>([]);
+  const [secoes, setSecoes] = useState<Secao[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,7 +55,7 @@ export default function FrequenciaSecaoSelector({
       setLoading(true);
       try {
         const { resolveActiveDivisaoId } = await import("../../utils/divisaoContext");
-        const list = await loadSecoes(resolveActiveDivisaoId(usuario));
+        const list = await loadSecoes(resolveActiveDivisaoId(usuario), usuario);
         if (!cancelled) setSecoes(list);
       } catch (e) {
         console.error(e);
@@ -108,9 +108,9 @@ export default function FrequenciaSecaoSelector({
               const Icon = iconForSecao(s.nome, idx);
               return (
                 <button
-                  key={s.nome}
+                  key={s.id}
                   type="button"
-                  onClick={() => onSelectSecao(s.nome)}
+                  onClick={() => onSelectSecao(s.id)}
                   className="group text-left bg-white border border-gray-200 hover:border-blue-400 hover:shadow-md rounded-2xl p-5 cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                 >
                   <div className="flex items-start gap-4">

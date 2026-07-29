@@ -12,7 +12,13 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "security:secrets": "node scripts/check-secrets.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project escalaead-rules-test \"tsx scripts/rules.test.ts\"",
     "deploy:rules": "node scripts/deploy-firestore-rules.mjs",
+    "audit:divisao": "node scripts/audit-divisao-secao-colaborador.mjs",
+    "audit:hierarquia": "node scripts/audit-hierarquia-secao.mjs",
+    "migrate:hierarquia": "node scripts/migrate-hierarquia-secao.mjs",
+    "migrate:tenant-ids": "node scripts/migrate-tenant-doc-ids.mjs",
     "migrate:escalaead": "node scripts/migrate-to-escalaead.mjs"
   },
   "dependencies": {
@@ -29,10 +35,14 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "firebase-admin": "^14.2.0",
+    "firebase-tools": "^13.35.1",
+    "google-auth-library": "^10.9.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

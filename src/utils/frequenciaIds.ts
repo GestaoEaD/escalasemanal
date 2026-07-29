@@ -12,22 +12,29 @@ export function normalizeSecaoId(secao: string): string {
 }
 
 /**
- * ID Firestore: `{divisaoId}_{ano}_{mes}_{secaoNormalizada}`
+ * ID Firestore: `{divisaoId}_{ano}_{mes}_{secaoId}`
  * Legado (sem tenant): `{ano}_{mes}_{secao}`
  */
 export function buildControleFrequenciaId(
   ano: number,
   mes: number,
-  secao: string,
+  secaoId: string,
   divisaoId: string = DIVISAO_EAD_ID
 ): string {
   const d = normalizeDivisaoId(divisaoId) || DIVISAO_EAD_ID;
-  return `${d}_${ano}_${String(mes).padStart(2, "0")}_${normalizeSecaoId(secao)}`;
+  return `${d}_${ano}_${String(mes).padStart(2, "0")}_${normalizeSecaoId(secaoId)}`;
 }
 
 export function parseControleFrequenciaId(
   id: string
-): { divisaoId: string; ano: number; mes: number; secaoKey: string; legacy: boolean } | null {
+): {
+  divisaoId: string;
+  ano: number;
+  mes: number;
+  secaoId: string;
+  secaoKey: string;
+  legacy: boolean;
+} | null {
   const raw = String(id || "").trim();
   // Tenant: divisao_YYYY_MM_secao...
   const tenant = raw.match(/^(.+)_(\d{4})_(\d{1,2})_(.+)$/);
@@ -39,6 +46,7 @@ export function parseControleFrequenciaId(
         divisaoId: normalizeDivisaoId(prefix),
         ano: Number(tenant[2]),
         mes: Number(tenant[3]),
+        secaoId: tenant[4],
         secaoKey: tenant[4],
         legacy: false,
       };
@@ -51,6 +59,7 @@ export function parseControleFrequenciaId(
       divisaoId: DIVISAO_EAD_ID,
       ano: Number(legacy[1]),
       mes: Number(legacy[2]),
+      secaoId: legacy[3],
       secaoKey: legacy[3],
       legacy: true,
     };

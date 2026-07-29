@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
 import { EscalaStatus, TipoEscalaDocumento, Usuario } from "../types";
-import { db, collection, getDocs, query, where } from "../firebase";
+import { db, doc, getDoc } from "../firebase";
 import { canApproveScales, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
 import {
@@ -23,10 +23,12 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { resolveActiveDivisaoId } from "../utils/divisaoContext";
-import { escalaWeekKeyFromDocId } from "../utils/divisaoIds";
+import { buildEscalaDocId, escalaWeekKeyFromDocId } from "../utils/divisaoIds";
 
 interface WeekSelectorProps {
   usuario: Usuario;
+  secaoId: string;
+  secaoLabel?: string;
   /** Ano inicial (ex.: restaurado da URL / navegação). */
   initialYear?: number;
   onSelectWeek: (year: number, week: WeekInfo) => void;
@@ -45,6 +47,8 @@ const EMPTY_SUMMARY: PendingApprovalsSummary = {
 
 export default function WeekSelector({
   usuario,
+  secaoId,
+  secaoLabel,
   initialYear = 2026,
   onSelectWeek,
   onLogout,
@@ -63,6 +67,7 @@ export default function WeekSelector({
   const today = useMemo(() => new Date(), []);
   const canApprove = canApproveScales(usuario);
   const divisaoId = resolveActiveDivisaoId(usuario);
+  const currentSecaoId = String(secaoId || "").trim();
 
   const weeks = useMemo(() => {
     return getWeeksForYear(selectedYear);
@@ -102,37 +107,42 @@ export default function WeekSelector({
   useEffect(() => {
     let cancelled = false;
     const loadStatuses = async () => {
+      if (!currentSecaoId || !divisaoId) return;
       try {
-        const [weeklySnap, altSnap] = await Promise.all([
-          getDocs(
-            query(
-              collection(db, "escalas_semanais"),
-              where("ano", "==", selectedYear),
-              where("divisaoId", "==", divisaoId)
-            )
-          ),
-          getDocs(
-            query(
-              collection(db, "escalas_alteracao"),
-              where("ano", "==", selectedYear),
-              where("divisaoId", "==", divisaoId)
-            )
-          ),
-        ]);
+        // getDoc por ID conhecido evita índice composto e respeita rules por seção.
+        const weekNums = weeks.map((w) => w.numero);
+        const weeklyEntries = await Promise.all(
+          weekNums.map(async (num) => {
+            const id = buildEscalaDocId(divisaoId, currentSecaoId, selectedYear, num);
+            const snap = await getDoc(doc(db, "escalas_semanais", id));
+            if (!snap.exists()) return null;
+            const data = snap.data();
+            const weekKey =
+              escalaWeekKeyFromDocId((data.id as string) || snap.id) ||
+              `${selectedYear}_${String(num).padStart(2, "0")}`;
+            return [weekKey, normalizeEscalaStatus(data.status)] as const;
+          })
+        );
+        const altEntries = await Promise.all(
+          weekNums.map(async (num) => {
+            const id = buildEscalaDocId(divisaoId, currentSecaoId, selectedYear, num);
+            const snap = await getDoc(doc(db, "escalas_alteracao", id));
+            if (!snap.exists()) return null;
+            const data = snap.data();
+            const weekKey =
+              escalaWeekKeyFromDocId((data.id as string) || snap.id) ||
+              `${selectedYear}_${String(num).padStart(2, "0")}`;
+            return [weekKey, normalizeEscalaStatus(data.status)] as const;
+          })
+        );
         const weeklyMap: Record<string, EscalaStatus> = {};
-        weeklySnap.forEach((d) => {
-          const data = d.data();
-          const id = (data.id as string) || d.id;
-          const weekKey = escalaWeekKeyFromDocId(id) || id;
-          weeklyMap[weekKey] = normalizeEscalaStatus(data.status);
-        });
+        for (const entry of weeklyEntries) {
+          if (entry) weeklyMap[entry[0]] = entry[1];
+        }
         const altMap: Record<string, EscalaStatus> = {};
-        altSnap.forEach((d) => {
-          const data = d.data();
-          const id = (data.id as string) || d.id;
-          const weekKey = escalaWeekKeyFromDocId(id) || id;
-          altMap[weekKey] = normalizeEscalaStatus(data.status);
-        });
+        for (const entry of altEntries) {
+          if (entry) altMap[entry[0]] = entry[1];
+        }
         if (!cancelled) {
           setWeeklyStatusByWeek(weeklyMap);
           setAltStatusByWeek(altMap);
@@ -141,11 +151,11 @@ export default function WeekSelector({
         console.error("Falha ao carregar status das escalas:", err);
       }
     };
-    loadStatuses();
+    void loadStatuses();
     return () => {
       cancelled = true;
     };
-  }, [selectedYear, divisaoId]);
+  }, [selectedYear, divisaoId, currentSecaoId, weeks]);
 
   const currentWeekId = useMemo(() => {
     const todayYear = today.getFullYear();
@@ -210,6 +220,7 @@ export default function WeekSelector({
               Selecione a Semana de Serviço
             </h2>
             <p className="mt-1 text-sm text-gray-500">
+              {secaoLabel ? `${secaoLabel} · ` : ""}
               Escolha o ano e clique na semana correspondente para abrir o editor de escala.
             </p>
           </div>

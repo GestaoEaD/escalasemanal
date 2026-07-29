@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Colaborador, POSTOS_GRADUACOES } from "../types";
 import { X, Search, UserPlus, ArrowLeft } from "lucide-react";
-import { db, collection, getDocs } from "../firebase";
+import { db, collection, getDocs, query, where } from "../firebase";
 import { isColaboradorAtivo } from "../utils/ativoFlag";
 
 interface CollaboratorModalProps {
@@ -12,6 +12,11 @@ interface CollaboratorModalProps {
   collaboratorsPool: Colaborador[]; // All collaborators in database
   currentReList: string[]; // R.E.s currently in the active panel table to avoid duplicates
   editCollaborator: Colaborador | null; // Set when editing an existing row
+  allowCadastro: boolean;
+  /** Divisão ativa: filtra seções e postos disponíveis. */
+  divisaoId: string;
+  /** Seção ativa da escala; usada como padrão ao cadastrar. */
+  secaoId: string;
 }
 
 export default function CollaboratorModal({
@@ -22,50 +27,58 @@ export default function CollaboratorModal({
   collaboratorsPool,
   currentReList,
   editCollaborator,
+  allowCadastro,
+  divisaoId,
+  secaoId,
 }: CollaboratorModalProps) {
   const [activeTab, setActiveTab] = useState<"select" | "new">("select");
   const [searchTerm, setSearchTerm] = useState("");
-  
+
   const [postosList, setPostosList] = useState<string[]>([]);
-  const [secoesList, setSecoesList] = useState<string[]>([]);
+  const [secoesList, setSecoesList] = useState<{ id: string; nome: string }[]>([]);
 
-  // Load postos and secoes from Firestore on mount/open
+  // Load postos and secoes da Divisão ativa
   useEffect(() => {
-    if (isOpen) {
-      const fetchList = async () => {
-        try {
-          const postosSnap = await getDocs(collection(db, "postos"));
-          const postosData = postosSnap.docs
-            .map((doc) => doc.data())
-            .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
-            .map((p) => p.sigla as string);
-          setPostosList(postosData.length > 0 ? postosData : POSTOS_GRADUACOES);
-        } catch (err) {
-          console.error("Erro ao buscar postos:", err);
-          setPostosList(POSTOS_GRADUACOES);
-        }
+    if (!isOpen || !divisaoId) return;
+    const fetchList = async () => {
+      try {
+        const postosSnap = await getDocs(
+          query(collection(db, "postos"), where("divisaoId", "==", divisaoId))
+        );
+        const postosData = postosSnap.docs
+          .map((docSnap) => docSnap.data())
+          .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
+          .map((p) => p.sigla as string);
+        setPostosList(postosData.length > 0 ? postosData : POSTOS_GRADUACOES);
+      } catch (err) {
+        console.error("Erro ao buscar postos:", err);
+        setPostosList(POSTOS_GRADUACOES);
+      }
 
-        try {
-          const secoesSnap = await getDocs(collection(db, "secoes"));
-          const secoesData = secoesSnap.docs
-            .map((doc) => doc.data())
-            .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
-            .map((s) => s.nome as string);
-          setSecoesList(secoesData.length > 0 ? secoesData : ["Seç Gest Educ"]);
-        } catch (err) {
-          console.error("Erro ao buscar seções:", err);
-          setSecoesList(["Seç Gest Educ"]);
-        }
-      };
-      fetchList();
-    }
-  }, [isOpen]);
+      try {
+        const secoesSnap = await getDocs(
+          query(collection(db, "secoes"), where("divisaoId", "==", divisaoId))
+        );
+        const secoesData = secoesSnap.docs
+          .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as { nome?: string; ordem?: number }) }))
+          .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
+          .map((s) => ({ id: s.id, nome: s.nome || "" }))
+          .filter((s) => Boolean(s.id));
+        setSecoesList(secoesData);
+      } catch (err) {
+        console.error("Erro ao buscar seções:", err);
+        setSecoesList([]);
+      }
+    };
+    void fetchList();
+  }, [isOpen, divisaoId]);
 
   // Form fields
   const [postoGrad, setPostoGrad] = useState("SD PM");
   const [re, setRe] = useState("");
   const [nome, setNome] = useState("");
   const [secao, setSecao] = useState("");
+  const [selectedSecaoId, setSelectedSecaoId] = useState("");
   const [observacao, setObservacao] = useState("");
   const [formError, setFormError] = useState("");
 
@@ -77,17 +90,25 @@ export default function CollaboratorModal({
       setRe(editCollaborator.re);
       setNome(editCollaborator.nome);
       setSecao(editCollaborator.secao);
+      setSelectedSecaoId(
+        editCollaborator.secaoId ||
+          selectedSecaoId ||
+          secoesList.find((s) => s.nome === editCollaborator.secao)?.id ||
+          ""
+      );
       setObservacao(editCollaborator.observacao || "");
     } else {
       setActiveTab("select");
       setPostoGrad(postosList[0] || "SD PM");
       setRe("");
       setNome("");
-      setSecao(secoesList[0] || "Seç Gest Educ");
+      const defaultSecao = secoesList.find((s) => s.id === selectedSecaoId) || secoesList[0];
+      setSecao(defaultSecao?.nome || "");
+      setSelectedSecaoId(defaultSecao?.id || selectedSecaoId || "");
       setObservacao("");
     }
     setFormError("");
-  }, [editCollaborator, isOpen, postosList, secoesList]);
+  }, [editCollaborator, isOpen, postosList, secoesList, selectedSecaoId]);
 
   // Filter pool for select tab
   const availablePool = useMemo(() => {
@@ -117,8 +138,9 @@ export default function CollaboratorModal({
     const cleanRe = re.trim();
     const cleanNome = nome.trim();
     const cleanSecao = secao.trim();
+    const cleanSecaoId = selectedSecaoId.trim();
 
-    if (!cleanRe || !cleanNome || !cleanSecao) {
+    if (!cleanRe || !cleanNome || !cleanSecao || !cleanSecaoId) {
       setFormError("Por favor, preencha todos os campos obrigatórios (*).");
       return;
     }
@@ -142,8 +164,9 @@ export default function CollaboratorModal({
       postoGrad,
       nome: cleanNome,
       secao: cleanSecao,
+      secaoId: cleanSecaoId,
       observacao: observacao.trim() || "",
-      divisaoId: String(editCollaborator?.divisaoId || ""),
+      divisaoId: String(editCollaborator?.divisaoId || divisaoId),
     };
 
     if (editCollaborator) {
@@ -188,7 +211,7 @@ export default function CollaboratorModal({
           </div>
 
           {/* Tab Selector (only when NOT editing) */}
-          {!editCollaborator && (
+          {!editCollaborator && allowCadastro && (
             <div className="flex border-b border-gray-150 bg-gray-50">
               <button
                 type="button"
@@ -222,7 +245,7 @@ export default function CollaboratorModal({
           {/* Content Body */}
           <div className="px-4 py-5 sm:p-6 bg-white max-h-[60vh] overflow-y-auto">
             
-            {activeTab === "select" && !editCollaborator ? (
+            {(!editCollaborator && (!allowCadastro || activeTab === "select")) ? (
               // Tab: Select Existing
               <div className="space-y-4">
                 <div className="relative rounded-md shadow-sm">
@@ -271,6 +294,7 @@ export default function CollaboratorModal({
                     )}
                     <button
                       type="button"
+                      hidden={!allowCadastro}
                       onClick={() => setActiveTab("new")}
                       className="mt-3 text-xs font-bold text-blue-600 hover:underline inline-flex items-center space-x-1 cursor-pointer"
                     >
@@ -339,14 +363,26 @@ export default function CollaboratorModal({
                     Seção de Serviço *
                   </label>
                   <select
-                    value={secao}
-                    onChange={(e) => setSecao(e.target.value)}
-                    className="block w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 font-medium bg-white"
+                    value={selectedSecaoId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedSecaoId(nextId);
+                      setSecao(secoesList.find((s) => s.id === nextId)?.nome || "");
+                    }}
+                    className="block w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 font-medium bg-white disabled:bg-gray-100"
+                    disabled={secoesList.length === 0}
+                    required
                   >
+                    <option value="" disabled>Selecione a seção</option>
                     {secoesList.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s.id} value={s.id}>{s.nome}</option>
                     ))}
                   </select>
+                  {secoesList.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-700 font-semibold">
+                      Esta Divisão ainda não possui seções cadastradas.
+                    </p>
+                  )}
                 </div>
 
                 <div>

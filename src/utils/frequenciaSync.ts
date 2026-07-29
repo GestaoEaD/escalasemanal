@@ -367,11 +367,13 @@ export function buildEmptyControleDocument(options: {
   ano: number;
   mes: number;
   secao: string;
+  secaoId?: string;
   divisaoId?: string;
 }): ControleFrequenciaDocument {
   return {
     id: options.id,
     divisaoId: options.divisaoId || DIVISAO_EAD_ID,
+    secaoId: String(options.secaoId || options.secao || "").trim(),
     ano: options.ano,
     mes: options.mes,
     secao: options.secao,

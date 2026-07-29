@@ -104,7 +104,21 @@ export async function createSolicitacaoAprovacao(options: {
   const days = options.expiryDays ?? APPROVAL_LINK_EXPIRY_DAYS;
   const expira = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   const { ano, semana } = parseAnoSemana(options.escalaId);
-  const divisaoId = resolveActiveDivisaoId(options.usuario);
+  const parsedEscala = parseEscalaDocId(options.escalaId);
+  const parsedFreq = parseControleFrequenciaId(options.escalaId);
+  const secaoId = String(
+    parsedEscala?.secaoId ||
+      parsedFreq?.secaoId ||
+      options.usuario.activeSecaoId ||
+      options.usuario.secaoId ||
+      ""
+  ).trim();
+  const divisaoId = String(
+    parsedEscala?.divisaoId ||
+      parsedFreq?.divisaoId ||
+      resolveActiveDivisaoId(options.usuario) ||
+      ""
+  ).trim();
 
   const sol: SolicitacaoAprovacao = {
     token: options.token,
@@ -113,6 +127,7 @@ export async function createSolicitacaoAprovacao(options: {
     ano,
     escalaId: options.escalaId,
     divisaoId,
+    secaoId,
     versao: options.versao,
     status: "AGUARDANDO",
     criadoPor: {

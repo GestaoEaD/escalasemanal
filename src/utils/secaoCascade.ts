@@ -24,21 +24,24 @@ async function cascadeCollectionRows(
   collectionName: "escalas_semanais" | "escalas_alteracao",
   from: string,
   to: string,
-  divisaoId: string
+  divisaoId: string,
+  secaoId?: string
 ): Promise<number> {
   const snap = await getDocs(
     query(collection(db, collectionName), where("divisaoId", "==", divisaoId))
   );
   let updated = 0;
   for (const d of snap.docs) {
-    const data = d.data() as { rows?: ScheduleRow[]; secao?: string; divisaoId?: string };
+    const data = d.data() as { rows?: ScheduleRow[]; secao?: string; secaoId?: string; divisaoId?: string };
     const mapped = mapRowsSecao(data.rows, from, to);
-    if (!mapped.changed) continue;
+    const matchesSecaoId = secaoId ? String(data.secaoId || "").trim() === String(secaoId).trim() : false;
+    if (!mapped.changed && !matchesSecaoId) continue;
     await setDoc(
       doc(db, collectionName, d.id),
       prepareFirestoreWrite(`${collectionName}/${d.id}`, {
         ...data,
         divisaoId: data.divisaoId || divisaoId,
+        ...(secaoId ? { secaoId } : {}),
         rows: mapped.rows,
       } as unknown as Record<string, unknown>),
       { merge: true }
@@ -51,7 +54,8 @@ async function cascadeCollectionRows(
 async function cascadeControleFrequencia(
   from: string,
   to: string,
-  divisaoId: string
+  divisaoId: string,
+  secaoId?: string
 ): Promise<number> {
   const snap = await getDocs(
     query(collection(db, "controle_frequencia"), where("divisaoId", "==", divisaoId))
@@ -64,7 +68,7 @@ async function cascadeControleFrequencia(
     const data = d.data() as Record<string, unknown>;
     const secao = String(data.secao || "");
     const idMatches =
-      d.id.includes(`_${fromKey}`) || secoesIguais(secao, from);
+      d.id.includes(`_${fromKey}`) || secoesIguais(secao, from) || (secaoId ? String(data.secaoId || "").trim() === String(secaoId).trim() : false);
     if (!idMatches && !secoesIguais(secao, from)) continue;
 
     const ano = Number(data.ano);
@@ -110,7 +114,8 @@ async function cascadeControleFrequencia(
 export async function cascadeSecaoRename(
   from: string,
   to: string,
-  divisaoId: string = DIVISAO_EAD_ID
+  divisaoId: string = DIVISAO_EAD_ID,
+  secaoId?: string
 ): Promise<{
   semanais: number;
   alteracao: number;
@@ -122,8 +127,8 @@ export async function cascadeSecaoRename(
     return { semanais: 0, alteracao: 0, frequencia: 0 };
   }
   const d = String(divisaoId || DIVISAO_EAD_ID).trim() || DIVISAO_EAD_ID;
-  const semanais = await cascadeCollectionRows("escalas_semanais", fromN, toN, d);
-  const alteracao = await cascadeCollectionRows("escalas_alteracao", fromN, toN, d);
-  const frequencia = await cascadeControleFrequencia(fromN, toN, d);
+  const semanais = await cascadeCollectionRows("escalas_semanais", fromN, toN, d, secaoId);
+  const alteracao = await cascadeCollectionRows("escalas_alteracao", fromN, toN, d, secaoId);
+  const frequencia = await cascadeControleFrequencia(fromN, toN, d, secaoId);
   return { semanais, alteracao, frequencia };
 }

@@ -17,14 +17,18 @@ import {
   clearSession,
   restoreSession,
   setActiveDivisaoInSession,
+  setActiveSecaoInSession,
   toSessionUser,
   writeSession,
 } from "./utils/sessionService";
 import { signOutGoogle } from "./utils/googleAuthService";
 import { markUsuarioGoogleLogin } from "./utils/usuarioHelpers";
 import { resolveActiveDivisaoId } from "./utils/divisaoContext";
+import { canAccessSecao, resolveActiveSecaoId } from "./utils/secaoContext";
+import { loadSecaoById } from "./utils/secaoCodigo";
 import Login from "./components/Login";
 import DivisaoSelector from "./components/DivisaoSelector";
+import SecaoSelector from "./components/SecaoSelector";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
 import Configuracoes from "./components/Configuracoes";
@@ -59,10 +63,22 @@ function needsDivisaoSelection(usuario: Usuario, route: AppRoute): boolean {
   return !active;
 }
 
+function needsSecaoSelection(usuario: Usuario, route: AppRoute): boolean {
+  if (route.view === "aprovacao" || route.view === "divisoes") return false;
+  if (route.view === "config" || route.view === "pendencias") return false;
+  if (route.view === "secao" || route.view === "editor" || route.view === "frequencia") {
+    return false;
+  }
+  const activeDivisao = String(usuario.activeDivisaoId || "").trim();
+  if (!activeDivisao) return false;
+  return !String(usuario.activeSecaoId || "").trim();
+}
+
 export default function App() {
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [divisaoLabel, setDivisaoLabel] = useState<string>("");
+  const [secaoLabel, setSecaoLabel] = useState<string>("");
 
   const [route, setRoute] = useState<AppRoute>(() => routeFromLocation());
   const [selectedYear, setSelectedYear] = useState<number>(() => {
@@ -131,21 +147,59 @@ export default function App() {
   }, [authPhase, usuario, route, navigate]);
 
   useEffect(() => {
-    if (authPhase !== "authenticated") return;
-    if (route.view === "divisoes") return;
-    if (route.view === "editor" && !selectedWeek) {
+    if (authPhase !== "authenticated" || !usuario) return;
+    if (route.view === "aprovacao" || route.view === "divisoes") return;
+    if (route.view === "config" && !canAccessConfig(usuario)) {
       navigate({ view: "selector" }, "replace");
       return;
     }
-    if (route.view === "config" && usuario && !canAccessConfig(usuario)) {
+    if (route.view === "pendencias" && !canApproveScales(usuario)) {
       navigate({ view: "selector" }, "replace");
       return;
     }
-    if (route.view === "pendencias" && usuario && !canApproveScales(usuario)) {
-      navigate({ view: "selector" }, "replace");
-      return;
-    }
-    if (route.view === "aprovacao") {
+    if (route.view === "editor") {
+      const resolvedSecaoId = String(route.secaoId || "").trim();
+      if (!resolvedSecaoId) {
+        const activeSecaoId = resolveActiveSecaoId(usuario);
+        if (activeSecaoId) {
+          navigate(
+            { view: "editor", year: route.year, weekId: route.weekId, secaoId: activeSecaoId },
+            "replace"
+          );
+        } else {
+          navigate({ view: "selector" }, "replace");
+        }
+        return;
+      }
+      if (!canAccessSecao(usuario, resolvedSecaoId, resolveActiveDivisaoId(usuario))) {
+        navigate({ view: "selector" }, "replace");
+        return;
+      }
+      if (String(usuario.activeSecaoId || "").trim() !== resolvedSecaoId) {
+        setUsuario(setActiveSecaoInSession(usuario, resolvedSecaoId));
+      }
+      if (!selectedWeek) {
+        navigate({ view: "selector" }, "replace");
+        return;
+      }
+    } else if (route.view === "secao") {
+      if (!canAccessSecao(usuario, route.secaoId, resolveActiveDivisaoId(usuario))) {
+        navigate({ view: "selector" }, "replace");
+        return;
+      }
+      if (String(usuario.activeSecaoId || "").trim() !== route.secaoId) {
+        setUsuario(setActiveSecaoInSession(usuario, route.secaoId));
+      }
+    } else if (route.view === "frequencia") {
+      const secaoId = String(route.secaoId || "").trim();
+      if (secaoId && !canAccessSecao(usuario, secaoId, resolveActiveDivisaoId(usuario))) {
+        navigate({ view: "selector" }, "replace");
+        return;
+      }
+      if (secaoId && String(usuario.activeSecaoId || "").trim() !== secaoId) {
+        setUsuario(setActiveSecaoInSession(usuario, secaoId));
+      }
+    } else if (route.view === "aprovacao") {
       const hasTarget =
         (route.mode === "token" && Boolean(route.token)) ||
         (route.mode === "legacy" && Boolean(route.escalaId));
@@ -153,7 +207,7 @@ export default function App() {
         navigate({ view: "selector" }, "replace");
       }
     }
-  }, [authPhase, route, selectedWeek, usuario, navigate]);
+  }, [authPhase, navigate, route, selectedWeek, usuario]);
 
   // Carrega rótulo da Divisão ativa
   useEffect(() => {
@@ -183,6 +237,30 @@ export default function App() {
     };
   }, [usuario?.activeDivisaoId, usuario?.divisaoId]);
 
+  // Carrega rótulo da Seção ativa / selecionada.
+  useEffect(() => {
+    const secaoId =
+      route.view === "secao" || route.view === "editor" || route.view === "frequencia"
+        ? String(route.secaoId || "").trim()
+        : String(usuario?.activeSecaoId || "").trim();
+
+    if (!secaoId || !usuario?.activeDivisaoId) {
+      setSecaoLabel("");
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const secao = await loadSecaoById(secaoId, resolveActiveDivisaoId(usuario));
+      if (!cancelled) {
+        setSecaoLabel(secao?.nome || secaoId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [route.view, route.secaoId, usuario?.activeDivisaoId, usuario?.activeSecaoId, usuario]);
+
   const goHome = useCallback(() => {
     if (usuario && !usuario.activeDivisaoId) {
       navigate({ view: "divisoes" });
@@ -198,9 +276,12 @@ export default function App() {
   const handleSelectDivisao = useCallback(
     (divisao: Divisao) => {
       if (!usuario) return;
-      const next = setActiveDivisaoInSession(usuario, divisao.codigo);
+      const nextDiv = setActiveDivisaoInSession(usuario, divisao.codigo);
+      const next = setActiveSecaoInSession(nextDiv, "");
       setUsuario(next);
+      setSelectedWeek(null);
       setDivisaoLabel(`${divisao.nome} · ${divisao.codigo}`);
+      setSecaoLabel("");
       navigate({ view: "selector" });
     },
     [usuario, navigate]
@@ -256,6 +337,7 @@ export default function App() {
       emailVerificado: true,
       // Força escolha de Divisão após login
       activeDivisaoId: "",
+      activeSecaoId: "",
     });
     writeSession(sessionUser);
     setUsuario(sessionUser);
@@ -269,6 +351,7 @@ export default function App() {
     void auditAuth("LOGIN", sessionUser).catch((err) =>
       console.warn("Falha ao registrar login na auditoria:", err)
     );
+    setSecaoLabel("");
     navigate({ view: "divisoes" }, "replace");
   };
 
@@ -293,7 +376,13 @@ export default function App() {
   const handleSelectWeek = (year: number, week: WeekInfo) => {
     setSelectedYear(year);
     setSelectedWeek(week);
-    navigate({ view: "editor", year, weekId: week.id });
+    const currentSecaoId = String(route.secaoId || usuario?.activeSecaoId || "").trim();
+    navigate({
+      view: "editor",
+      year,
+      weekId: week.id,
+      ...(currentSecaoId ? { secaoId: currentSecaoId } : {}),
+    });
   };
 
   if (authPhase === "loading") {
@@ -333,6 +422,40 @@ export default function App() {
         onLogout={handleLogout}
       />
     );
+  } else if (route.view === "selector" && needsSecaoSelection(usuario, route)) {
+    page = (
+      <SecaoSelector
+        usuario={usuario}
+        onSelectSecao={(secao) => {
+          setUsuario(setActiveSecaoInSession(usuario, secao.id));
+          setSecaoLabel(secao.nome);
+          navigate({ view: "secao", secaoId: secao.id });
+        }}
+        onLogout={handleLogout}
+      />
+    );
+  } else if (route.view === "secao") {
+    page = (
+      <WeekSelector
+        usuario={usuario}
+        secaoId={route.secaoId}
+        secaoLabel={secaoLabel}
+        initialYear={selectedYear}
+        onSelectWeek={handleSelectWeek}
+        onLogout={handleLogout}
+        onOpenConfig={() => navigate({ view: "config" })}
+        onOpenApproval={openApproval}
+        onOpenPendencias={() => navigate({ view: "pendencias" })}
+        onOpenFrequencia={(year) => {
+          setSelectedYear(year);
+          navigate({
+            view: "frequencia",
+            year,
+            secaoId: route.secaoId,
+          });
+        }}
+      />
+    );
   } else if (route.view === "pendencias") {
     if (!canApproveScales(usuario)) {
       page = <SessionLoadingScreen />;
@@ -348,7 +471,8 @@ export default function App() {
       );
     }
   } else if (route.view === "editor") {
-    if (!selectedWeek) {
+    const editorSecaoId = String(route.secaoId || usuario.activeSecaoId || "").trim();
+    if (!selectedWeek || !editorSecaoId) {
       page = <SessionLoadingScreen />;
     } else {
       page = (
@@ -356,6 +480,7 @@ export default function App() {
           usuario={usuario}
           year={selectedYear}
           week={selectedWeek}
+          secaoId={editorSecaoId}
           onBack={goHome}
           onLogout={handleLogout}
           onOpenConfig={() => navigate({ view: "config" })}
@@ -376,12 +501,14 @@ export default function App() {
       );
     }
   } else if (route.view === "frequencia") {
+    const secaoId = String(route.secaoId || "").trim();
     page = (
       <FrequenciaApp
         usuario={usuario}
         year={route.year}
         month={route.month ?? null}
-        secao={route.secao ?? null}
+        secaoId={secaoId || null}
+        secao={route.secao || null}
         onBack={goHome}
         onOpenApproval={openApproval}
         onNavigateFrequencia={(next) => {
@@ -389,27 +516,49 @@ export default function App() {
             view: "frequencia",
             year: next.year,
             month: next.month,
-            secao: next.secao,
+            secaoId: secaoId || next.secaoId,
+            secao: next.secao || route.secao,
           });
         }}
       />
     );
   } else {
-    page = (
-      <WeekSelector
-        usuario={usuario}
-        initialYear={selectedYear}
-        onSelectWeek={handleSelectWeek}
-        onLogout={handleLogout}
-        onOpenConfig={() => navigate({ view: "config" })}
-        onOpenApproval={openApproval}
-        onOpenPendencias={() => navigate({ view: "pendencias" })}
-        onOpenFrequencia={(year) => {
-          setSelectedYear(year);
-          navigate({ view: "frequencia", year });
-        }}
-      />
-    );
+    const activeSecaoId = String(usuario.activeSecaoId || "").trim();
+    if (activeSecaoId) {
+      page = (
+        <WeekSelector
+          usuario={usuario}
+          secaoId={activeSecaoId}
+          secaoLabel={secaoLabel}
+          initialYear={selectedYear}
+          onSelectWeek={handleSelectWeek}
+          onLogout={handleLogout}
+          onOpenConfig={() => navigate({ view: "config" })}
+          onOpenApproval={openApproval}
+          onOpenPendencias={() => navigate({ view: "pendencias" })}
+          onOpenFrequencia={(year) => {
+            setSelectedYear(year);
+            navigate({
+              view: "frequencia",
+              year,
+              secaoId: activeSecaoId,
+            });
+          }}
+        />
+      );
+    } else {
+      page = (
+        <SecaoSelector
+          usuario={usuario}
+          onSelectSecao={(secao) => {
+            setUsuario(setActiveSecaoInSession(usuario, secao.id));
+            setSecaoLabel(secao.nome);
+            navigate({ view: "secao", secaoId: secao.id });
+          }}
+          onLogout={handleLogout}
+        />
+      );
+    }
   }
 
   return (

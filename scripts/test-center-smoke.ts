@@ -58,6 +58,7 @@ const admin: Usuario = {
   nome: "A",
   postoGrad: "CB PM",
   secao: "X",
+  secaoId: "X",
   divisaoId: "202002500",
   perfil: "Administrador",
 };
@@ -204,8 +205,8 @@ const enLeg = normalizeLegenda({
 assert(enLeg.representacoes?.escalaConsolidada === "1", "EN consolidada");
 assert(isDiaTrabalhado(enLeg) && getValorMeiaDiaria(enLeg) === 1, "EN regras");
 
-const freqId = buildControleFrequenciaId(2026, 1, "Sec Gest Educ");
-assert(freqId === "2026_01_Sec_Gest_Educ", "id frequencia");
+const freqId = buildControleFrequenciaId(2026, 1, "SECAO_GEST_EDUC");
+assert(freqId === "2026_01_SECAO_GEST_EDUC", "id frequencia");
 assert(parseControleFrequenciaId(freqId)?.mes === 1, "parse id frequencia");
 assert(daysInMonth(2026, 2) === 28, "dias fevereiro 2026");
 assert(getWeeksOverlappingMonth(2026, 1).length > 0, "semanas overlapping janeiro");
@@ -272,17 +273,24 @@ assert(parseAppPath("/").view === "selector", "rota / = selector");
 assert(parseAppPath("/config").view === "config", "rota /config");
 const ed = parseAppPath("/semana/2026/2026_01");
 assert(ed.view === "editor" && (ed as { weekId: string }).weekId === "2026_01", "rota semana");
-const fr = parseAppPath("/frequencia/2026/Sec%20Gest/01");
+const edSecao = parseAppPath("/secao/SECAO_01/semana/2026/2026_01");
+assert(
+  edSecao.view === "editor" &&
+    (edSecao as { secaoId?: string }).secaoId === "SECAO_01" &&
+    (edSecao as { weekId: string }).weekId === "2026_01",
+  "rota editor por seção"
+);
+const fr = parseAppPath("/frequencia/2026/secao/SECAO_01/01");
 assert(
   fr.view === "frequencia" &&
     (fr as { month?: number }).month === 1 &&
-    (fr as { secao?: string }).secao === "Sec Gest",
-  "rota frequencia completa (seção → mês)"
+    (fr as { secaoId?: string }).secaoId === "SECAO_01",
+  "rota frequencia completa (secaoId → mês)"
 );
 assert(
-  buildAppPath({ view: "frequencia", year: 2026, secao: "Sec Gest", month: 3 }) ===
-    "/frequencia/2026/Sec%20Gest/03",
-  "build frequencia seção/mês"
+  buildAppPath({ view: "frequencia", year: 2026, secaoId: "SECAO_01", month: 3 }) ===
+    "/frequencia/2026/secao/SECAO_01/03",
+  "build frequencia secaoId/mês"
 );
 assert(
   parseAppPath("/frequencia/2026/Secao%20X").view === "frequencia" &&
@@ -296,6 +304,7 @@ assert(
     nome: "A",
     postoGrad: "CB",
     secao: "X",
+    secaoId: "X",
     divisaoId: "202002500",
     perfil: "Administrador",
   }).perfil === "Administrador",

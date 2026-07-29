@@ -10,9 +10,17 @@
 import { GoogleAuth } from "google-auth-library";
 
 const project = "escalaead";
-const apiKey = "AIzaSyAuAZO0L8ifpGDFqybvIlsuzNxMclW79o0";
+const apiKey = String(
+  process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || ""
+).trim();
 
 async function publicProbe() {
+  if (!apiKey) {
+    console.log(
+      "PUBLIC_PROBE skipped (defina FIREBASE_WEB_API_KEY ou VITE_FIREBASE_API_KEY)"
+    );
+    return;
+  }
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${apiKey}`,
     {

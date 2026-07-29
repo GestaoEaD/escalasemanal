@@ -31,6 +31,8 @@ export function prepareUsuarioDocument(user: Usuario): Usuario {
     ...user,
     email,
     divisaoId: String(user.divisaoId || "").trim(),
+    // secaoId permanece como lotação; ACL é por Divisão (campo legado não é mais fonte de autorização).
+    secoesResponsaveisIds: [],
     authProvider: user.authProvider || (email ? "google" : "local"),
     ultimoLogin: user.ultimoLogin ?? null,
     emailVerificado: user.emailVerificado === true,

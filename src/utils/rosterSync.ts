@@ -61,11 +61,17 @@ export type RosterSyncResult = {
  */
 export function syncScheduleRosterWithCadastro(
   existing: ScheduleRow[],
-  pool: Colaborador[]
+  pool: Colaborador[],
+  secaoId?: string
 ): RosterSyncResult {
   const normalizedPool = pool.map(normalizeColaboradorCadastro);
   const activePool = normalizedPool
     .filter((c) => isColaboradorAtivo(c))
+    .filter((c) => {
+      const target = String(secaoId || "").trim();
+      if (!target) return true;
+      return String(c.secaoId || "").trim() === target;
+    })
     .slice()
     .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 

@@ -74,7 +74,7 @@ async function rewriteEscalaCollection(
     const ano = Number(data.ano);
     const semana = Number(data.semana);
     if (!Number.isFinite(ano) || !Number.isFinite(semana)) continue;
-    const newId = buildEscalaDocId(divisaoId, ano, semana);
+    const newId = buildEscalaDocId(divisaoId, String(data.secaoId || ""), ano, semana);
     if (d.id === newId && data.divisaoId === divisaoId) continue;
     const next = {
       ...data,
@@ -101,7 +101,7 @@ async function rewriteFrequencia(divisaoId: string): Promise<number> {
     const parsed = parseControleFrequenciaId(d.id);
     const ano = Number(data.ano) || parsed?.ano;
     const mes = Number(data.mes) || parsed?.mes;
-    const secao = String(data.secao || parsed?.secaoKey || "");
+    const secao = String(data.secao || parsed?.secaoId || parsed?.secaoKey || "");
     if (!ano || !mes || !secao) continue;
     const newId = buildControleFrequenciaId(ano, mes, secao, divisaoId);
     if (d.id === newId && data.divisaoId === divisaoId) continue;
@@ -126,12 +126,17 @@ async function rewriteSolicitacoes(divisaoId: string): Promise<number> {
     // Reescreve escalaId legado YYYY_WW → tenant_YYYY_WW
     if (/^\d{4}_\d{1,2}$/.test(escalaId)) {
       const [ano, sem] = escalaId.split("_");
-      escalaId = buildEscalaDocId(divisaoId, Number(ano), Number(sem));
+      escalaId = buildEscalaDocId(
+        divisaoId,
+        String(data.secaoId || data.secao || ""),
+        Number(ano),
+        Number(sem)
+      );
     } else if (/^\d{4}_\d{1,2}_.+/.test(escalaId) && !escalaId.startsWith(divisaoId)) {
       // CF legado
       const p = parseControleFrequenciaId(escalaId);
       if (p) {
-        escalaId = buildControleFrequenciaId(p.ano, p.mes, p.secaoKey, divisaoId);
+        escalaId = buildControleFrequenciaId(p.ano, p.mes, p.secaoId || p.secaoKey, divisaoId);
       }
     }
     await setDoc(

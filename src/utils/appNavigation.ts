@@ -10,6 +10,7 @@ import { buildTokenApprovalPath } from "./solicitacaoAprovacaoService";
 export type AppView =
   | "divisoes"
   | "selector"
+  | "secao"
   | "editor"
   | "config"
   | "aprovacao"
@@ -19,13 +20,15 @@ export type AppView =
 export type AppRoute =
   | { view: "divisoes" }
   | { view: "selector" }
-  | { view: "editor"; year: number; weekId: string }
+  | { view: "secao"; secaoId: string }
+  | { view: "editor"; year: number; weekId: string; secaoId?: string }
   | { view: "config" }
   | { view: "pendencias" }
   | {
       view: "frequencia";
       year: number;
       month?: number;
+      secaoId?: string;
       secao?: string;
     }
   | {
@@ -46,19 +49,28 @@ export function buildAppPath(route: AppRoute): string {
       return "/divisoes";
     case "selector":
       return "/";
+    case "secao":
+      return `/secao/${encodeURIComponent(route.secaoId)}`;
     case "editor":
+      if (route.secaoId) {
+        return `/secao/${encodeURIComponent(route.secaoId)}/semana/${route.year}/${encodeURIComponent(
+          route.weekId
+        )}`;
+      }
       return `/semana/${route.year}/${encodeURIComponent(route.weekId)}`;
     case "config":
       return "/config";
     case "pendencias":
       return "/aprovacoes";
     case "frequencia": {
-      let path = `/frequencia/${route.year}`;
-      if (route.secao) {
-        path += `/${encodeURIComponent(route.secao)}`;
-        if (route.month != null) {
-          path += `/${String(route.month).padStart(2, "0")}`;
-        }
+      let path = route.secaoId
+        ? `/frequencia/${route.year}/secao/${encodeURIComponent(route.secaoId)}`
+        : `/frequencia/${route.year}`;
+      if (!route.secaoId && route.secao) {
+        path = `/frequencia/${route.year}/${encodeURIComponent(route.secao)}`;
+      }
+      if (route.month != null) {
+        path += `/${String(route.month).padStart(2, "0")}`;
       }
       return path;
     }
@@ -96,6 +108,26 @@ export function parseAppPath(pathname: string): AppRoute {
     return { view: "selector" };
   }
 
+  const secaoSemana = path.match(
+    /^\/secao\/([^/]+)\/semana\/(\d{4})\/([^/]+)\/?$/i
+  );
+  if (secaoSemana) {
+    return {
+      view: "editor",
+      secaoId: decodeURIComponent(secaoSemana[1]),
+      year: Number(secaoSemana[2]),
+      weekId: decodeURIComponent(secaoSemana[3]),
+    };
+  }
+
+  const secao = path.match(/^\/secao\/([^/]+)\/?$/i);
+  if (secao) {
+    return {
+      view: "secao",
+      secaoId: decodeURIComponent(secao[1]),
+    };
+  }
+
   const semana = path.match(/^\/semana\/(\d{4})\/([^/]+)\/?$/i);
   if (semana) {
     return {
@@ -113,39 +145,62 @@ export function parseAppPath(pathname: string): AppRoute {
     return { view: "pendencias" };
   }
 
-  // Novo fluxo: /frequencia/{ano}/{secao}/{mês}
-  const freqFull = path.match(
-    /^\/frequencia\/(\d{4})\/([^/]+)\/(\d{1,2})\/?$/i
+  // Novo fluxo: /frequencia/{ano}/secao/{secaoId}/{mês}
+  const freqNewFull = path.match(
+    /^\/frequencia\/(\d{4})\/secao\/([^/]+)\/(\d{1,2})\/?$/i
   );
-  if (freqFull) {
+  if (freqNewFull) {
     return {
       view: "frequencia",
-      year: Number(freqFull[1]),
-      secao: decodeURIComponent(freqFull[2]),
-      month: Number(freqFull[3]),
+      year: Number(freqNewFull[1]),
+      secaoId: decodeURIComponent(freqNewFull[2]),
+      month: Number(freqNewFull[3]),
+    };
+  }
+
+  // Novo fluxo: /frequencia/{ano}/secao/{secaoId}
+  const freqNewSecao = path.match(/^\/frequencia\/(\d{4})\/secao\/([^/]+)\/?$/i);
+  if (freqNewSecao) {
+    return {
+      view: "frequencia",
+      year: Number(freqNewSecao[1]),
+      secaoId: decodeURIComponent(freqNewSecao[2]),
     };
   }
 
   // Legado: /frequencia/{ano}/{mês}/{secao}
-  const freqLegacy = path.match(
+  const freqLegacyMonthFirst = path.match(
     /^\/frequencia\/(\d{4})\/(\d{1,2})\/([^/]+)\/?$/i
   );
-  if (freqLegacy) {
+  if (freqLegacyMonthFirst) {
     return {
       view: "frequencia",
-      year: Number(freqLegacy[1]),
-      month: Number(freqLegacy[2]),
-      secao: decodeURIComponent(freqLegacy[3]),
+      year: Number(freqLegacyMonthFirst[1]),
+      month: Number(freqLegacyMonthFirst[2]),
+      secaoId: decodeURIComponent(freqLegacyMonthFirst[3]),
     };
   }
 
-  // /frequencia/{ano}/{secao} — seletor de meses
+  // Legado atual: /frequencia/{ano}/{secao}/{mês}
+  const freqLegacyMonthLast = path.match(
+    /^\/frequencia\/(\d{4})\/([^/]+)\/(\d{1,2})\/?$/i
+  );
+  if (freqLegacyMonthLast) {
+    return {
+      view: "frequencia",
+      year: Number(freqLegacyMonthLast[1]),
+      secaoId: decodeURIComponent(freqLegacyMonthLast[2]),
+      month: Number(freqLegacyMonthLast[3]),
+    };
+  }
+
+  // /frequencia/{ano}/{secao} — seletor de meses legado
   const freqSecao = path.match(/^\/frequencia\/(\d{4})\/([^/]+)\/?$/i);
   if (freqSecao) {
     return {
       view: "frequencia",
       year: Number(freqSecao[1]),
-      secao: decodeURIComponent(freqSecao[2]),
+      secaoId: decodeURIComponent(freqSecao[2]),
     };
   }
 

@@ -23,6 +23,10 @@ export async function upsertAuthIndex(usuario: Usuario): Promise<void> {
     perfil: usuario.perfil || "Operador",
     ativo: usuario.ativo !== false,
     secao: String(usuario.secao || "").trim(),
+    secaoId: String(usuario.secaoId || "").trim(),
+    secoesResponsaveisIds: (usuario.secoesResponsaveisIds || []).map((secaoId) =>
+      String(secaoId || "").trim()
+    ),
     divisaoId: String(usuario.divisaoId || "").trim(),
     updatedAt: new Date().toISOString(),
   };

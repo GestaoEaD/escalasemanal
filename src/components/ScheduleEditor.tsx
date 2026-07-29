@@ -43,11 +43,13 @@ import {
   canEditScale,
   canReopenApprovedScale,
   canSubmitForApproval,
+  canManageCadastrosDivisao,
   isGestor,
 } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { buildEscalaDocId } from "../utils/divisaoIds";
+import { colaboradorDocId } from "../utils/tenantDocIds";
 import { resolveActiveDivisaoId } from "../utils/divisaoContext";
 import {
   applyWeekendDefault,
@@ -140,6 +142,7 @@ interface ScheduleEditorProps {
   usuario: Usuario;
   year: number;
   week: WeekInfo;
+  secaoId: string;
   onBack: () => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
@@ -150,6 +153,7 @@ export default function ScheduleEditor({
   usuario,
   year,
   week,
+  secaoId,
   onBack,
   onLogout: _onLogout,
   onOpenConfig: _onOpenConfig,
@@ -157,8 +161,9 @@ export default function ScheduleEditor({
 }: ScheduleEditorProps) {
   // Document IDs in Firestore
   const divisaoId = resolveActiveDivisaoId(usuario);
-  // Firestore: `{divisaoId}_{ano}_{semana}` — week.id local permanece `YYYY_WW`
-  const docId = buildEscalaDocId(divisaoId, year, week.numero);
+  const activeSecaoId = String(secaoId || usuario.activeSecaoId || usuario.secaoId || "").trim();
+  // Firestore: `{divisaoId}__{secaoId}__{ano}__{semana}` — week.id local permanece `YYYY_WW`
+  const docId = buildEscalaDocId(divisaoId, activeSecaoId, year, week.numero);
   const dayHeaders = useMemo(
     () => getWeekDayColumnHeaders(week.startDate),
     [week.startDate]
@@ -406,25 +411,23 @@ export default function ScheduleEditor({
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Collaborators Pool (Divisão ativa)
+      // 1. Fetch Collaborators Pool (Seção ativa)
       const colSnapshot = await getDocs(
-        query(
-          collection(db, "colaboradores"),
-          where("divisaoId", "==", divisaoId)
-        )
+        query(collection(db, "colaboradores"), where("secaoId", "==", activeSecaoId))
       );
       const colList: Colaborador[] = [];
       colSnapshot.forEach((docSnap) => {
-        colList.push(normalizeColaboradorCadastro(docSnap.data() as Colaborador));
+        const data = normalizeColaboradorCadastro(docSnap.data() as Colaborador);
+        if (String(data.divisaoId || "") === divisaoId) {
+          colList.push(data);
+        }
       });
       // Sort by official order field
       const sortedCols = colList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
       setCollaboratorsPool(sortedCols);
 
       // 2. Fetch Legendas Pool
-      const legSnapshot = await getDocs(
-        query(collection(db, "legendas"), where("divisaoId", "==", divisaoId))
-      );
+      const legSnapshot = await getDocs(collection(db, "legendas"));
       const legList: any[] = [];
       legSnapshot.forEach((doc) => {
         legList.push(doc.data());
@@ -461,7 +464,7 @@ export default function ScheduleEditor({
           isScheduleRosterEditable(weeklyStatusLoaded) &&
           canEditScale(usuario, week, weeklyStatusLoaded)
         ) {
-          const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols);
+          const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols, activeSecaoId);
           if (synced.changed) {
             loadedRows = synced.rows.map(applyWeekendDefault);
             await setDoc(
@@ -475,6 +478,7 @@ export default function ScheduleEditor({
                 historico: cleanHistorico(
                   Array.isArray(data.historico) ? data.historico : []
                 ),
+                secaoId: activeSecaoId,
               } as unknown as Record<string, unknown>)
             );
             const parts: string[] = [];
@@ -672,6 +676,8 @@ export default function ScheduleEditor({
   }, [docId]);
 
   // Open modal to add collaborator
+  const canManageCadastros = canManageCadastrosDivisao(usuario);
+
   const handleOpenAddCol = (panel: "semanal" | "alteracao") => {
     setActivePanelForModal(panel);
     setEditColTarget(null);
@@ -695,9 +701,9 @@ export default function ScheduleEditor({
   const handleAddColConfirm = async (col: Colaborador) => {
     const panelEditable = activePanelForModal === "semanal" ? isWeeklyEditable : isAltEditable;
     if (!panelEditable) return;
-    // 1. Instantly register in pool if it doesn't exist
+    // Admin/Gerente persistem o cadastro; Operador só injeta na escala local.
     const existsInPool = collaboratorsPool.some((p) => p.re === col.re);
-    if (!existsInPool) {
+    if (canManageCadastros && !existsInPool) {
       try {
         const maxOrdem = collaboratorsPool.reduce((max, c) => (c.ordem && c.ordem > max) ? c.ordem : max, 0);
         const nextOrdem = maxOrdem + 1;
@@ -706,6 +712,7 @@ export default function ScheduleEditor({
           postoGrad: col.postoGrad,
           nome: col.nome,
           secao: col.secao,
+          secaoId: col.secaoId || activeSecaoId,
           observacao: col.observacao || "",
           ativo: true,
           ordem: nextOrdem,
@@ -713,9 +720,10 @@ export default function ScheduleEditor({
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
+        const colDocId = colaboradorDocId(divisaoId, col.re);
         await setDoc(
-          doc(db, "colaboradores", col.re),
-          prepareFirestoreWrite(`colaboradores/${col.re}`, newColDoc as unknown as Record<string, unknown>)
+          doc(db, "colaboradores", colDocId),
+          prepareFirestoreWrite(`colaboradores/${colDocId}`, newColDoc as unknown as Record<string, unknown>)
         );
         setCollaboratorsPool((prev) => [...prev, newColDoc].sort((a, b) => (a.ordem || 0) - (b.ordem || 0)));
       } catch (err) {
@@ -745,35 +753,40 @@ export default function ScheduleEditor({
 
   // Update collaborator info confirmed in modal
   const handleUpdateColConfirm = async (oldRe: string, updated: Colaborador) => {
-    try {
-      const existing = collaboratorsPool.find((c) => c.re === oldRe);
-      const updatedColDoc = {
-        re: updated.re,
-        postoGrad: updated.postoGrad,
-        nome: updated.nome,
-        secao: updated.secao,
-        observacao: updated.observacao || "",
-        ativo: existing?.ativo !== undefined ? existing.ativo : true,
-        ordem: existing?.ordem !== undefined ? existing.ordem : 1,
-        divisaoId: String(existing?.divisaoId || divisaoId),
-        createdAt: existing?.createdAt || Timestamp.now(),
-        updatedAt: Timestamp.now()
-      };
-      
-      await setDoc(
-        doc(db, "colaboradores", updated.re),
-        prepareFirestoreWrite(`colaboradores/${updated.re}`, updatedColDoc as unknown as Record<string, unknown>)
-      );
-      if (oldRe !== updated.re) {
-        await deleteDoc(doc(db, "colaboradores", oldRe));
-      }
+    if (canManageCadastros) {
+      try {
+        const existing = collaboratorsPool.find((c) => c.re === oldRe);
+        const updatedColDoc = {
+          re: updated.re,
+          postoGrad: updated.postoGrad,
+          nome: updated.nome,
+          secao: updated.secao,
+          secaoId: updated.secaoId || activeSecaoId,
+          observacao: updated.observacao || "",
+          ativo: existing?.ativo !== undefined ? existing.ativo : true,
+          ordem: existing?.ordem !== undefined ? existing.ordem : 1,
+          divisaoId: String(existing?.divisaoId || divisaoId),
+          createdAt: existing?.createdAt || Timestamp.now(),
+          updatedAt: Timestamp.now()
+        };
+        
+        const newDocId = colaboradorDocId(String(updatedColDoc.divisaoId || divisaoId), updated.re);
+        const oldDocId = colaboradorDocId(String(existing?.divisaoId || divisaoId), oldRe);
+        await setDoc(
+          doc(db, "colaboradores", newDocId),
+          prepareFirestoreWrite(`colaboradores/${newDocId}`, updatedColDoc as unknown as Record<string, unknown>)
+        );
+        if (oldDocId !== newDocId) {
+          await deleteDoc(doc(db, "colaboradores", oldDocId));
+        }
 
-      setCollaboratorsPool((prev) => 
-        prev.map((c) => (c.re === oldRe ? updatedColDoc : c))
-            .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
-      );
-    } catch (err) {
-      console.error("Failed to update collaborator in global pool:", err);
+        setCollaboratorsPool((prev) => 
+          prev.map((c) => (c.re === oldRe ? updatedColDoc : c))
+              .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
+        );
+      } catch (err) {
+        console.error("Failed to update collaborator in global pool:", err);
+      }
     }
 
     const updateRows = (prev: ScheduleRow[]) =>
@@ -854,7 +867,12 @@ export default function ScheduleEditor({
     setPreviousWeekInfo(null);
     setPreviousWeekBusy(true);
     try {
-      const result = await fetchPreviousWeeklyScale(year, week.numero, divisaoId);
+      const result = await fetchPreviousWeeklyScale(
+        year,
+        week.numero,
+        activeSecaoId,
+        divisaoId
+      );
       if (result.status === "error") {
         setPreviousWeekInfo(result.message);
         const ref = result.ref || (() => {
@@ -2900,6 +2918,9 @@ export default function ScheduleEditor({
           ? localWeeklyRows.map((r) => r.re) 
           : localAlterationRows.map((r) => r.re)}
         editCollaborator={editColTarget}
+        allowCadastro={canManageCadastros}
+        divisaoId={divisaoId}
+        secaoId={activeSecaoId}
       />
 
       <ConcurrencyModal

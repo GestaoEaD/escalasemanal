@@ -1,3 +1,14 @@
+/**
+ * Matriz final de permissões.
+ *
+ * - Gerente: global (todas as Divisões e módulos administrativos globais).
+ * - Administrador: administração da própria Divisão.
+ * - Gestor: aprova na própria Divisão (todas as Seções).
+ * - Operador: edita/envia na própria Divisão (todas as Seções).
+ *
+ * `secaoId` identifica lotação e documento selecionado, mas NÃO restringe
+ * o acesso dentro da própria Divisão.
+ */
 import { EscalaStatus, PerfilUsuario, Usuario } from "../types";
 import { WeekInfo } from "./dateUtils";
 import { normalizeRe } from "./reUtils";
@@ -28,14 +39,53 @@ export function canAccessAnyDivisao(usuario: Usuario | null | undefined): boolea
   return isGerente(usuario);
 }
 
-/** CRUD de Divisões e configuração global. */
+/** CRUD de Divisões — somente Gerente. */
 export function canManageDivisoes(usuario: Usuario | null | undefined): boolean {
   return isGerente(usuario);
 }
 
-/** Acesso às configurações (Admin da Divisão ou Gerente). */
+/** Entrada na área de Configurações (Admin da Divisão ou Gerente). */
 export function canAccessConfig(usuario: Usuario | null | undefined): boolean {
   return isAdministrador(usuario) || isGerente(usuario);
+}
+
+/** Cadastros da Divisão: Seções, Colaboradores, Postos. */
+export function canManageCadastrosDivisao(
+  usuario: Usuario | null | undefined
+): boolean {
+  return isAdministrador(usuario) || isGerente(usuario);
+}
+
+/** Alias histórico — Seções = cadastro da Divisão. */
+export function canManageSecoes(usuario: Usuario | null | undefined): boolean {
+  return canManageCadastrosDivisao(usuario);
+}
+
+/** Gerenciamento de usuários/perfis (Admin da Divisão ou Gerente). */
+export function canManageUsuarios(usuario: Usuario | null | undefined): boolean {
+  return isAdministrador(usuario) || isGerente(usuario);
+}
+
+/** Legendas globais — somente Gerente. */
+export function canManageLegendasGlobais(
+  usuario: Usuario | null | undefined
+): boolean {
+  return isGerente(usuario);
+}
+
+/** Configurações Gerais — somente Gerente. */
+export function canEditConfigGerais(usuario: Usuario | null | undefined): boolean {
+  return isGerente(usuario);
+}
+
+/** Central de Testes / diagnósticos — somente Gerente. */
+export function canAccessTestCenter(usuario: Usuario | null | undefined): boolean {
+  return isGerente(usuario);
+}
+
+/** Logs: Gerente (global) ou Administrador (própria Divisão). */
+export function canViewLogs(usuario: Usuario | null | undefined): boolean {
+  return isGerente(usuario) || isAdministrador(usuario);
 }
 
 /**
@@ -89,7 +139,7 @@ export function isWeekCurrentOrFuture(week: WeekInfo, today: Date = new Date()):
  * - Aprovada / Aguardando: ninguém edita conteúdo.
  * - Gestor: nunca edita conteúdo.
  * - Gerente / Administrador: qualquer período editável.
- * - Operador: semana atual/futura editável.
+ * - Operador: semana atual/futura editável (qualquer Seção da Divisão).
  */
 export function canEditScale(
   usuario: Usuario | null | undefined,
@@ -132,6 +182,24 @@ export function canEditFrequencia(
   return st === "em_edicao" || st === "revisao_solicitada";
 }
 
+/**
+ * Acesso a documento de escala/frequência por Seção.
+ * Dentro da própria Divisão, Operador/Gestor/Admin acessam qualquer Seção.
+ * Somente Gerente cruza Divisões.
+ */
+export function canAccessSecaoScale(
+  usuario: Usuario | null | undefined,
+  secaoId: string,
+  divisaoId?: string
+): boolean {
+  if (!usuario?.re) return false;
+  if (isGerente(usuario)) return true;
+  if (divisaoId && normalizeDivisaoId(usuario.divisaoId) !== normalizeDivisaoId(divisaoId)) {
+    return false;
+  }
+  return Boolean(String(secaoId || "").trim());
+}
+
 /** Confirmação de RE do aprovador (Gestor/Gerente). */
 export function confirmGestorRe(usuario: Usuario, typedRe: string): boolean {
   if (!canApproveScales(usuario)) return false;
@@ -152,4 +220,17 @@ export function canManageUsuarioInDivisao(
 /** Pode atribuir perfil Gerente (somente Gerente). */
 export function canAssignGerente(actor: Usuario | null | undefined): boolean {
   return isGerente(actor);
+}
+
+/** Perfis que o ator pode atribuir a outro usuário. */
+export function assignablePerfis(
+  actor: Usuario | null | undefined
+): PerfilUsuario[] {
+  if (isGerente(actor)) {
+    return ["Operador", "Gestor", "Administrador", "Gerente"];
+  }
+  if (isAdministrador(actor)) {
+    return ["Operador", "Gestor", "Administrador"];
+  }
+  return [];
 }

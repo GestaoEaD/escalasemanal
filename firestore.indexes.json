@@ -9,11 +9,47 @@
       ]
     },
     {
+      "collectionGroup": "escalas_semanais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" },
+        { "fieldPath": "ano", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "escalas_semanais",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "escalas_alteracao",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "ano", "order": "ASCENDING" },
         { "fieldPath": "divisaoId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "escalas_alteracao",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" },
+        { "fieldPath": "ano", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "escalas_alteracao",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
@@ -25,11 +61,37 @@
       ]
     },
     {
+      "collectionGroup": "controle_frequencia",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" },
+        { "fieldPath": "ano", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "solicitacoes_aprovacao",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "divisaoId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitacoes_aprovacao",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "colaboradores",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisaoId", "order": "ASCENDING" },
+        { "fieldPath": "secaoId", "order": "ASCENDING" }
       ]
     }
   ],

@@ -45,20 +45,67 @@ service cloud.firestore {
       return signedIn() && authIndexExists();
     }
 
+    function docInexistente() {
+      return resource == null;
+    }
+
     function sameDivisao(data) {
-      return data.keys().hasAny(['divisaoId'])
-        && data.divisaoId == callerDivisao();
+      return data.keys().hasAny(['divisaoId']) && data.divisaoId == callerDivisao();
+    }
+
+    function hasSecaoId(data) {
+      return data.keys().hasAny(['secaoId']);
+    }
+
+    function accessByRole(data) {
+      return isGerente()
+        || ((isAdmin() || isGestor() || isOperador())
+          && sameDivisao(data)
+          && hasSecaoId(data));
+    }
+
+    // Admin nunca cria, promove, edita ou remove Gerente.
+    function adminUsuarioPerfilOk() {
+      return request.resource.data.keys().hasAny(['perfil'])
+        && request.resource.data.perfil != 'Gerente'
+        && (
+          resource == null
+          || !resource.data.keys().hasAny(['perfil'])
+          || resource.data.perfil != 'Gerente'
+        );
+    }
+
+    function sectionRead() {
+      return isGerente()
+        || (isRegistered()
+            && docInexistente())
+        || (isRegistered()
+            && hasSecaoId(resource.data)
+            && accessByRole(resource.data));
+    }
+
+    function sectionCreateOk() {
+      return isGerente()
+        || (isRegistered()
+            && hasSecaoId(request.resource.data)
+            && accessByRole(request.resource.data));
+    }
+
+    function sectionUpdateOk() {
+      return isGerente()
+        || (isRegistered()
+            && hasSecaoId(resource.data)
+            && hasSecaoId(request.resource.data)
+            && resource.data.divisaoId == request.resource.data.divisaoId
+            && accessByRole(resource.data)
+            && accessByRole(request.resource.data));
     }
 
     function tenantRead() {
       return isGerente()
-        || (isRegistered() && resource.data.keys().hasAny(['divisaoId'])
-            && resource.data.divisaoId == callerDivisao())
-        || (isRegistered() && !resource.data.keys().hasAny(['divisaoId'])
-            && callerDivisao() == '202002500');
+        || (isRegistered() && !docInexistente() && sameDivisao(resource.data));
     }
 
-    /** Create: documento deve pertencer à Divisão do caller (ou Gerente). */
     function tenantCreateOk() {
       return isGerente()
         || (isRegistered()
@@ -66,12 +113,6 @@ service cloud.firestore {
             && request.resource.data.divisaoId == callerDivisao());
     }
 
-    /**
-     * Update: não permite trocar/hijack divisaoId.
-     * resource e request devem permanecer na mesma Divisão do caller (Admin/Op)
-     * ou Gerente pode escrever em qualquer tenant sem mudar o tenant do doc sem querer —
-     * Gerente ainda não pode mover doc entre Divisões (divisaoId imutável).
-     */
     function tenantUpdateOk() {
       return request.resource.data.keys().hasAny(['divisaoId'])
         && resource.data.keys().hasAny(['divisaoId'])
@@ -83,7 +124,7 @@ service cloud.firestore {
     }
 
     function canEditCadastro() {
-      return isAdmin() || isOperador() || isGerente();
+      return isAdmin() || isGerente();
     }
 
     function canSubmitRole() {
@@ -98,57 +139,31 @@ service cloud.firestore {
       return request.resource.data.status == resource.data.status;
     }
 
-    function workflowSubmit() {
-      return canSubmitRole()
-        && resource.data.status in ['em_edicao', 'revisao_solicitada']
-        && request.resource.data.status == 'aguardando_aprovacao';
-    }
-
-    function workflowApprove() {
-      return canApproveRole()
-        && resource.data.status == 'aguardando_aprovacao'
-        && request.resource.data.status == 'aprovada';
-    }
-
-    function workflowRevision() {
-      return canApproveRole()
-        && resource.data.status == 'aguardando_aprovacao'
-        && request.resource.data.status == 'revisao_solicitada';
-    }
-
-    function workflowCancel() {
-      return canSubmitRole()
-        && resource.data.status == 'aguardando_aprovacao'
-        && request.resource.data.status == 'em_edicao';
-    }
-
-    function workflowReopen() {
-      return canApproveRole()
-        && resource.data.status == 'aprovada'
-        && request.resource.data.status == 'em_edicao';
-    }
-
-    function workflowContentEdit() {
-      return canEditCadastro()
-        && sameStatus()
-        && !(resource.data.status in ['aprovada', 'aguardando_aprovacao']);
-    }
-
     function canWriteWorkflowDoc() {
-      return tenantUpdateOk()
+      return sectionUpdateOk()
         && (
-          workflowContentEdit()
-          || workflowSubmit()
-          || workflowApprove()
-          || workflowRevision()
-          || workflowCancel()
-          || workflowReopen()
+          (canSubmitRole()
+            && sameStatus()
+            && !(resource.data.status in ['aprovada', 'aguardando_aprovacao']))
+          || (canSubmitRole()
+            && resource.data.status in ['em_edicao', 'revisao_solicitada']
+            && request.resource.data.status == 'aguardando_aprovacao')
+          || (canApproveRole()
+            && resource.data.status == 'aguardando_aprovacao'
+            && request.resource.data.status in ['aprovada', 'revisao_solicitada'])
+          || (canSubmitRole()
+            && resource.data.status == 'aguardando_aprovacao'
+            && request.resource.data.status == 'em_edicao')
+          || (canApproveRole()
+            && resource.data.status == 'aprovada'
+            && request.resource.data.status == 'em_edicao')
         );
     }
 
     function canCreateWorkflowDoc() {
-      return canEditCadastro()
-        && tenantCreateOk()
+      return canSubmitRole()
+        && sectionCreateOk()
+        && request.resource.data.keys().hasAll(['divisaoId', 'secaoId'])
         && (
           !('status' in request.resource.data)
           || request.resource.data.status == 'em_edicao'
@@ -161,44 +176,78 @@ service cloud.firestore {
             && resource.data.divisaoId == callerDivisao());
     }
 
-    /**
-     * Self-write de auth_index só se espelhar usuarios/{re} (impede auto-promoção a Gerente).
-     */
     function authIndexMirrorsUsuario() {
       return request.resource.data.keys().hasAll(['re', 'perfil', 'divisaoId', 'email'])
         && request.resource.data.email == authEmail()
         && exists(/databases/$(database)/documents/usuarios/$(request.resource.data.re))
         && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.email == authEmail()
         && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.perfil == request.resource.data.perfil
-        && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.divisaoId == request.resource.data.divisaoId;
+        && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.divisaoId == request.resource.data.divisaoId
+        && (
+          !get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.keys().hasAny(['secaoId'])
+          || get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.secaoId == request.resource.data.secaoId
+        )
+        && (
+          !get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.keys().hasAny(['secoesResponsaveisIds'])
+          || get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.secoesResponsaveisIds == request.resource.data.secoesResponsaveisIds
+        );
+    }
+
+    function adminAuthIndexMirrorsUsuario(email) {
+      return isAdmin()
+        && request.resource.data.keys().hasAll(['re', 'perfil', 'divisaoId', 'email'])
+        && request.resource.data.email == email
+        && request.resource.data.divisaoId == callerDivisao()
+        && request.resource.data.perfil != 'Gerente'
+        && exists(/databases/$(database)/documents/usuarios/$(request.resource.data.re))
+        && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.email == email
+        && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.divisaoId == callerDivisao()
+        && get(/databases/$(database)/documents/usuarios/$(request.resource.data.re)).data.perfil == request.resource.data.perfil
+        && (
+          resource == null
+          || (
+            resource.data.keys().hasAll(['divisaoId', 'perfil'])
+            && resource.data.divisaoId == callerDivisao()
+            && resource.data.perfil != 'Gerente'
+          )
+        );
     }
 
     match /auth_index/{email} {
       allow read: if signedIn() && authEmail() == email;
       allow create, update: if signedIn()
         && (
-          isAdmin()
-          || isGerente()
+          isGerente()
+          || adminAuthIndexMirrorsUsuario(email)
           || (authEmail() == email && authIndexMirrorsUsuario())
         );
-      allow delete: if isAdmin() || isGerente();
+      allow delete: if isGerente()
+        || (isAdmin()
+          && resource != null
+          && resource.data.keys().hasAll(['divisaoId', 'perfil'])
+          && resource.data.divisaoId == callerDivisao()
+          && resource.data.perfil != 'Gerente');
     }
 
     match /divisoes/{id} {
-      allow read: if isRegistered();
+      allow read: if isGerente()
+        || (isRegistered() && docInexistente())
+        || (isRegistered() && resource.data.keys().hasAny(['codigo'])
+            && resource.data.codigo == callerDivisao());
       allow create, update, delete: if isGerente();
     }
 
     match /logs/{id} {
       allow read: if isGerente()
-        || (isAdmin() && resource.data.keys().hasAny(['divisaoId'])
+        || (isAdmin() && !docInexistente()
+            && resource.data.keys().hasAny(['divisaoId'])
             && resource.data.divisaoId == callerDivisao());
-      allow create: if signedIn()
+      allow create: if isRegistered()
         && request.resource.data.keys().hasAny(['timestamp'])
         && request.resource.data.timestamp == request.time
         && (
           isGerente()
-          || !('divisaoId' in request.resource.data)
+          || !request.resource.data.keys().hasAny(['divisaoId'])
           || request.resource.data.divisaoId == callerDivisao()
         );
       allow update, delete: if false;
@@ -206,18 +255,28 @@ service cloud.firestore {
 
     match /counters/{id} {
       allow read: if isRegistered();
-      // Incremento de contador de logs — qualquer autenticado registrado (necessário p/ auditoria)
       allow write: if isRegistered();
     }
 
     match /usuarios/{re} {
       allow read: if isGerente()
-        || (signedIn() && resource.data.keys().hasAny(['email'])
-            && resource.data.email == authEmail())
-        || (isRegistered() && sameDivisao(resource.data));
-      allow create: if (isGerente() || isAdmin()) && tenantCreateOk();
+        || (isRegistered() && docInexistente())
+        || (signedIn() && resource.data.keys().hasAny(['email']) && resource.data.email == authEmail())
+        || (isAdmin() && sectionRead())
+        || (isGestor() && sectionRead())
+        || (isOperador() && sectionRead());
+      allow create: if isGerente()
+        && sectionCreateOk()
+        && request.resource.data.keys().hasAll(['divisaoId', 'secaoId'])
+        || (isAdmin()
+          && sectionCreateOk()
+          && adminUsuarioPerfilOk()
+          && request.resource.data.keys().hasAll(['divisaoId', 'secaoId']));
       allow update: if isGerente()
-        || (isAdmin() && tenantUpdateOk())
+        || (isAdmin()
+          && sectionUpdateOk()
+          && adminUsuarioPerfilOk()
+          && !(resource.data.keys().hasAny(['email']) && resource.data.email == authEmail()))
         || (
           signedIn()
           && resource.data.keys().hasAny(['email'])
@@ -225,22 +284,47 @@ service cloud.firestore {
           && request.resource.data.email == authEmail()
           && request.resource.data.perfil == resource.data.perfil
           && request.resource.data.divisaoId == resource.data.divisaoId
+          && request.resource.data.secaoId == resource.data.secaoId
+          && (
+            !resource.data.keys().hasAny(['secoesResponsaveisIds'])
+              ? !request.resource.data.keys().hasAny(['secoesResponsaveisIds'])
+              : request.resource.data.secoesResponsaveisIds == resource.data.secoesResponsaveisIds
+          )
           && request.resource.data.re == resource.data.re
         );
-      allow delete: if tenantDeleteOk();
+      allow delete: if isGerente()
+        || (isAdmin()
+          && resource.data.keys().hasAny(['divisaoId'])
+          && resource.data.divisaoId == callerDivisao()
+          && (
+            !resource.data.keys().hasAny(['perfil'])
+            || resource.data.perfil != 'Gerente'
+          ));
     }
 
     match /colaboradores/{id} {
-      allow read: if tenantRead();
-      allow create: if canEditCadastro() && tenantCreateOk();
-      allow update: if canEditCadastro() && tenantUpdateOk();
+      allow read: if isGerente()
+        || (isRegistered() && docInexistente())
+        || sectionRead();
+      allow create: if canEditCadastro()
+        && sectionCreateOk()
+        && request.resource.data.keys().hasAll(['divisaoId', 'secaoId']);
+      allow update: if canEditCadastro()
+        && sectionUpdateOk();
       allow delete: if canEditCadastro() && tenantDeleteOk();
     }
 
     match /secoes/{id} {
-      allow read: if tenantRead();
-      allow create: if (isAdmin() || isGerente()) && tenantCreateOk();
-      allow update: if (isAdmin() || isGerente()) && tenantUpdateOk();
+      allow read: if isGerente()
+        || (isRegistered() && docInexistente())
+        || tenantRead();
+      allow create: if (isAdmin() || isGerente())
+        && tenantCreateOk()
+        && request.resource.data.keys().hasAny(['divisaoId'])
+        && !request.resource.data.keys().hasAny(['secaoId']);
+      allow update: if (isAdmin() || isGerente())
+        && tenantUpdateOk()
+        && !request.resource.data.keys().hasAny(['secaoId']);
       allow delete: if tenantDeleteOk();
     }
 
@@ -252,53 +336,62 @@ service cloud.firestore {
     }
 
     match /legendas/{id} {
-      allow read: if tenantRead();
-      allow create: if (isAdmin() || isGerente()) && tenantCreateOk();
-      allow update: if (isAdmin() || isGerente()) && tenantUpdateOk();
-      allow delete: if tenantDeleteOk();
+      allow read: if isRegistered() || (isRegistered() && docInexistente());
+      allow create, update, delete: if isGerente();
     }
 
     match /configuracoes/{id} {
       allow read: if isRegistered();
-      allow write: if isAdmin() || isGerente();
+      allow write: if isGerente();
     }
 
     match /escalas_semanais/{id} {
-      allow read: if tenantRead();
+      allow read: if sectionRead();
       allow create: if canCreateWorkflowDoc();
       allow update: if canWriteWorkflowDoc();
       allow delete: if tenantDeleteOk();
     }
 
     match /escalas_alteracao/{id} {
-      allow read: if tenantRead();
+      allow read: if sectionRead();
       allow create: if canCreateWorkflowDoc();
       allow update: if canWriteWorkflowDoc();
       allow delete: if tenantDeleteOk();
     }
 
     match /controle_frequencia/{id} {
-      allow read: if tenantRead();
+      allow read: if sectionRead();
       allow create: if canCreateWorkflowDoc();
       allow update: if canWriteWorkflowDoc();
       allow delete: if tenantDeleteOk();
     }
 
     match /solicitacoes_aprovacao/{id} {
-      allow read: if isGerente()
-        || (isRegistered() && sameDivisao(resource.data))
-        || (isRegistered() && !resource.data.keys().hasAny(['divisaoId'])
-            && callerDivisao() == '202002500');
-      allow create: if canSubmitRole() && tenantCreateOk();
-      allow update: if (canSubmitRole() || canApproveRole()) && tenantUpdateOk();
+      allow read: if sectionRead();
+      allow create: if canSubmitRole()
+        && sectionCreateOk()
+        && request.resource.data.keys().hasAll(['divisaoId', 'secaoId']);
+      allow update: if sectionUpdateOk()
+        && (canSubmitRole() || canApproveRole())
+        && request.resource.data.divisaoId == resource.data.divisaoId
+        && request.resource.data.secaoId == resource.data.secaoId;
       allow delete: if tenantDeleteOk();
     }
 
     match /presenca_online/{id} {
-      allow read: if isRegistered();
+      allow read: if isGerente()
+        || (isRegistered() && docInexistente())
+        || (isRegistered()
+            && (!resource.data.keys().hasAny(['divisaoId'])
+                || resource.data.divisaoId == callerDivisao()));
       allow create, update: if isRegistered()
         && request.resource.data.keys().hasAny(['re'])
-        && request.resource.data.re == callerRe();
+        && request.resource.data.re == callerRe()
+        && (
+          !request.resource.data.keys().hasAny(['divisaoId'])
+          || request.resource.data.divisaoId == callerDivisao()
+          || isGerente()
+        );
       allow delete: if isRegistered()
         && (
           (resource.data.keys().hasAny(['re']) && resource.data.re == callerRe())

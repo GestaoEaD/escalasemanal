@@ -7,6 +7,8 @@ import {
   collection,
   doc,
   getDocs,
+  query,
+  where,
   setDoc,
   serverTimestamp,
   runTransaction,
@@ -54,6 +56,7 @@ export function toAuditUsuario(usuario: Usuario | null | undefined): AuditUsuari
     posto: usuario?.postoGrad || "",
     perfil: usuario?.perfil || "Operador",
     ...(usuario?.secao ? { secao: String(usuario.secao) } : {}),
+    ...(usuario?.secaoId ? { secaoId: String(usuario.secaoId) } : {}),
     ...(usuario?.divisaoId || usuario?.activeDivisaoId
       ? {
           divisaoId: String(
@@ -108,6 +111,7 @@ export interface RegisterAuditInput {
   solicitacaoId?: string;
   motivo?: string;
   origem?: string;
+  secaoId?: string;
   date?: Date;
 }
 
@@ -135,6 +139,10 @@ export async function registerAuditOperation(
   if (input.anoSemana) op.anoSemana = input.anoSemana;
   const divisaoId = resolveActiveDivisaoId(input.usuario);
   if (divisaoId) op.divisaoId = divisaoId;
+  const secaoId = String(
+    input.secaoId || input.usuario.activeSecaoId || input.usuario.secaoId || ""
+  ).trim();
+  if (secaoId) op.secaoId = secaoId;
   if (typeof input.ano === "number") op.ano = input.ano;
   else if (typeof parsed.ano === "number") op.ano = parsed.ano;
   if (typeof input.semana === "number") op.semana = input.semana;
@@ -205,6 +213,7 @@ export async function auditWorkflowEscala(options: {
   solicitacaoId?: string;
   motivo?: string;
   detalhes?: string;
+  secaoId?: string;
 }): Promise<AuditOperation> {
   const isAlt = options.tipoDoc === "alteracao";
   const isFreq = options.tipoDoc === "frequencia";
@@ -236,6 +245,7 @@ export async function auditWorkflowEscala(options: {
     solicitacaoId: options.solicitacaoId,
     motivo: options.motivo,
     detalhes: options.detalhes,
+    secaoId: options.secaoId,
   });
 }
 
@@ -246,6 +256,7 @@ export async function auditAbrirLinkAprovacao(options: {
   versao?: number;
   solicitacaoId: string;
   detalhes?: string;
+  secaoId?: string;
 }): Promise<AuditOperation> {
   return registerAuditOperation({
     tipo: "ABRIR_LINK_APROVACAO",
@@ -260,6 +271,7 @@ export async function auditAbrirLinkAprovacao(options: {
     versao: options.versao,
     solicitacaoId: options.solicitacaoId,
     detalhes: options.detalhes || "Abertura do link de aprovação",
+    secaoId: options.secaoId,
   });
 }
 
@@ -267,6 +279,7 @@ export async function auditExportacao(options: {
   usuario: Usuario;
   anoSemana?: string;
   detalhes?: string;
+  secaoId?: string;
 }): Promise<AuditOperation> {
   return registerAuditOperation({
     tipo: "EXPORTAR",
@@ -274,6 +287,7 @@ export async function auditExportacao(options: {
     usuario: options.usuario,
     anoSemana: options.anoSemana,
     detalhes: options.detalhes,
+    secaoId: options.secaoId,
   });
 }
 
@@ -327,6 +341,7 @@ export function normalizeAuditOperation(
         posto: raw.usuario.posto || "",
         perfil: raw.usuario.perfil || "Operador",
         ...(raw.usuario.secao ? { secao: String(raw.usuario.secao) } : {}),
+        ...(raw.usuario.secaoId ? { secaoId: String(raw.usuario.secaoId) } : {}),
         ...(raw.usuario.divisaoId
           ? { divisaoId: String(raw.usuario.divisaoId) }
           : {}),
@@ -392,8 +407,11 @@ export function normalizeAuditOperation(
   };
 }
 
-export async function loadAuditOperations(): Promise<AuditOperation[]> {
-  const snap = await getDocs(collection(db, LOGS_COLLECTION));
+export async function loadAuditOperations(divisaoId?: string): Promise<AuditOperation[]> {
+  const base = collection(db, LOGS_COLLECTION);
+  const snap = String(divisaoId || "").trim()
+    ? await getDocs(query(base, where("divisaoId", "==", String(divisaoId).trim())))
+    : await getDocs(base);
   const list: AuditOperation[] = [];
   snap.forEach((d) => {
     list.push(normalizeAuditOperation(d.id, d.data() as Record<string, any>));

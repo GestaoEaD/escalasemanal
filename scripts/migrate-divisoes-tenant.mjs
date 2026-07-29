@@ -28,16 +28,13 @@ function resolveKeyPath() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     return resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
   }
-  const fallback = resolve(
-    process.env.USERPROFILE || "",
-    "Downloads",
-    "escalaead-firebase-adminsdk-fbsvc-7c94d488e8.json"
+  throw new Error(
+    "Defina GOOGLE_APPLICATION_CREDENTIALS ou informe --key <caminho>."
   );
-  return fallback;
 }
 
-function buildEscalaDocId(divisaoId, ano, semana) {
-  return `${divisaoId}_${ano}_${String(semana).padStart(2, "0")}`;
+function buildEscalaDocId(divisaoId, secaoId, ano, semana) {
+  return `${divisaoId}__${secaoId || ""}__${ano}__${String(semana).padStart(2, "0")}`;
 }
 
 function buildCfId(divisaoId, ano, mes, secao) {
@@ -83,7 +80,7 @@ async function rewriteEscalas(db, collectionName) {
     const ano = Number(data.ano);
     const semana = Number(data.semana);
     if (!Number.isFinite(ano) || !Number.isFinite(semana)) continue;
-    const newId = buildEscalaDocId(DIVISAO_EAD_ID, ano, semana);
+    const newId = buildEscalaDocId(DIVISAO_EAD_ID, data.secaoId || "", ano, semana);
     if (d.id === newId && data.divisaoId === DIVISAO_EAD_ID) continue;
     await db
       .collection(collectionName)

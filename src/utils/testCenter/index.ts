@@ -2,16 +2,24 @@ import { DIVISAO_EAD_ID, Usuario } from "../../types";
 import {
   canAccessAnyDivisao,
   canAccessConfig,
+  canAccessTestCenter,
   canApproveScales,
+  canEditConfigGerais,
   canEditFrequencia,
   canEditScale,
   canExportScale,
+  canManageCadastrosDivisao,
   canManageDivisoes,
+  canManageLegendasGlobais,
+  canManageUsuarios,
   canReopenApprovedScale,
   canSubmitForApproval,
+  canViewLogs,
   confirmGestorRe,
+  assignablePerfis,
   isGerente,
 } from "../permissions";
+import { canAccessSecao } from "../secaoContext";
 import { canEnterDivisao, resolveActiveDivisaoId } from "../divisaoContext";
 import { buildEscalaDocId, parseEscalaDocId } from "../divisaoIds";
 import { WeekInfo } from "../dateUtils";
@@ -70,8 +78,10 @@ const adminUser: Usuario = {
   nome: "TESTE_ADMIN",
   postoGrad: "CB PM",
   secao: "TESTE",
+  secaoId: "TESTE_SECAO",
   divisaoId: DIVISAO_EAD_ID,
   activeDivisaoId: DIVISAO_EAD_ID,
+  activeSecaoId: "TESTE_SECAO",
   perfil: "Administrador",
   ativo: true,
 };
@@ -292,7 +302,40 @@ export function buildAllTestCases(opts: {
       }
       if (!canManageDivisoes(gerenteUser)) return fail("Gerente gerencia Divisões");
       if (canManageDivisoes(adminUser)) return fail("Admin não gerencia Divisões");
-      return ok("Matriz de envio/aprovação/config/Divisões correta");
+      if (!canManageLegendasGlobais(gerenteUser) || canManageLegendasGlobais(adminUser)) {
+        return fail("Legendas globais exclusivas do Gerente");
+      }
+      if (!canEditConfigGerais(gerenteUser) || canEditConfigGerais(adminUser)) {
+        return fail("Config Gerais exclusivas do Gerente");
+      }
+      if (!canAccessTestCenter(gerenteUser) || canAccessTestCenter(adminUser)) {
+        return fail("Central de Testes exclusiva do Gerente");
+      }
+      if (!canViewLogs(gerenteUser) || !canViewLogs(adminUser) || canViewLogs(operadorUser) || canViewLogs(gestorUser)) {
+        return fail("Logs: Gerente/Admin sim; Op/Gestor não");
+      }
+      if (!canManageCadastrosDivisao(adminUser) || canManageCadastrosDivisao(operadorUser)) {
+        return fail("Cadastros da Divisão: Admin sim; Operador não");
+      }
+      if (!canManageUsuarios(adminUser) || canManageUsuarios(gestorUser)) {
+        return fail("Usuários: Admin sim; Gestor não");
+      }
+      if (assignablePerfis(adminUser).includes("Gerente")) {
+        return fail("Admin não pode atribuir Gerente");
+      }
+      if (!assignablePerfis(gerenteUser).includes("Gerente")) {
+        return fail("Gerente pode atribuir Gerente");
+      }
+      if (!canAccessSecao(operadorUser, "OUTRA_SECAO", DIVISAO_EAD_ID)) {
+        return fail("Operador deve acessar qualquer Seção da própria Divisão");
+      }
+      if (canAccessSecao(operadorUser, "OUTRA_SECAO", "999999999")) {
+        return fail("Operador não deve acessar Seção de outra Divisão");
+      }
+      if (!canAccessSecao(gestorUser, "OUTRA_SECAO", DIVISAO_EAD_ID)) {
+        return fail("Gestor deve acessar qualquer Seção da própria Divisão");
+      }
+      return ok("Matriz final de permissões (envio/aprovação/config/cadastros/escopo) OK");
     },
   });
 
@@ -319,10 +362,10 @@ export function buildAllTestCases(opts: {
       if (!canEnterDivisao(gerenteUser, outra)) {
         return fail("Gerente deveria entrar em qualquer Divisão");
       }
-      const id = buildEscalaDocId(DIVISAO_EAD_ID, 2026, 1);
-      if (id !== `${DIVISAO_EAD_ID}_2026_01`) return fail("ID de escala inválido", id);
+      const id = buildEscalaDocId(DIVISAO_EAD_ID, "SECAO_TESTE", 2026, 1);
+      if (id !== `${DIVISAO_EAD_ID}__SECAO_TESTE__2026__01`) return fail("ID de escala inválido", id);
       const parsed = parseEscalaDocId(id);
-      if (!parsed || parsed.ano !== 2026 || parsed.semana !== 1) {
+      if (!parsed || parsed.ano !== 2026 || parsed.semana !== 1 || parsed.secaoId !== "SECAO_TESTE") {
         return fail("parseEscalaDocId falhou", JSON.stringify(parsed));
       }
       if (resolveActiveDivisaoId(adminUser) !== DIVISAO_EAD_ID) {
@@ -1265,8 +1308,8 @@ export function buildAllTestCases(opts: {
     perfil: "Sistema",
     acao: "buildControleFrequenciaId / convertEscalaValorToFrequencia",
     run: async () => {
-      const id = buildControleFrequenciaId(2026, 3, "Sec Gest Educ", DIVISAO_EAD_ID);
-      if (id !== `${DIVISAO_EAD_ID}_2026_03_Sec_Gest_Educ`) return fail("ID inválido", id);
+      const id = buildControleFrequenciaId(2026, 3, "SECAO_GEST_EDUC", DIVISAO_EAD_ID);
+      if (id !== `${DIVISAO_EAD_ID}_2026_03_SECAO_GEST_EDUC`) return fail("ID inválido", id);
       const parsed = parseControleFrequenciaId(id);
       if (!parsed || parsed.ano !== 2026 || parsed.mes !== 3 || parsed.divisaoId !== DIVISAO_EAD_ID) {
         return fail("Parse do ID falhou", JSON.stringify(parsed));

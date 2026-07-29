@@ -32,6 +32,7 @@ import FrequenciaHeader from "../relatorios/FrequenciaHeader";
 import { normalizeEscalaStatus } from "../../utils/approvalService";
 import { getTokenApprovalUrl } from "../../utils/solicitacaoAprovacaoService";
 import { registerAuditOperation } from "../../utils/auditService";
+import { loadSecoes } from "../../utils/frequenciaService";
 import {
   canCancelApprovalRequest,
   canEditFrequencia,
@@ -62,7 +63,8 @@ interface Props {
   usuario: Usuario;
   year: number;
   month: number;
-  secao: string;
+  secaoId: string;
+  secao?: string;
   onBack: () => void;
   onOpenApproval?: (escalaId: string, tipo?: TipoEscalaDocumento) => void;
 }
@@ -76,7 +78,8 @@ export default function FrequenciaEditor({
   usuario,
   year,
   month,
-  secao,
+  secaoId,
+  secao = "",
   onBack,
   onOpenApproval,
 }: Props) {
@@ -98,6 +101,7 @@ export default function FrequenciaEditor({
   const [reopenOpen, setReopenOpen] = useState(false);
   const [reopenMotivo, setReopenMotivo] = useState("");
   const [codigoOpm, setCodigoOpm] = useState("");
+  const [secaoNome, setSecaoNome] = useState(secao);
 
   const nDays = daysInMonth(year, month);
   const dayKeys = useMemo(
@@ -119,16 +123,25 @@ export default function FrequenciaEditor({
     setLoading(true);
     setError(null);
     try {
-      const [legs, result] = await Promise.all([
-        loadLegendas(),
-        ensureAndSyncControleFrequencia({
-          ano: year,
-          mes: month,
-          secao,
-          usuario,
-          forceResync: false,
-        }),
+      const divisaoId = resolveActiveDivisaoId(usuario);
+      const [legs, secoes] = await Promise.all([
+        loadLegendas(divisaoId),
+        loadSecoes(divisaoId, usuario),
       ]);
+      const secaoInfo = secoes.find((s) => s.id === secaoId);
+      if (!secaoInfo) {
+        throw new Error("Você não possui acesso a esta seção.");
+      }
+      const currentSecaoNome = secaoInfo?.nome || secao || secaoId;
+      setSecaoNome(currentSecaoNome);
+      const result = await ensureAndSyncControleFrequencia({
+        ano: year,
+        mes: month,
+        secao: currentSecaoNome,
+        secaoId,
+        usuario,
+        forceResync: false,
+      });
       setLegendas(legs);
       let next = result.doc;
       const st = normalizeEscalaStatus(next.status);
@@ -162,7 +175,7 @@ export default function FrequenciaEditor({
     } finally {
       setLoading(false);
     }
-  }, [year, month, secao, usuario]);
+  }, [year, month, secao, secaoId, usuario]);
 
   useEffect(() => {
     void load();
@@ -170,13 +183,14 @@ export default function FrequenciaEditor({
 
   useEffect(() => {
     let cancelled = false;
-    void loadCodigoOpmBySecaoNome(secao, resolveActiveDivisaoId(usuario)).then((codigo) => {
+    const nome = docData?.secao || secaoNome || secaoId;
+    void loadCodigoOpmBySecaoNome(nome, resolveActiveDivisaoId(usuario)).then((codigo) => {
       if (!cancelled) setCodigoOpm(codigo);
     });
     return () => {
       cancelled = true;
     };
-  }, [secao, usuario]);
+  }, [docData?.secao, secaoNome, secaoId, usuario]);
 
   const setCell = (re: string, key: string, valorRaw: string) => {
     if (!docData || !editable) return;
@@ -262,7 +276,8 @@ export default function FrequenciaEditor({
       const result = await ensureAndSyncControleFrequencia({
         ano: year,
         mes: month,
-        secao,
+        secao: docData?.secao || secaoNome || secaoId,
+        secaoId,
         usuario,
         forceResync: true,
       });
@@ -509,7 +524,7 @@ export default function FrequenciaEditor({
           <div className="h-4 w-px bg-gray-200 print:hidden" />
           <div className="min-w-0 flex-1">
             <h1 className="text-sm font-bold text-gray-900 truncate">
-              Controle de Frequência — {secao}
+              Controle de Frequência — {docData?.secao || secaoNome || secaoId}
             </h1>
             <p className="text-[11px] text-gray-500">
               {MESES_NOMES[month - 1]} / {year}
@@ -631,6 +646,7 @@ export default function FrequenciaEditor({
                   anoSemana: docData.id,
                   detalhes: `Export Excel/CSV · seção ${docData.secao}`,
                   origem: "export",
+                  secaoId: docData.secaoId,
                 }).catch(() => undefined);
               }}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-md border border-gray-300 bg-white text-gray-800 cursor-pointer"
@@ -660,6 +676,7 @@ export default function FrequenciaEditor({
                   anoSemana: docData.id,
                   detalhes: `Export PDF · seção ${docData.secao}`,
                   origem: "export",
+                  secaoId: docData.secaoId,
                 }).catch(() => undefined);
               }}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-md border border-gray-300 bg-white text-gray-800 cursor-pointer"
@@ -685,7 +702,7 @@ export default function FrequenciaEditor({
         )}
 
         <FrequenciaHeader
-          secaoNome={secao}
+          secaoNome={docData?.secao || secaoNome || secaoId}
           codigoOpm={codigoOpm}
           mes={month}
           ano={year}

@@ -17,5 +17,10 @@ firebase-debug.log
 # Credenciais Firebase Admin — nunca versionar
 *firebase-adminsdk*.json
 **/serviceAccount*.json
+**/*service-account*.json
+**/*service_account*.json
+**/application_default_credentials.json
+*.pem
+*.p12
 secrets/
 .credentials/

@@ -39,15 +39,26 @@ import {
   assertPendingApproval,
 } from "./permissionGuards";
 import { assertDivisaoAccess, resolveActiveDivisaoId } from "./divisaoContext";
+import { assertSecaoAccess } from "./secaoContext";
+import { parseControleFrequenciaId } from "./frequenciaIds";
+import { parseEscalaDocId } from "./divisaoIds";
 
 function assertDocumentoDivisao(
   usuario: Usuario,
-  data: { divisaoId?: string }
+  data: { divisaoId?: string; secaoId?: string; id?: string },
+  tipo?: TipoEscalaDocumento
 ): void {
-  assertDivisaoAccess(
-    usuario,
-    String(data.divisaoId || resolveActiveDivisaoId(usuario))
-  );
+  const divisaoId = String(data.divisaoId || resolveActiveDivisaoId(usuario));
+  assertDivisaoAccess(usuario, divisaoId);
+
+  const parsed =
+    tipo === "frequencia"
+      ? parseControleFrequenciaId(String(data.id || ""))
+      : parseEscalaDocId(String(data.id || ""));
+  const secaoId = String(data.secaoId || parsed?.secaoId || "").trim();
+  if (secaoId) {
+    assertSecaoAccess(usuario, secaoId, divisaoId);
+  }
 }
 
 export type EscalaCollectionName =
@@ -353,7 +364,17 @@ export async function loadEscalaDocumento(
 ): Promise<EscalaDocument | null> {
   const snap = await getDoc(doc(db, getEscalaCollection(tipo), escalaId));
   if (!snap.exists()) return null;
-  return snap.data() as EscalaDocument;
+  const data = snap.data() as EscalaDocument;
+  const parsed =
+    tipo === "frequencia"
+      ? parseControleFrequenciaId(escalaId)
+      : parseEscalaDocId(escalaId);
+  return {
+    ...data,
+    id: data.id || escalaId,
+    secaoId: data.secaoId || parsed?.secaoId || "",
+    status: normalizeEscalaStatus(data.status),
+  };
 }
 
 export async function loadWeeklyEscala(escalaId: string): Promise<EscalaDocument | null> {
@@ -410,7 +431,7 @@ export async function submitScaleForApproval(
     throw new Error(`${label} não encontrada.`);
   }
   const data = snap.data() as EscalaDocument;
-  assertDocumentoDivisao(usuario, data);
+  assertDocumentoDivisao(usuario, { ...data, id: escalaId }, tipo);
   const currentStatus = normalizeEscalaStatus(data.status);
   if (currentStatus === "aguardando_aprovacao") {
     throw new Error(`Esta ${label} já está aguardando aprovação.`);
@@ -485,6 +506,7 @@ export async function submitScaleForApproval(
     statusAnterior: statusLabel(currentStatus),
     statusAtual: statusLabel("aguardando_aprovacao"),
     solicitacaoId,
+    secaoId: data.secaoId,
     detalhes:
       isReenvio || fromRevisao
         ? `Nova submissão após revisão · token interno gerado`
@@ -514,7 +536,7 @@ export async function approveScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
-  assertDocumentoDivisao(gestor, data);
+  assertDocumentoDivisao(gestor, { ...data, id: escalaId }, tipo);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertPendingApproval(currentStatus, label);
 
@@ -566,6 +588,7 @@ export async function approveScale(
     statusAnterior: statusLabel("aguardando_aprovacao"),
     statusAtual: statusLabel("aprovada"),
     solicitacaoId,
+    secaoId: data.secaoId,
     detalhes: observacao || undefined,
   });
 
@@ -600,7 +623,7 @@ export async function requestRevisionScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
-  assertDocumentoDivisao(gestor, data);
+  assertDocumentoDivisao(gestor, { ...data, id: escalaId }, tipo);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertPendingApproval(currentStatus, label);
 
@@ -653,6 +676,7 @@ export async function requestRevisionScale(
     statusAtual: statusLabel("revisao_solicitada"),
     solicitacaoId,
     motivo: motivoTrim,
+    secaoId: data.secaoId,
   });
 
   if (solicitacaoId) {
@@ -686,7 +710,7 @@ export async function cancelApprovalRequest(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
-  assertDocumentoDivisao(usuario, data);
+  assertDocumentoDivisao(usuario, { ...data, id: escalaId }, tipo);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertCanCancelApproval(usuario, currentStatus);
 
@@ -721,6 +745,7 @@ export async function cancelApprovalRequest(
     statusAnterior: statusLabel("aguardando_aprovacao"),
     statusAtual: statusLabel("em_edicao"),
     solicitacaoId: solicitacaoId || undefined,
+    secaoId: data.secaoId,
   });
 
   if (solicitacaoId) {
@@ -755,7 +780,7 @@ export async function reopenApprovedScale(
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error(`${label} não encontrada.`);
   const data = snap.data() as EscalaDocument;
-  assertDocumentoDivisao(gestor, data);
+  assertDocumentoDivisao(gestor, { ...data, id: escalaId }, tipo);
   const currentStatus = normalizeEscalaStatus(data.status);
   assertCanReopen(gestor, currentStatus);
 
@@ -794,6 +819,7 @@ export async function reopenApprovedScale(
     statusAtual: statusLabel("em_edicao"),
     solicitacaoId: solicitacaoId || undefined,
     motivo: motivoTrim,
+    secaoId: data.secaoId,
   });
 
   return { status: "em_edicao", versao: novaVersao, aprovacao: null, historico };

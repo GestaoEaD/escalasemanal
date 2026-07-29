@@ -23,6 +23,8 @@ export const GERENTE_INICIAL_RE = "124342-0";
 
 /** Seção administrativa (cadastro em `secoes`). */
 export interface Secao {
+  /** Identificador imutável do documento Firestore (secaoId). */
+  id: string;
   nome: string;
   /** Código da OPM — identidade numérica institucional (editável). */
   codigo: string;
@@ -54,6 +56,7 @@ export interface Usuario {
   nome: string; // Nome de Guerra
   postoGrad: string;
   secao: string;
+  secaoId: string;
   /** Tenant — Divisão do usuário (cadastro). */
   divisaoId: string;
   /**
@@ -61,6 +64,10 @@ export interface Usuario {
    * Para demais perfis, deve coincidir com divisaoId.
    */
   activeDivisaoId?: string;
+  /** Seção ativa na sessão (opcional; preserva a seleção do usuário). */
+  activeSecaoId?: string;
+  /** Seções sob responsabilidade do Gestor. */
+  secoesResponsaveisIds?: string[];
   /** Perfil carregado exclusivamente do Firestore. */
   perfil?: PerfilUsuario;
   ativo?: boolean;
@@ -140,6 +147,7 @@ export interface Colaborador {
   nome: string; // Nome de Guerra
   nomeCompleto?: string;
   secao: string;
+  secaoId: string;
   /** Tenant — obrigatório. */
   divisaoId: string;
   /** E-mail Google de acesso (minúsculas). Usado ao conceder permissão. */
@@ -173,9 +181,10 @@ export interface LastSaved {
 }
 
 export interface EscalaDocument {
-  id: string; // Format: "{divisaoId}_{year}_{week}" e.g., "202002500_2026_01"
+  id: string; // Format: "{divisaoId}__{secaoId}__{ano}__{semana}"
   /** Tenant — obrigatório. */
   divisaoId: string;
+  secaoId: string;
   ano: number;
   semana: number;
   periodo: string;
@@ -221,6 +230,7 @@ export interface SolicitacaoAprovacao {
   escalaId: string;
   /** Tenant. */
   divisaoId: string;
+  secaoId: string;
   versao: number;
   status: SolicitacaoAprovacaoStatus;
   criadoPor: {
@@ -299,6 +309,7 @@ export interface AuditUsuarioSnapshot {
   posto: string;
   perfil: string;
   secao?: string;
+  secaoId?: string;
   divisaoId?: string;
 }
 
@@ -312,6 +323,7 @@ export interface AuditOperation {
   anoSemana?: string;
   /** Tenant do evento. */
   divisaoId?: string;
+  secaoId?: string;
   usuario: AuditUsuarioSnapshot;
   versao?: number;
   statusAnterior?: string;
@@ -566,6 +578,7 @@ export interface ControleFrequenciaDocument {
   id: string;
   /** Tenant — obrigatório. */
   divisaoId: string;
+  secaoId: string;
   ano: number;
   mes: number;
   secao: string;

@@ -34,6 +34,7 @@ const admin: Usuario = {
   nome: "VENTURA",
   postoGrad: "CB PM",
   secao: "Seç Gest Educ",
+  secaoId: "SECAO_GEST_EDUC",
   divisaoId: "202002500",
   perfil: "Administrador",
 };
@@ -81,6 +82,7 @@ assert(confirmGestorRe(gestor, "104585") === true, "RE gestor");
 const awaiting: EscalaDocument = {
   id: "202002500_2026_10",
   divisaoId: "202002500",
+  secaoId: "SECAO_GEST_EDUC",
   ano: 2026,
   semana: 10,
   periodo: "x",
