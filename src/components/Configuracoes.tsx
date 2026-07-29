@@ -266,9 +266,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       .slice()
       .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
+  const listPostosDaDivisao = (divisaoId: string) =>
+    postos
+      .filter((p) => normalizeDivisaoId(p.divisaoId) === normalizeDivisaoId(divisaoId))
+      .slice()
+      .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
   const nomeDivisao = (divisaoId: string): string => {
     const codigo = normalizeDivisaoId(divisaoId);
     return divisoesList.find((d) => d.codigo === codigo)?.nome || codigo || "—";
+  };
+
+  const opcoesDivisaoSelect = (): Divisao[] => {
+    if (isGerente(usuario)) return divisoesList;
+    const own = divisoesList.find((d) => d.codigo === activeDivisaoId);
+    return own
+      ? [own]
+      : [{ codigo: activeDivisaoId, nome: nomeDivisao(activeDivisaoId), ativo: true }];
   };
 
   // Ordem final do menu lateral, respeitando a matriz de permissões.
@@ -383,6 +397,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [divisaoSecoesCarregando, setDivisaoSecoesCarregando] = useState(false);
   const [novaSecaoNome, setNovaSecaoNome] = useState("");
   const [novaSecaoCodigo, setNovaSecaoCodigo] = useState("");
+  /** Quando preenchido, o formulário de seção no modal de Divisão está em modo edição. */
+  const [editandoSecaoId, setEditandoSecaoId] = useState<string | null>(null);
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -414,10 +430,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         tenantSecoesList.map((s) => [normalizeSecaoNome(s.nome), s])
       );
 
-      // 2. Fetch Collaborators (tenant)
-      const colSnap = await getDocs(
-        query(collection(db, "colaboradores"), where("divisaoId", "==", activeDivisaoId))
-      );
+      // 2. Fetch Collaborators — Gerente vê todas as Divisões; demais só a ativa.
+      const colSnap = canDivisoes
+        ? await getDocs(collection(db, "colaboradores"))
+        : await getDocs(
+            query(collection(db, "colaboradores"), where("divisaoId", "==", activeDivisaoId))
+          );
       const colList: Colaborador[] = [];
       colSnap.forEach((docSnap) => {
         const data = docSnap.data() as Colaborador;
@@ -433,13 +451,17 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
           })
         );
       });
-      const tenantColList = filterByDivisaoId(colList, activeDivisaoId, usuario);
+      const tenantColList = canDivisoes
+        ? colList
+        : filterByDivisaoId(colList, activeDivisaoId, usuario);
       tenantColList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
-      // 3. Fetch Users (tenant)
-      const userSnap = await getDocs(
-        query(collection(db, "usuarios"), where("divisaoId", "==", activeDivisaoId))
-      );
+      // 3. Fetch Users — Gerente vê todas; demais só a ativa.
+      const userSnap = canDivisoes
+        ? await getDocs(collection(db, "usuarios"))
+        : await getDocs(
+            query(collection(db, "usuarios"), where("divisaoId", "==", activeDivisaoId))
+          );
       const userList: Usuario[] = [];
       userSnap.forEach((d) => {
         const data = d.data() as Usuario;
@@ -457,19 +479,25 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
           })
         );
       });
-      const tenantUserList = filterByDivisaoId(userList, activeDivisaoId, usuario);
+      const tenantUserList = canDivisoes
+        ? userList
+        : filterByDivisaoId(userList, activeDivisaoId, usuario);
       tenantUserList.sort((a, b) => a.nome.localeCompare(b.nome));
 
-      // 4. Fetch Postos (tenant)
-      const postosSnap = await getDocs(
-        query(collection(db, "postos"), where("divisaoId", "==", activeDivisaoId))
-      );
+      // 4. Fetch Postos — Gerente vê todas; demais só a ativa.
+      const postosSnap = canDivisoes
+        ? await getDocs(collection(db, "postos"))
+        : await getDocs(
+            query(collection(db, "postos"), where("divisaoId", "==", activeDivisaoId))
+          );
       const postosList: any[] = [];
       postosSnap.forEach((doc) => {
         const data = doc.data();
         postosList.push({ ...data, divisaoId: String(data.divisaoId || activeDivisaoId) });
       });
-      const tenantPostosList = filterByDivisaoId(postosList, activeDivisaoId, usuario);
+      const tenantPostosList = canDivisoes
+        ? postosList
+        : filterByDivisaoId(postosList, activeDivisaoId, usuario);
       tenantPostosList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
       // 5. Fetch Legendas (tenant)
@@ -819,12 +847,22 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         // B. Handle creations and edits
         for (const col of colsToSave) {
           const original = origColaboradores.find((c) => c.re === col.re);
-          const docId = colaboradorDocId(String(col.divisaoId || activeDivisaoId), col.re);
+          const newDivisaoId = String(col.divisaoId || activeDivisaoId);
+          const docId = colaboradorDocId(newDivisaoId, col.re);
           const docRef = doc(db, "colaboradores", docId);
           const normalized = normalizeColaborador(col);
+          // Troca de Divisão muda o ID do documento — remove o antigo.
+          if (original) {
+            const oldDivisaoId = String(original.divisaoId || activeDivisaoId);
+            if (normalizeDivisaoId(oldDivisaoId) !== normalizeDivisaoId(newDivisaoId)) {
+              batch.delete(
+                doc(db, "colaboradores", colaboradorDocId(oldDivisaoId, original.re))
+              );
+            }
+          }
           batch.set(docRef, prepareFirestoreWrite(`colaboradores/${docId}`, {
             ...normalized,
-            divisaoId: String(normalized.divisaoId || activeDivisaoId),
+            divisaoId: newDivisaoId,
             ativo: normalized.ativo, // boolean explícito (false deve persistir)
             updatedAt: timestamp,
             createdAt: col.createdAt || timestamp
@@ -840,7 +878,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
               colLabel,
               "Todos",
               "",
-              `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
+              `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Divisão: ${normalized.divisaoId}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
             );
           } else {
             // Edits
@@ -863,8 +901,31 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 normalizeEmail(normalized.email) || ""
               );
             }
-            if (!secoesIguais(normalized.secao, original.secao)) {
-              createAuditLog("Colaboradores", "Edição", colLabel, "Seção", original.secao, normalized.secao);
+            if (
+              normalizeDivisaoId(normalized.divisaoId) !==
+              normalizeDivisaoId(original.divisaoId)
+            ) {
+              createAuditLog(
+                "Colaboradores",
+                "Edição",
+                colLabel,
+                "Divisão",
+                String(original.divisaoId || ""),
+                String(normalized.divisaoId || "")
+              );
+            }
+            if (
+              String(normalized.secaoId || "") !== String(original.secaoId || "") ||
+              !secoesIguais(normalized.secao, original.secao)
+            ) {
+              createAuditLog(
+                "Colaboradores",
+                "Edição",
+                colLabel,
+                "Seção",
+                `${original.secao || "—"} (${original.secaoId || "—"})`,
+                `${normalized.secao || "—"} (${normalized.secaoId || "—"})`
+              );
             }
             if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
               createAuditLog(
@@ -955,8 +1016,31 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 emailDepois
               );
             }
-            if (!secoesIguais(prepared.secao, original.secao)) {
-              createAuditLog("Permissão", "Edição", userLabel, "Seção", original.secao, prepared.secao);
+            if (
+              normalizeDivisaoId(prepared.divisaoId) !==
+              normalizeDivisaoId(original.divisaoId)
+            ) {
+              createAuditLog(
+                "Permissão",
+                "Edição",
+                userLabel,
+                "Divisão",
+                String(original.divisaoId || ""),
+                String(prepared.divisaoId || "")
+              );
+            }
+            if (
+              String(prepared.secaoId || "") !== String(original.secaoId || "") ||
+              !secoesIguais(prepared.secao, original.secao)
+            ) {
+              createAuditLog(
+                "Permissão",
+                "Edição",
+                userLabel,
+                "Seção",
+                `${original.secao || "—"} (${original.secaoId || "—"})`,
+                `${prepared.secao || "—"} (${prepared.secaoId || "—"})`
+              );
             }
             if (prepared.perfil !== original.perfil) {
               createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
@@ -1536,8 +1620,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const abrirModalDivisao = async (divisao: Divisao | null) => {
     setCurrentDivisao(divisao ? { ...divisao } : { codigo: "", nome: "", descricao: "", ativo: true });
     setDivisaoOriginalCodigo(divisao?.codigo || null);
-    setNovaSecaoNome("");
-    setNovaSecaoCodigo("");
+    limparFormSecaoDivisao();
     setDivisaoModalOpen(true);
     setDivisaoSecoesRemovidas([]);
 
@@ -1587,7 +1670,19 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
   };
 
-  const adicionarSecaoDivisao = () => {
+  const limparFormSecaoDivisao = () => {
+    setNovaSecaoNome("");
+    setNovaSecaoCodigo("");
+    setEditandoSecaoId(null);
+  };
+
+  const iniciarEdicaoSecaoDivisao = (secao: SecaoDivisaoForm) => {
+    setEditandoSecaoId(secao.id);
+    setNovaSecaoNome(secao.nome);
+    setNovaSecaoCodigo(secao.codigo || "");
+  };
+
+  const salvarSecaoDivisao = () => {
     const nome = normalizeSecaoNome(novaSecaoNome);
     if (!nome) return;
     const codigo = normalizeSecaoCodigo(novaSecaoCodigo);
@@ -1595,7 +1690,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       alert("Informe o Código da OPM (somente números) da seção.");
       return;
     }
-    if (divisaoSecoes.some((s) => secoesIguais(s.nome, nome))) {
+    const editId = editandoSecaoId;
+
+    if (
+      divisaoSecoes.some(
+        (s) => secoesIguais(s.nome, nome) && s.id !== editId
+      )
+    ) {
       alert("Esta Divisão já possui uma seção com este nome.");
       return;
     }
@@ -1603,27 +1704,40 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       secoes.some(
         (s) =>
           normalizeSecaoCodigo(s.codigo) === codigo &&
+          s.id !== editId &&
           !divisaoSecoesRemovidas.includes(s.id)
       ) ||
-      divisaoSecoes.some((s) => normalizeSecaoCodigo(s.codigo) === codigo)
+      divisaoSecoes.some(
+        (s) => normalizeSecaoCodigo(s.codigo) === codigo && s.id !== editId
+      )
     ) {
       alert(`O código ${codigo} já está em uso por outra seção.`);
       return;
     }
-    const maxOrdem = divisaoSecoes.reduce((max, s) => (s.ordem > max ? s.ordem : max), 0);
-    setDivisaoSecoes((prev) => [
-      ...prev,
-      {
-        id: doc(collection(db, "secoes")).id,
-        nome,
-        codigo,
-        ordem: maxOrdem + 1,
-        ativo: true,
-        divisaoId: String(currentDivisao?.codigo || activeDivisaoId),
-      },
-    ]);
-    setNovaSecaoNome("");
-    setNovaSecaoCodigo("");
+
+    if (editId) {
+      setDivisaoSecoes((prev) =>
+        prev.map((s) =>
+          s.id === editId
+            ? { ...s, nome, codigo, ativo: s.ativo !== false }
+            : s
+        )
+      );
+    } else {
+      const maxOrdem = divisaoSecoes.reduce((max, s) => (s.ordem > max ? s.ordem : max), 0);
+      setDivisaoSecoes((prev) => [
+        ...prev,
+        {
+          id: doc(collection(db, "secoes")).id,
+          nome,
+          codigo,
+          ordem: maxOrdem + 1,
+          ativo: true,
+          divisaoId: String(currentDivisao?.codigo || activeDivisaoId),
+        },
+      ]);
+    }
+    limparFormSecaoDivisao();
   };
 
   const removerSecaoDivisao = (id: string) => {
@@ -1636,6 +1750,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setDivisaoSecoes((prev) =>
         prev.map((s) => (s.id === id ? { ...s, ativo: false } : s))
       );
+      if (editandoSecaoId === id) limparFormSecaoDivisao();
       alert(
         "Esta seção está em uso por colaboradores ou permissões e foi inativada em vez de excluída."
       );
@@ -1643,6 +1758,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
     setDivisaoSecoes((prev) => prev.filter((s) => s.id !== id));
     setDivisaoSecoesRemovidas((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    if (editandoSecaoId === id) limparFormSecaoDivisao();
   };
 
   const handleDivisaoSubmit = (e: React.FormEvent) => {
@@ -1745,6 +1861,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setDivisaoModalOpen(false);
     setCurrentDivisao(null);
     setDivisaoOriginalCodigo(null);
+    limparFormSecaoDivisao();
   };
 
   const handleLegendaSubmit = (e: React.FormEvent) => {
@@ -2014,18 +2131,21 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Colaboradores</h2>
                     <p className="text-xs text-gray-500">
-                      Efetivo policial e ordem de precedência. Cadastre o e-mail Google de acesso
-                      quando houver. Inativar remove das escalas, sem retirar eventual permissão no
-                      módulo Permissão.
+                      Efetivo policial lotado por Divisão e Seção. A lotação determina em quais
+                      escalas o militar entra. Inativar remove das escalas, sem retirar eventual
+                      permissão no módulo Permissão.
                     </p>
                   </div>
                   <button
                     id="new-col-btn"
                     onClick={() => {
-                      const secaoInicial = listSecoesDaDivisao(activeDivisaoId)[0];
+                      const secaoInicial = listSecoesDaDivisao(activeDivisaoId).find(
+                        (s) => s.ativo !== false
+                      );
+                      const postoInicial = listPostosDaDivisao(activeDivisaoId)[0];
                       setCurrentCol({
                         re: "",
-                        postoGrad: postos[0]?.sigla || "SD PM",
+                        postoGrad: postoInicial?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
                         email: "",
@@ -2872,7 +2992,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
                       required
                     >
-                      {postos.map((p) => (
+                      {listPostosDaDivisao(String(currentCol.divisaoId || activeDivisaoId)).map((p) => (
                         <option key={p.sigla} value={p.sigla}>{p.sigla}</option>
                       ))}
                     </select>
@@ -2935,58 +3055,104 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                      Seção de Serviço *
-                      <span className="ml-1 normal-case font-semibold text-gray-400">
-                        (Divisão {nomeDivisao(String(currentCol.divisaoId || activeDivisaoId))})
-                      </span>
+                      Divisão *
                     </label>
-                    {(() => {
-                      const opcoes = listSecoesDaDivisao(String(currentCol.divisaoId || activeDivisaoId));
-                      return (
-                        <select
-                          value={currentCol.secaoId || ""}
-                          onChange={(e) => {
-                            const nextId = e.target.value;
-                            const secao = opcoes.find((s) => s.id === nextId);
-                            setCurrentCol({
-                              ...currentCol,
-                              secaoId: nextId,
-                              secao: secao?.nome || "",
-                            });
-                          }}
-                          className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100"
-                          required
-                          disabled={opcoes.length === 0}
-                        >
-                          <option value="" disabled>Selecione a seção</option>
-                          {opcoes.map((s) => (
-                            <option key={s.id} value={s.id}>{s.nome}</option>
-                          ))}
-                        </select>
-                      );
-                    })()}
-                    {listSecoesDaDivisao(String(currentCol.divisaoId || activeDivisaoId)).length === 0 && (
-                      <p className="mt-1 text-[11px] text-amber-700 font-semibold">
-                        Esta Divisão ainda não possui seções. Cadastre-as em Divisões antes de
-                        vincular colaboradores.
-                      </p>
-                    )}
+                    <select
+                      value={currentCol.divisaoId || activeDivisaoId}
+                      onChange={(e) => {
+                        const nextDivisaoId = e.target.value;
+                        const secoesDaDivisao = listSecoesDaDivisao(nextDivisaoId).filter(
+                          (s) => s.ativo !== false
+                        );
+                        const postosDaDivisao = listPostosDaDivisao(nextDivisaoId);
+                        setCurrentCol((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                divisaoId: nextDivisaoId,
+                                secaoId: secoesDaDivisao[0]?.id || "",
+                                secao: secoesDaDivisao[0]?.nome || "",
+                                postoGrad:
+                                  postosDaDivisao.find((p) => p.sigla === prev.postoGrad)?.sigla ||
+                                  postosDaDivisao[0]?.sigla ||
+                                  prev.postoGrad,
+                              }
+                            : prev
+                        );
+                      }}
+                      disabled={!isGerente(usuario)}
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-500"
+                      required
+                    >
+                      {opcoesDivisaoSelect().map((divisao) => (
+                        <option key={divisao.codigo} value={divisao.codigo}>
+                          {divisao.codigo} — {divisao.nome}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="flex flex-col justify-end h-full pt-4">
-                    <label className="inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={normalizeAtivoFlag(currentCol.ativo)}
-                        onChange={(e) => setCurrentCol({ ...currentCol, ativo: e.target.checked })}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Colaborador Ativo</span>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Seção *
                     </label>
-                    <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                      Inativo = fora das escalas. Não remove permissão no módulo Permissão.
-                    </p>
+                    {(() => {
+                      const divisaoCol = String(currentCol.divisaoId || activeDivisaoId);
+                      const opcoes = listSecoesDaDivisao(divisaoCol).filter(
+                        (s) => s.ativo !== false || s.id === currentCol.secaoId
+                      );
+                      return (
+                        <>
+                          <select
+                            value={currentCol.secaoId || ""}
+                            onChange={(e) => {
+                              const nextId = e.target.value;
+                              const secao = opcoes.find((s) => s.id === nextId);
+                              setCurrentCol({
+                                ...currentCol,
+                                secaoId: nextId,
+                                secao: secao?.nome || "",
+                                divisaoId: divisaoCol,
+                              });
+                            }}
+                            className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100"
+                            required
+                            disabled={opcoes.length === 0}
+                          >
+                            <option value="">Selecione a seção</option>
+                            {opcoes.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.nome}
+                                {s.codigo ? ` (${s.codigo})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          {opcoes.length === 0 && (
+                            <p className="mt-1 text-[11px] text-amber-700 font-semibold">
+                              Esta Divisão ainda não possui seções. Cadastre-as em Divisões antes de
+                              vincular colaboradores.
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
+                </div>
+
+                <div className="flex flex-col">
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={normalizeAtivoFlag(currentCol.ativo)}
+                      onChange={(e) => setCurrentCol({ ...currentCol, ativo: e.target.checked })}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Colaborador Ativo</span>
+                  </label>
+                  <p className="mt-1 text-[10px] text-gray-400 leading-snug">
+                    Inativo = fora das escalas. Não remove permissão no módulo Permissão. A lotação
+                    (Divisão + Seção) define em quais escalas o colaborador aparece.
+                  </p>
                 </div>
 
                 <div>
@@ -3073,6 +3239,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 nomeCompleto: col.nomeCompleto || "",
                                 secao: col.secao,
                                 secaoId: col.secaoId || "",
+                                divisaoId: String(col.divisaoId || activeDivisaoId),
                                 email: normalizeEmail(col.email) || prev.email || "",
                               }
                             : prev
@@ -3189,55 +3356,27 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       value={currentUser.divisaoId || activeDivisaoId}
                       onChange={(e) => {
                         const nextDivisaoId = e.target.value;
-                        const secoesDaDivisao = listSecoesDaDivisao(nextDivisaoId);
+                        const secoesDaDivisao = listSecoesDaDivisao(nextDivisaoId).filter(
+                          (s) => s.ativo !== false
+                        );
                         setCurrentUser((prev) =>
                           prev
                             ? {
                                 ...prev,
                                 divisaoId: nextDivisaoId,
-                                secaoId: secoesDaDivisao.find((s) => s.id === prev.secaoId)?.id || secoesDaDivisao[0]?.id || "",
-                                secao:
-                                  secoesDaDivisao.find((s) => s.id === prev.secaoId)?.nome ||
-                                  secoesDaDivisao[0]?.nome ||
-                                  "",
+                                secaoId: secoesDaDivisao[0]?.id || "",
+                                secao: secoesDaDivisao[0]?.nome || "",
                               }
                             : prev
                         );
                       }}
-                      disabled={isAdministrador(usuario)}
+                      disabled={!isGerente(usuario)}
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100 disabled:text-gray-500"
                       required
                     >
-                      {isGerente(usuario) ? (
-                        divisoesList.map((divisao) => (
-                          <option key={divisao.codigo} value={divisao.codigo}>
-                            {divisao.codigo} — {divisao.nome}
-                          </option>
-                        ))
-                      ) : (
-                        <option value={activeDivisaoId}>
-                          {activeDivisaoId} — {divisoesList.find((d) => d.codigo === activeDivisaoId)?.nome || "Divisão ativa"}
-                        </option>
-                      )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Perfil de Acesso *</label>
-                    <select
-                      value={currentUser.perfil || "Operador"}
-                      onChange={(e) =>
-                        setCurrentUser({
-                          ...currentUser,
-                          perfil: e.target.value as any,
-                        })
-                      }
-                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
-                      required
-                    >
-                      {perfilOptions.map((perfil) => (
-                        <option key={perfil} value={perfil}>
-                          {perfil}
+                      {opcoesDivisaoSelect().map((divisao) => (
+                        <option key={divisao.codigo} value={divisao.codigo}>
+                          {divisao.codigo} — {divisao.nome}
                         </option>
                       ))}
                     </select>
@@ -3246,9 +3385,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
                       Seção *
-                      <span className="ml-1 normal-case font-semibold text-gray-400">
-                        (Divisão {nomeDivisao(String(currentUser.divisaoId || activeDivisaoId))})
-                      </span>
                     </label>
                     {(() => {
                       const divisaoDoUsuario = String(currentUser.divisaoId || activeDivisaoId);
@@ -3288,19 +3424,35 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                               antes de conceder a permissão.
                             </p>
                           )}
-                          {opcoes.length > 0 && (
-                            <p className="mt-1 text-[10px] text-gray-400">
-                              A seção escolhida pertence à Divisão{" "}
-                              <span className="font-semibold text-gray-600">
-                                {nomeDivisao(divisaoDoUsuario)}
-                              </span>
-                              .
-                            </p>
-                          )}
                         </>
                       );
                     })()}
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Perfil de Acesso *</label>
+                  <select
+                    value={currentUser.perfil || "Operador"}
+                    onChange={(e) =>
+                      setCurrentUser({
+                        ...currentUser,
+                        perfil: e.target.value as any,
+                      })
+                    }
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                    required
+                  >
+                    {perfilOptions.map((perfil) => (
+                      <option key={perfil} value={perfil}>
+                        {perfil}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    A lotação (Divisão + Seção) define o escopo do usuário nas escalas e no
+                    Controle de Frequência.
+                  </p>
                 </div>
 
                 <div className="pt-1">
@@ -3399,11 +3551,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     Seções desta Divisão
                   </label>
                   <p className="text-[11px] text-gray-500 mb-3">
-                    Único lugar para criar seções. Após confirmar e salvar, elas ficam
+                    Único lugar para criar e editar seções. Após confirmar e salvar, elas ficam
                     disponíveis em Colaboradores e Permissão, sempre vinculadas a esta Divisão.
                   </p>
 
-                  <div className="flex gap-2 mb-3">
+                  <div className="flex flex-wrap gap-2 mb-3">
                     <input
                       type="text"
                       value={novaSecaoNome}
@@ -3411,11 +3563,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          adicionarSecaoDivisao();
+                          salvarSecaoDivisao();
                         }
                       }}
                       placeholder="Nome da seção"
-                      className="flex-1 border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
+                      className="flex-1 min-w-[8rem] border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900"
                     />
                     <input
                       type="text"
@@ -3424,7 +3576,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          adicionarSecaoDivisao();
+                          salvarSecaoDivisao();
                         }
                       }}
                       placeholder="Cód. OPM"
@@ -3432,14 +3584,37 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     />
                     <button
                       type="button"
-                      onClick={adicionarSecaoDivisao}
+                      onClick={salvarSecaoDivisao}
                       disabled={!novaSecaoNome.trim() || !novaSecaoCodigo.trim()}
                       className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:cursor-not-allowed"
                     >
-                      <Plus size={13} />
-                      Adicionar
+                      {editandoSecaoId ? (
+                        <>
+                          <Check size={13} />
+                          Atualizar
+                        </>
+                      ) : (
+                        <>
+                          <Plus size={13} />
+                          Adicionar
+                        </>
+                      )}
                     </button>
+                    {editandoSecaoId && (
+                      <button
+                        type="button"
+                        onClick={limparFormSecaoDivisao}
+                        className="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                    )}
                   </div>
+                  {editandoSecaoId && (
+                    <p className="text-[11px] text-blue-700 font-semibold mb-2">
+                      Editando seção — corrija o nome ou o código OPM e clique em Atualizar.
+                    </p>
+                  )}
 
                   {divisaoSecoesCarregando ? (
                     <p className="text-[11px] text-gray-400 font-semibold py-2">
@@ -3454,7 +3629,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       {divisaoSecoes.map((secao) => (
                         <li
                           key={secao.id}
-                          className="flex items-center justify-between px-3 py-2 text-xs"
+                          className={`flex items-center justify-between px-3 py-2 text-xs ${
+                            editandoSecaoId === secao.id ? "bg-blue-50" : ""
+                          }`}
                         >
                           <span className="font-semibold text-gray-900">
                             {secao.nome}
@@ -3469,14 +3646,24 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                               </span>
                             )}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => removerSecaoDivisao(secao.id)}
-                            className="p-1 hover:bg-red-50 text-red-600 rounded cursor-pointer"
-                            title={secao.ativo === false ? "Remover seção inativa" : "Remover seção"}
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          <span className="inline-flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => iniciarEdicaoSecaoDivisao(secao)}
+                              className="p-1 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded cursor-pointer"
+                              title="Editar seção"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removerSecaoDivisao(secao.id)}
+                              className="p-1 hover:bg-red-50 text-red-600 rounded cursor-pointer"
+                              title={secao.ativo === false ? "Remover seção inativa" : "Remover seção"}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </span>
                         </li>
                       ))}
                     </ul>
