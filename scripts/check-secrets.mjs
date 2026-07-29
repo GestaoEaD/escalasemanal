@@ -12,7 +12,12 @@ const tracked = execFileSync("git", ["ls-files", "-z"], {
   .filter(Boolean);
 
 const patterns = [
-  { name: "Google API key", regex: /AIza[0-9A-Za-z_-]{30,}/g },
+  {
+    name: "Google API key",
+    regex: /AIza[0-9A-Za-z_-]{30,}/g,
+    // Chave Web do Firebase é pública por design; permitir só no arquivo dedicado.
+    allowFiles: new Set(["src/firebasePublicConfig.ts"]),
+  },
   { name: "Google private key", regex: /-----BEGIN PRIVATE KEY-----/g },
   { name: "GitHub token", regex: /\b(?:ghp|github_pat)_[0-9A-Za-z_]{20,}/g },
   { name: "Service account private key", regex: /"private_key"\s*:\s*"[^"]+"/g },
@@ -28,6 +33,10 @@ for (const file of tracked) {
     continue;
   }
   for (const pattern of patterns) {
+    if (pattern.allowFiles?.has(file)) {
+      pattern.regex.lastIndex = 0;
+      continue;
+    }
     if (pattern.regex.test(content)) {
       findings.push(`${file}: ${pattern.name}`);
     }

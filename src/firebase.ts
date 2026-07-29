@@ -23,29 +23,31 @@ import {
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
+import { FIREBASE_PUBLIC_CONFIG } from "./firebasePublicConfig";
 
-function requiredEnv(name: string, value: string | undefined): string {
+function envOrDefault(value: string | undefined, fallback: string): string {
   const normalized = String(value || "").trim();
-  if (!normalized) {
-    throw new Error(
-      `Configuração Firebase ausente: ${name}. Defina-a no ambiente de build.`
-    );
-  }
-  return normalized;
+  return normalized || fallback;
 }
 
 const firebaseConfig = {
-  projectId: requiredEnv("VITE_FIREBASE_PROJECT_ID", import.meta.env.VITE_FIREBASE_PROJECT_ID),
-  appId: requiredEnv("VITE_FIREBASE_APP_ID", import.meta.env.VITE_FIREBASE_APP_ID),
-  apiKey: requiredEnv("VITE_FIREBASE_API_KEY", import.meta.env.VITE_FIREBASE_API_KEY),
-  authDomain: requiredEnv("VITE_FIREBASE_AUTH_DOMAIN", import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
-  storageBucket: requiredEnv(
-    "VITE_FIREBASE_STORAGE_BUCKET",
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET
+  projectId: envOrDefault(
+    import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    FIREBASE_PUBLIC_CONFIG.projectId
   ),
-  messagingSenderId: requiredEnv(
-    "VITE_FIREBASE_MESSAGING_SENDER_ID",
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID
+  appId: envOrDefault(import.meta.env.VITE_FIREBASE_APP_ID, FIREBASE_PUBLIC_CONFIG.appId),
+  apiKey: envOrDefault(import.meta.env.VITE_FIREBASE_API_KEY, FIREBASE_PUBLIC_CONFIG.apiKey),
+  authDomain: envOrDefault(
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    FIREBASE_PUBLIC_CONFIG.authDomain
+  ),
+  storageBucket: envOrDefault(
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    FIREBASE_PUBLIC_CONFIG.storageBucket
+  ),
+  messagingSenderId: envOrDefault(
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    FIREBASE_PUBLIC_CONFIG.messagingSenderId
   ),
 };
 
