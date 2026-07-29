@@ -23,20 +23,20 @@ import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  projectId: "gen-lang-client-0610988869",
-  appId: "1:1065970160388:web:c8e86475df7c1998183651",
-  apiKey: "AIzaSyA53oNdbcKh8pAkpPpSGS-bUoXgZju__-8",
-  authDomain: "gen-lang-client-0610988869.firebaseapp.com",
-  storageBucket: "gen-lang-client-0610988869.firebasestorage.app",
-  messagingSenderId: "1065970160388",
+  projectId: "escalaead",
+  appId: "1:273620416234:web:6cca13b7fbcf941bd7c993",
+  apiKey: "AIzaSyAuAZO0L8ifpGDFqybvIlsuzNxMclW79o0",
+  authDomain: "escalaead.firebaseapp.com",
+  storageBucket: "escalaead.firebasestorage.app",
+  messagingSenderId: "273620416234",
   measurementId: ""
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with custom database ID
-const db = getFirestore(app, "ai-studio-27d48337-faf8-4a27-a402-a865ec6f3b72");
+// Firestore (default database)
+const db = getFirestore(app);
 
 // Initialize Auth (Google Sign-In) and Storage
 const auth = getAuth(app);

@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "deploy:rules": "node scripts/deploy-firestore-rules.mjs"
+    "deploy:rules": "node scripts/deploy-firestore-rules.mjs",
+    "migrate:escalaead": "node scripts/migrate-to-escalaead.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

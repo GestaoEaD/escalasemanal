@@ -13,3 +13,9 @@ firebase-debug.log
 !.env.example
 
 .vercel
+
+# Credenciais Firebase Admin — nunca versionar
+*firebase-adminsdk*.json
+**/serviceAccount*.json
+secrets/
+.credentials/
