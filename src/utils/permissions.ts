@@ -49,14 +49,14 @@ export function canAccessConfig(usuario: Usuario | null | undefined): boolean {
   return isAdministrador(usuario) || isGerente(usuario);
 }
 
-/** Cadastros da Divisão: Seções, Colaboradores, Postos. */
+/** Cadastros da Divisão: Colaboradores e Postos (Seções nascem em Divisões). */
 export function canManageCadastrosDivisao(
   usuario: Usuario | null | undefined
 ): boolean {
   return isAdministrador(usuario) || isGerente(usuario);
 }
 
-/** Alias histórico — Seções = cadastro da Divisão. */
+/** Alias histórico — Seções passam a ser geridas dentro de Divisões. */
 export function canManageSecoes(usuario: Usuario | null | undefined): boolean {
   return canManageCadastrosDivisao(usuario);
 }

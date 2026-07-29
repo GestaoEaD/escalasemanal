@@ -200,7 +200,7 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
     tela: "Configurações",
     botao: "Salvar Configurações",
     funcaoEsperada:
-      "Admin: Seções/Colaboradores/Permissão/Postos/Logs da Divisão; Gerente: + Divisões/Legendas/Gerais/Testes",
+      "Admin: Colaboradores/Permissão/Postos/Logs da Divisão; Gerente: + Divisões (com seções)/Legendas/Gerais/Testes",
     perfilPermitido: "Administrador / Gerente (módulos conforme perfil)",
     acaoFirestore: "writeBatch nas coleções autorizadas",
     geraLog: "Sim (ALTERAR_CONFIGURACAO)",

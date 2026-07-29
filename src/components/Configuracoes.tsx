@@ -4,7 +4,6 @@ import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, D
 import {
   Users,
   Shield,
-  Layers,
   Activity,
   Settings,
   Plus,
@@ -105,7 +104,7 @@ interface ConfiguracoesProps {
   onUsuarioUpdate?: (usuario: Usuario) => void;
 }
 
-type MenuTab = "colaboradores" | "usuarios" | "postos" | "secoes" | "legendas" | "divisoes" | "gerais" | "registros" | "testes";
+type MenuTab = "colaboradores" | "usuarios" | "postos" | "legendas" | "divisoes" | "gerais" | "registros" | "testes";
 /** Item de catálogo removido: a chave sozinha não identifica o documento. */
 type RemocaoCatalogo = { chave: string };
 /** Seção editada dentro do modal de Divisão. */
@@ -267,10 +266,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       .slice()
       .sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
 
+  const nomeDivisao = (divisaoId: string): string => {
+    const codigo = normalizeDivisaoId(divisaoId);
+    return divisoesList.find((d) => d.codigo === codigo)?.nome || codigo || "—";
+  };
+
   // Ordem final do menu lateral, respeitando a matriz de permissões.
+  // Seções não têm aba própria: são cadastradas dentro de cada Divisão.
   const MENU_ITENS: { id: MenuTab; label: string; icone: LucideIcon; visivel: boolean }[] = [
     { id: "divisoes", label: "Divisões", icone: Building2, visivel: canDivisoes },
-    { id: "secoes", label: "Seções", icone: Layers, visivel: canCadastrosDivisao },
     { id: "colaboradores", label: "Colaboradores", icone: Users, visivel: canCadastrosDivisao },
     { id: "usuarios", label: "Permissão", icone: Shield, visivel: canUsuarios },
     { id: "postos", label: "Postos", icone: Briefcase, visivel: canCadastrosDivisao },
@@ -281,7 +285,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   ];
 
   // Active module tab
-  const [activeTab, setActiveTab] = useState<MenuTab>(() => (isGerente(usuario) ? "divisoes" : "secoes"));
+  const [activeTab, setActiveTab] = useState<MenuTab>(() =>
+    isGerente(usuario) ? "divisoes" : "colaboradores"
+  );
   const visibleMenuItems = MENU_ITENS.filter((item) => item.visivel);
 
   // Audit Logs Tab States
@@ -361,10 +367,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   // Sigla original do posto em edição (null = inclusão de novo posto)
   const [postoOriginalSigla, setPostoOriginalSigla] = useState<string | null>(null);
 
-  const [secaoModalOpen, setSecaoModalOpen] = useState(false);
-  const [currentSecao, setCurrentSecao] = useState<Secao | null>(null);
-  // Nome original da seção em edição (null = inclusão de nova seção)
-  const [secaoOriginalNome, setSecaoOriginalNome] = useState<string | null>(null);
   const [secaoRenames, setSecaoRenames] = useState<{ id: string; from: string; to: string; divisaoId: string }[]>([]);
 
   const [legendaModalOpen, setLegendaModalOpen] = useState(false);
@@ -375,15 +377,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [divisaoModalOpen, setDivisaoModalOpen] = useState(false);
   const [currentDivisao, setCurrentDivisao] = useState<Divisao | null>(null);
   const [divisaoOriginalCodigo, setDivisaoOriginalCodigo] = useState<string | null>(null);
-  // Seções da Divisão aberta no modal, e as alterações ainda não salvas por Divisão.
+  // Seções da Divisão aberta no modal (único lugar de criação/edição de seções).
   const [divisaoSecoes, setDivisaoSecoes] = useState<SecaoDivisaoForm[]>([]);
   const [divisaoSecoesRemovidas, setDivisaoSecoesRemovidas] = useState<string[]>([]);
   const [divisaoSecoesCarregando, setDivisaoSecoesCarregando] = useState(false);
   const [novaSecaoNome, setNovaSecaoNome] = useState("");
   const [novaSecaoCodigo, setNovaSecaoCodigo] = useState("");
-  const [secoesPendentesPorDivisao, setSecoesPendentesPorDivisao] = useState<
-    Record<string, { secoes: SecaoDivisaoForm[]; removidas: string[] }>
-  >({});
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState<{ type: MenuTab; id: string; label: string } | null>(null);
@@ -393,17 +392,22 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Secoes (tenant)
-      const secoesSnap = await getDocs(
-        query(collection(db, "secoes"), where("divisaoId", "==", activeDivisaoId))
-      );
+      // 1. Fetch Secoes — Gerente carrega todas (para lotar usuários em qualquer Divisão);
+      // Admin/outros só a Divisão ativa.
+      const secoesSnap = canDivisoes
+        ? await getDocs(collection(db, "secoes"))
+        : await getDocs(
+            query(collection(db, "secoes"), where("divisaoId", "==", activeDivisaoId))
+          );
       const secoesList: Secao[] = [];
       secoesSnap.forEach((docSnap) => {
-        secoesList.push(
-          withSecaoCodigo(docSnap.data() as Record<string, unknown>, activeDivisaoId, docSnap.id)
-        );
+        const data = docSnap.data() as Record<string, unknown>;
+        const divisaoId = String(data.divisaoId || activeDivisaoId);
+        secoesList.push(withSecaoCodigo(data, divisaoId, docSnap.id));
       });
-      const tenantSecoesList = filterByDivisaoId(secoesList, activeDivisaoId, usuario);
+      const tenantSecoesList = canDivisoes
+        ? secoesList
+        : filterByDivisaoId(secoesList, activeDivisaoId, usuario);
       tenantSecoesList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
       const secaoPorId = new Map(tenantSecoesList.map((s) => [String(s.id || "").trim(), s]));
       const secaoPorNome = new Map(
@@ -550,7 +554,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedSecoes([]);
       setRemovedLegendas([]);
       setRemovedDivisoes([]);
-      setSecoesPendentesPorDivisao({});
       setSecaoRenames([]);
 
     } catch (err: any) {
@@ -589,7 +592,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
   useEffect(() => {
     if (!loading && isGerente(usuario) && activeTab === "divisoes" && divisoesList.length === 0) {
-      setActiveTab("secoes");
+      setActiveTab("colaboradores");
     }
   }, [activeTab, divisoesList.length, loading, usuario]);
 
@@ -616,7 +619,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       removedSecoes.length > 0 ||
       removedLegendas.length > 0 ||
       removedDivisoes.length > 0 ||
-      Object.keys(secoesPendentesPorDivisao).length > 0 ||
       secaoRenames.length > 0
     );
   }, [
@@ -627,7 +629,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     legendas, origLegendas, divisoesList, origDivisoes,
     gerais, origGerais,
     removedColaboradores, removedUsuarios, removedPostos, removedSecoes, removedLegendas, removedDivisoes,
-    secoesPendentesPorDivisao,
     secaoRenames
   ]);
 
@@ -648,7 +649,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setRemovedSecoes([]);
       setRemovedLegendas([]);
       setRemovedDivisoes([]);
-      setSecoesPendentesPorDivisao({});
       setSecaoRenames([]);
 
       setSaveError(null);
@@ -683,9 +683,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     } else if (tab === "postos") {
       list = [...postos];
       setter = setPostos;
-    } else if (tab === "secoes") {
-      list = [...secoes];
-      setter = setSecoes;
     } else if (tab === "legendas") {
       list = [...legendas];
       setter = setLegendas;
@@ -726,25 +723,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         return updateOrderFields(filtered);
       });
       setRemovedPostos((prev) => [...prev, { chave: id, divisaoId }]);
-    } else if (type === "secoes") {
-      const target = secoes.find((s) => s.id === id);
-      if (!target) return;
-      const referenced =
-        colaboradores.some((c) => c.secaoId === target.id || secoesIguais(c.secao, target.nome)) ||
-        usuarios.some((u) => u.secaoId === target.id || secoesIguais(u.secao, target.nome));
-      if (referenced) {
-        setSecoes((prev) =>
-          prev.map((s) => (s.id === target.id ? { ...s, ativo: false } : s))
-        );
-        alert("Esta seção está em uso por colaboradores ou permissões e foi inativada em vez de excluída.");
-      } else {
-        const divisaoId = String(target.divisaoId || activeDivisaoId);
-        setSecoes((prev) => {
-          const filtered = prev.filter((s) => s.id !== id);
-          return updateOrderFields(filtered);
-        });
-        setRemovedSecoes((prev) => [...prev, { chave: id, divisaoId }]);
-      }
     } else if (type === "legendas") {
       if (!canLegendas) {
         setConfirmDeleteOpen(null);
@@ -1181,42 +1159,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
             createAuditLog("Divisões", "Inclusão", codigo, "Todos", "", divisao.nome);
           }
         }
-
-        // Seções criadas/removidas dentro do modal de cada Divisão.
-        for (const codigoDivisao of Object.keys(secoesPendentesPorDivisao)) {
-          const pendente = secoesPendentesPorDivisao[codigoDivisao];
-          const idsFinais = new Set(pendente.secoes.map((s) => s.id));
-          for (const nomeRemovido of pendente.removidas) {
-            if (idsFinais.has(nomeRemovido)) continue;
-            batch.delete(doc(db, "secoes", nomeRemovido));
-            createAuditLog("Seções", "Exclusão", nomeRemovido, "Divisão", codigoDivisao, "");
-          }
-          for (const secao of pendente.secoes) {
-            const docIdSecao = String(secao.id || "").trim();
-            batch.set(
-              doc(db, "secoes", docIdSecao),
-              prepareFirestoreWrite(`secoes/${docIdSecao}`, {
-                id: docIdSecao,
-                nome: secao.nome,
-                codigo: secao.codigo || KNOWN_SECAO_CODIGOS[secao.nome] || "",
-                ordem: secao.ordem,
-                ativo: secao.ativo !== false,
-                divisaoId: codigoDivisao,
-                updatedAt: now.toISOString(),
-              })
-            );
-          }
-          if (pendente.secoes.length > 0) {
-            createAuditLog(
-              "Seções",
-              "Inclusão",
-              codigoDivisao,
-              "Seções da Divisão",
-              "",
-              pendente.secoes.map((s) => s.nome).join(", ")
-            );
-          }
-        }
       }
 
       // --- 7. AUDIT & SAVE: CONFIGS GERAIS ---
@@ -1331,7 +1273,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       if (canDivisoes) {
         setOrigDivisoes(JSON.parse(JSON.stringify(divisoesList)));
         setRemovedDivisoes([]);
-        setSecoesPendentesPorDivisao({});
         setSecaoRenames([]);
       }
       if (canGerais) {
@@ -1588,97 +1529,222 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setPostoOriginalSigla(null);
   };
 
-  const handleSecaoSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentSecao) return;
+  /**
+   * Abre o modal de Divisão com as seções dela. Preferência: estado local
+   * (já carregado / editado na sessão); senão busca no Firestore.
+   */
+  const abrirModalDivisao = async (divisao: Divisao | null) => {
+    setCurrentDivisao(divisao ? { ...divisao } : { codigo: "", nome: "", descricao: "", ativo: true });
+    setDivisaoOriginalCodigo(divisao?.codigo || null);
+    setNovaSecaoNome("");
+    setNovaSecaoCodigo("");
+    setDivisaoModalOpen(true);
+    setDivisaoSecoesRemovidas([]);
 
-    const nome = normalizeSecaoNome(currentSecao.nome);
-    const codigo = normalizeSecaoCodigo(currentSecao.codigo);
-    const secaoId = String(currentSecao.id || "").trim() || doc(collection(db, "secoes")).id;
-
-    if (!nome) {
-      alert("Por favor, preencha o nome da seção.");
+    if (!divisao?.codigo) {
+      setDivisaoSecoes([]);
       return;
     }
+
+    const fromState = listSecoesDaDivisao(divisao.codigo).map((s, idx) => ({
+      id: s.id,
+      nome: normalizeSecaoNome(s.nome),
+      codigo: normalizeSecaoCodigo(s.codigo),
+      ordem: typeof s.ordem === "number" ? s.ordem : idx + 1,
+      ativo: s.ativo !== false,
+      divisaoId: String(s.divisaoId || divisao.codigo),
+    }));
+    if (fromState.length > 0 || canDivisoes) {
+      // Com catálogo completo (Gerente), o estado local é a fonte da verdade na sessão.
+      setDivisaoSecoes(fromState);
+      return;
+    }
+
+    setDivisaoSecoesCarregando(true);
+    setDivisaoSecoes([]);
+    try {
+      const snap = await getDocs(
+        query(collection(db, "secoes"), where("divisaoId", "==", divisao.codigo))
+      );
+      const lista: SecaoDivisaoForm[] = snap.docs.map((d, idx) => {
+        const data = d.data() as Record<string, unknown>;
+        return {
+          id: d.id,
+          nome: normalizeSecaoNome(String(data.nome || "")),
+          codigo: normalizeSecaoCodigo(String(data.codigo || "")),
+          ordem: typeof data.ordem === "number" ? data.ordem : idx + 1,
+          ativo: data.ativo !== false,
+          divisaoId: String(data.divisaoId || divisao.codigo),
+        };
+      });
+      lista.sort((a, b) => a.ordem - b.ordem);
+      setDivisaoSecoes(lista);
+    } catch (err) {
+      console.warn("Falha ao carregar seções da Divisão:", err);
+      setSaveError("Não foi possível carregar as seções desta Divisão.");
+    } finally {
+      setDivisaoSecoesCarregando(false);
+    }
+  };
+
+  const adicionarSecaoDivisao = () => {
+    const nome = normalizeSecaoNome(novaSecaoNome);
+    if (!nome) return;
+    const codigo = normalizeSecaoCodigo(novaSecaoCodigo);
     if (!codigo) {
-      alert("Por favor, preencha o Código da OPM (somente números).");
+      alert("Informe o Código da OPM (somente números) da seção.");
+      return;
+    }
+    if (divisaoSecoes.some((s) => secoesIguais(s.nome, nome))) {
+      alert("Esta Divisão já possui uma seção com este nome.");
+      return;
+    }
+    if (
+      secoes.some(
+        (s) =>
+          normalizeSecaoCodigo(s.codigo) === codigo &&
+          !divisaoSecoesRemovidas.includes(s.id)
+      ) ||
+      divisaoSecoes.some((s) => normalizeSecaoCodigo(s.codigo) === codigo)
+    ) {
+      alert(`O código ${codigo} já está em uso por outra seção.`);
+      return;
+    }
+    const maxOrdem = divisaoSecoes.reduce((max, s) => (s.ordem > max ? s.ordem : max), 0);
+    setDivisaoSecoes((prev) => [
+      ...prev,
+      {
+        id: doc(collection(db, "secoes")).id,
+        nome,
+        codigo,
+        ordem: maxOrdem + 1,
+        ativo: true,
+        divisaoId: String(currentDivisao?.codigo || activeDivisaoId),
+      },
+    ]);
+    setNovaSecaoNome("");
+    setNovaSecaoCodigo("");
+  };
+
+  const removerSecaoDivisao = (id: string) => {
+    const target = divisaoSecoes.find((s) => s.id === id) || secoes.find((s) => s.id === id);
+    if (!target) return;
+    const referenced =
+      colaboradores.some((c) => c.secaoId === target.id || secoesIguais(c.secao, target.nome)) ||
+      usuarios.some((u) => u.secaoId === target.id || secoesIguais(u.secao, target.nome));
+    if (referenced) {
+      setDivisaoSecoes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, ativo: false } : s))
+      );
+      alert(
+        "Esta seção está em uso por colaboradores ou permissões e foi inativada em vez de excluída."
+      );
+      return;
+    }
+    setDivisaoSecoes((prev) => prev.filter((s) => s.id !== id));
+    setDivisaoSecoesRemovidas((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  const handleDivisaoSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentDivisao || !canDivisoes) return;
+
+    const codigo = divisaoDocId(currentDivisao.codigo);
+    const nome = String(currentDivisao.nome || "").trim();
+    if (!codigo || !nome) {
+      alert("Informe o código e o nome da Divisão.");
+      return;
+    }
+    if (
+      divisoesList.some(
+        (d) => d.codigo === codigo && d.codigo !== divisaoOriginalCodigo
+      )
+    ) {
+      alert("Já existe uma Divisão com este código.");
       return;
     }
 
-    const duplicateNome = secoes.some(
-      (s) => secoesIguais(s.nome, nome) && s.id !== secaoId
-    );
-    if (duplicateNome) {
-      alert("Já existe uma seção com este nome.");
-      return;
-    }
-
-    const duplicateCodigo = secoes.find(
-      (s) =>
-        normalizeSecaoCodigo(s.codigo) === codigo &&
-        s.id !== secaoId
-    );
-    if (duplicateCodigo) {
-      alert(`O código ${codigo} já está em uso pela seção "${duplicateCodigo.nome}".`);
-      return;
-    }
-
-    let updatedList = [...secoes];
-    const originalNome = secoes.find((s) => s.id === secaoId)?.nome || secaoOriginalNome || "";
-    const payload = {
-      ...currentSecao,
-      id: secaoId,
-      nome,
+    const payload: Divisao = {
+      ...currentDivisao,
       codigo,
-      divisaoId: String(currentSecao.divisaoId || activeDivisaoId),
-      ativo: currentSecao.ativo !== false,
+      nome,
+      descricao: String(currentDivisao.descricao || "").trim(),
+      ativo: currentDivisao.ativo !== false,
     };
+    if (divisaoOriginalCodigo) {
+      setDivisoesList((prev) =>
+        sortDivisoes(
+          prev.map((d) => (d.codigo === divisaoOriginalCodigo ? payload : d))
+        )
+      );
+      if (divisaoOriginalCodigo !== codigo) {
+        setRemovedDivisoes((prev) => [...prev, divisaoOriginalCodigo]);
+      }
+    } else {
+      setDivisoesList((prev) => sortDivisoes([...prev, payload]));
+    }
 
-    const editIndex = secoes.findIndex((s) => s.id === secaoId);
+    const secoesDaDivisao = updateOrderFields(
+      divisaoSecoes.map((s) => ({ ...s, divisaoId: codigo }))
+    ) as SecaoDivisaoForm[];
 
-    if (editIndex > -1) {
-      updatedList[editIndex] = {
-        ...payload,
-        ordem: secoes[editIndex].ordem ?? payload.ordem,
-      };
-      if (!secoesIguais(originalNome, nome)) {
+    // Detecta renomes para cascata em colaboradores/usuários/escalas.
+    for (const secao of secoesDaDivisao) {
+      const anterior =
+        secoes.find((s) => s.id === secao.id) ||
+        origSecoes.find((s) => s.id === secao.id);
+      if (anterior && !secoesIguais(anterior.nome, secao.nome)) {
         setSecaoRenames((prev) => [
-          ...prev.filter((r) => r.id !== secaoId),
+          ...prev.filter((r) => r.id !== secao.id),
           {
-            id: secaoId,
-            from: originalNome,
-            to: nome,
-            divisaoId: String(payload.divisaoId || activeDivisaoId),
+            id: secao.id,
+            from: anterior.nome,
+            to: secao.nome,
+            divisaoId: codigo,
           },
         ]);
         setColaboradores((prev) =>
           prev.map((c) =>
-            String(c.secaoId || "").trim() === secaoId || secoesIguais(c.secao, originalNome)
-              ? { ...c, secao: nome, secaoId }
+            String(c.secaoId || "").trim() === secao.id ||
+            secoesIguais(c.secao, anterior.nome)
+              ? { ...c, secao: secao.nome, secaoId: secao.id }
               : c
           )
         );
         setUsuarios((prev) =>
           prev.map((u) =>
-            String(u.secaoId || "").trim() === secaoId || secoesIguais(u.secao, originalNome)
-              ? { ...u, secao: nome, secaoId }
+            String(u.secaoId || "").trim() === secao.id ||
+            secoesIguais(u.secao, anterior.nome)
+              ? { ...u, secao: secao.nome, secaoId: secao.id }
               : u
           )
         );
       }
-    } else {
-      const maxOrdem = secoes.reduce((max, s) => (s.ordem && s.ordem > max ? s.ordem : max), 0);
-      updatedList.push({
-        ...payload,
-        ordem: maxOrdem + 1,
-        ativo: true,
-      });
     }
 
-    setSecoes(updateOrderFields(updatedList));
-    setSecaoModalOpen(false);
-    setCurrentSecao(null);
-    setSecaoOriginalNome(null);
+    // Catálogo único de seções: substitui as da Divisão editada e mantém as demais.
+    const codigoAnterior = divisaoOriginalCodigo || codigo;
+    setSecoes((prev) =>
+      updateOrderFields([
+        ...prev.filter(
+          (s) =>
+            normalizeDivisaoId(s.divisaoId) !== normalizeDivisaoId(codigoAnterior) &&
+            normalizeDivisaoId(s.divisaoId) !== normalizeDivisaoId(codigo) &&
+            !divisaoSecoesRemovidas.includes(s.id)
+        ),
+        ...secoesDaDivisao,
+      ])
+    );
+    setRemovedSecoes((prev) => [
+      ...prev,
+      ...divisaoSecoesRemovidas
+        .filter((secaoId) => !prev.some((r) => r.chave === secaoId))
+        .map((secaoId) => ({ chave: secaoId, divisaoId: codigo })),
+    ]);
+
+    setDivisaoModalOpen(false);
+    setCurrentDivisao(null);
+    setDivisaoOriginalCodigo(null);
   };
 
   const handleLegendaSubmit = (e: React.FormEvent) => {
@@ -1736,158 +1802,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setCurrentLegenda(null);
     setLegendaOriginalSigla(null);
     setLegendaModalSection("basicas");
-  };
-
-  /**
-   * Abre o modal de Divisão já com as seções dela carregadas. Divisão nova começa
-   * vazia; edição busca no Firestore, salvo quando há alteração pendente na sessão.
-   */
-  const abrirModalDivisao = async (divisao: Divisao | null) => {
-    setCurrentDivisao(divisao ? { ...divisao } : { codigo: "", nome: "", descricao: "", ativo: true });
-    setDivisaoOriginalCodigo(divisao?.codigo || null);
-    setNovaSecaoNome("");
-    setNovaSecaoCodigo("");
-    setDivisaoModalOpen(true);
-
-    if (!divisao?.codigo) {
-      setDivisaoSecoes([]);
-      setDivisaoSecoesRemovidas([]);
-      return;
-    }
-
-    const pendente = secoesPendentesPorDivisao[divisao.codigo];
-    if (pendente) {
-      setDivisaoSecoes(pendente.secoes);
-      setDivisaoSecoesRemovidas(pendente.removidas);
-      return;
-    }
-
-    setDivisaoSecoesCarregando(true);
-    setDivisaoSecoes([]);
-    setDivisaoSecoesRemovidas([]);
-    try {
-      const snap = await getDocs(
-        query(collection(db, "secoes"), where("divisaoId", "==", divisao.codigo))
-      );
-      const lista: SecaoDivisaoForm[] = snap.docs.map((d, idx) => {
-        const data = d.data() as Record<string, unknown>;
-        return {
-          id: d.id,
-          nome: normalizeSecaoNome(String(data.nome || "")),
-          codigo: normalizeSecaoCodigo(String(data.codigo || "")),
-          ordem: typeof data.ordem === "number" ? data.ordem : idx + 1,
-          ativo: data.ativo !== false,
-          divisaoId: String(data.divisaoId || divisao.codigo),
-        };
-      });
-      lista.sort((a, b) => a.ordem - b.ordem);
-      setDivisaoSecoes(lista);
-    } catch (err) {
-      console.warn("Falha ao carregar seções da Divisão:", err);
-      setSaveError("Não foi possível carregar as seções desta Divisão.");
-    } finally {
-      setDivisaoSecoesCarregando(false);
-    }
-  };
-
-  const adicionarSecaoDivisao = () => {
-    const nome = normalizeSecaoNome(novaSecaoNome);
-    if (!nome) return;
-    if (divisaoSecoes.some((s) => secoesIguais(s.nome, nome))) {
-      alert("Esta Divisão já possui uma seção com este nome.");
-      return;
-    }
-    const maxOrdem = divisaoSecoes.reduce((max, s) => (s.ordem > max ? s.ordem : max), 0);
-    setDivisaoSecoes((prev) => [
-      ...prev,
-      {
-        id: doc(collection(db, "secoes")).id,
-        nome,
-        codigo: normalizeSecaoCodigo(novaSecaoCodigo),
-        ordem: maxOrdem + 1,
-        ativo: true,
-        divisaoId: String(currentDivisao?.codigo || activeDivisaoId),
-      },
-    ]);
-    setNovaSecaoNome("");
-    setNovaSecaoCodigo("");
-  };
-
-  const removerSecaoDivisao = (id: string) => {
-    setDivisaoSecoes((prev) => prev.filter((s) => s.id !== id));
-    setDivisaoSecoesRemovidas((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  };
-
-  const handleDivisaoSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentDivisao || !canDivisoes) return;
-
-    const codigo = divisaoDocId(currentDivisao.codigo);
-    const nome = String(currentDivisao.nome || "").trim();
-    if (!codigo || !nome) {
-      alert("Informe o código e o nome da Divisão.");
-      return;
-    }
-    if (
-      divisoesList.some(
-        (d) => d.codigo === codigo && d.codigo !== divisaoOriginalCodigo
-      )
-    ) {
-      alert("Já existe uma Divisão com este código.");
-      return;
-    }
-
-    const payload: Divisao = {
-      ...currentDivisao,
-      codigo,
-      nome,
-      descricao: String(currentDivisao.descricao || "").trim(),
-      ativo: currentDivisao.ativo !== false,
-    };
-    if (divisaoOriginalCodigo) {
-      setDivisoesList((prev) =>
-        sortDivisoes(
-          prev.map((d) => (d.codigo === divisaoOriginalCodigo ? payload : d))
-        )
-      );
-      if (divisaoOriginalCodigo !== codigo) {
-        setRemovedDivisoes((prev) => [...prev, divisaoOriginalCodigo]);
-      }
-    } else {
-      setDivisoesList((prev) => sortDivisoes([...prev, payload]));
-    }
-
-    if (codigo === activeDivisaoId) {
-      // Divisão ativa já é a fonte da aba Seções: aplica lá para não gravar duas vezes.
-      setSecoes(
-        updateOrderFields(
-          divisaoSecoes.map((s) => ({ ...s, divisaoId: codigo }))
-        )
-      );
-      setRemovedSecoes((prev) => [
-        ...prev,
-        ...divisaoSecoesRemovidas
-          .filter((secaoId) => !prev.some((r) => r.chave === secaoId))
-          .map((secaoId) => ({ chave: secaoId, divisaoId: codigo })),
-      ]);
-    } else {
-      setSecoesPendentesPorDivisao((prev) => {
-        const proximo = { ...prev };
-        // Renomear o código move as seções junto: o divisaoId delas é o código.
-        if (divisaoOriginalCodigo && divisaoOriginalCodigo !== codigo) {
-          delete proximo[divisaoOriginalCodigo];
-        }
-        proximo[codigo] = {
-          secoes: divisaoSecoes.map((s) => ({ ...s, divisaoId: codigo })),
-          removidas: divisaoSecoesRemovidas,
-        };
-        return proximo;
-      });
-    }
-
-    setDivisaoModalOpen(false);
-    setCurrentDivisao(null);
-    setDivisaoOriginalCodigo(null);
   };
 
   // --- LIST COMPUTATIONS (SEARCH, FILTER & PAGINATION) ---
@@ -2247,7 +2161,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 )}
                               </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{col.nomeCompleto || "Não informado"}</td>
-                              <td className="px-4 py-3 text-gray-600 font-medium">{col.secao}</td>
+                              <td className="px-4 py-3 text-gray-600 font-medium">
+                                {col.secao}
+                                <span className="block text-[10px] text-gray-400 font-semibold">
+                                  {nomeDivisao(String(col.divisaoId || activeDivisaoId))}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                   normalizeAtivoFlag(col.ativo) ? "bg-green-150 text-green-800" : "bg-red-150 text-red-800"
@@ -2426,7 +2345,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 )}
                               </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{usr.nomeCompleto || "Não informado"}</td>
-                              <td className="px-4 py-3 text-gray-600 font-medium">{usr.secao}</td>
+                              <td className="px-4 py-3 text-gray-600 font-medium">
+                                {usr.secao}
+                                <span className="block text-[10px] text-gray-400 font-semibold">
+                                  {nomeDivisao(String(usr.divisaoId || activeDivisaoId))}
+                                </span>
+                              </td>
                               <td className="px-4 py-3 text-center">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${
                                   usr.perfil === "Administrador" 
@@ -2595,117 +2519,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
               </div>
             )}
 
-            {/* 4. MODULE: SEÇÕES */}
-            {activeTab === "secoes" && (
-              <div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
-                  <div>
-                    <h2 className="text-base font-bold text-gray-900">Módulo Seções de Serviço</h2>
-                    <p className="text-xs text-gray-500">Configure as seções ou divisões administrativas onde os militares prestam serviços.</p>
-                  </div>
-                  <button
-                    id="new-secao-btn"
-                    onClick={() => {
-                      setCurrentSecao({
-                        id: doc(collection(db, "secoes")).id,
-                        nome: "",
-                        codigo: "",
-                        ativo: true,
-                        divisaoId: activeDivisaoId,
-                      });
-                      setSecaoOriginalNome(null);
-                      setSecaoModalOpen(true);
-                    }}
-                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>Nova Seção</span>
-                  </button>
-                </div>
-
-                <div className="table-scroll border border-gray-200 rounded-lg">
-                  <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
-                    <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                      <tr>
-                        <th className="px-4 py-3 text-center w-24">Ordem</th>
-                        <th className="px-4 py-3">Nome da Seção</th>
-                        <th className="px-4 py-3">Código da OPM</th>
-                        <th className="px-4 py-3 text-center">Situação</th>
-                        <th className="px-4 py-3 text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
-                      {secoes.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhuma seção cadastrada.</td>
-                        </tr>
-                      ) : (
-                        secoes.map((s, idx) => (
-                          <tr key={s.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-center">
-                              <div className="flex items-center justify-center space-x-1.5">
-                                <span className="font-bold text-gray-500">{s.ordem || idx + 1}</span>
-                                <div className="flex flex-col">
-                                  <button
-                                    onClick={() => handleMoveItem("secoes", idx, "up")}
-                                    disabled={idx === 0}
-                                    className="p-0.5 text-gray-400 hover:text-gray-900 disabled:opacity-30 cursor-pointer"
-                                  >
-                                    <ArrowUp size={11} />
-                                  </button>
-                                  <button
-                                    onClick={() => handleMoveItem("secoes", idx, "down")}
-                                    disabled={idx === secoes.length - 1}
-                                    className="p-0.5 text-gray-400 hover:text-gray-900 disabled:opacity-30 cursor-pointer"
-                                  >
-                                    <ArrowDown size={11} />
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 font-bold text-gray-800">{s.nome}</td>
-                            <td className="px-4 py-3 font-mono text-gray-700">{s.codigo || "—"}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                s.ativo !== false ? "bg-green-150 text-green-800" : "bg-red-150 text-red-800"
-                              }`}>
-                                {s.ativo !== false ? "ATIVO" : "INATIVO"}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right space-x-1">
-                              <button
-                                onClick={() => {
-                                  setCurrentSecao({
-                                    ...s,
-                                    id: s.id,
-                                    codigo: s.codigo || KNOWN_SECAO_CODIGOS[s.nome] || "",
-                                  });
-                                  setSecaoOriginalNome(s.nome);
-                                  setSecaoModalOpen(true);
-                                }}
-                                className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded transition-colors cursor-pointer inline-flex items-center"
-                                title="Editar"
-                              >
-                                <Edit2 size={13} />
-                              </button>
-                              <button
-                                onClick={() => requestDelete("secoes", s.id, s.nome)}
-                                className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center"
-                                title="Excluir"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* 5. MODULE: LEGENDAS DA ESCALA */}
+            {/* 4. MODULE: LEGENDAS DA ESCALA */}
             {activeTab === "legendas" && canLegendas && (
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
@@ -2848,8 +2662,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Divisões</h2>
                     <p className="text-xs text-gray-500">
-                      Cadastre as Divisões e as seções de cada uma. As seções ficam disponíveis
-                      para vincular aos colaboradores daquela Divisão.
+                      Cadastre as Divisões e, dentro de cada uma, as seções de serviço.
+                      Depois, em Colaboradores e Permissão, a lotação escolhe a seção
+                      indicando a Divisão a que ela pertence.
                     </p>
                   </div>
                   <button
@@ -3122,7 +2937,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
                       Seção de Serviço *
                       <span className="ml-1 normal-case font-semibold text-gray-400">
-                        (Divisão {currentCol.divisaoId || activeDivisaoId})
+                        (Divisão {nomeDivisao(String(currentCol.divisaoId || activeDivisaoId))})
                       </span>
                     </label>
                     {(() => {
@@ -3429,29 +3244,60 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Seção *</label>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Seção *
+                      <span className="ml-1 normal-case font-semibold text-gray-400">
+                        (Divisão {nomeDivisao(String(currentUser.divisaoId || activeDivisaoId))})
+                      </span>
+                    </label>
                     {(() => {
-                      const opcoes = listSecoesDaDivisao(String(currentUser.divisaoId || activeDivisaoId));
+                      const divisaoDoUsuario = String(currentUser.divisaoId || activeDivisaoId);
+                      const opcoes = listSecoesDaDivisao(divisaoDoUsuario).filter(
+                        (s) => s.ativo !== false || s.id === currentUser.secaoId
+                      );
                       return (
-                        <select
-                          value={currentUser.secaoId || ""}
-                          onChange={(e) => {
-                            const nextId = e.target.value;
-                            const secao = opcoes.find((s) => s.id === nextId);
-                            setCurrentUser({
-                              ...currentUser,
-                              secaoId: nextId,
-                              secao: secao?.nome || "",
-                            });
-                          }}
-                          className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
-                          required
-                        >
-                          <option value="">Selecione a seção</option>
-                          {opcoes.map((s) => (
-                            <option key={s.id} value={s.id}>{s.nome}</option>
-                          ))}
-                        </select>
+                        <>
+                          <select
+                            value={currentUser.secaoId || ""}
+                            onChange={(e) => {
+                              const nextId = e.target.value;
+                              const secao = opcoes.find((s) => s.id === nextId);
+                              setCurrentUser({
+                                ...currentUser,
+                                secaoId: nextId,
+                                secao: secao?.nome || "",
+                                divisaoId: divisaoDoUsuario,
+                              });
+                            }}
+                            className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100"
+                            required
+                            disabled={opcoes.length === 0}
+                          >
+                            <option value="">Selecione a seção</option>
+                            {opcoes.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.nome}
+                                {s.codigo ? ` (${s.codigo})` : ""}
+                                {s.ativo === false ? " — inativa" : ""}
+                              </option>
+                            ))}
+                          </select>
+                          {opcoes.length === 0 && (
+                            <p className="mt-1 text-[11px] text-amber-700 font-semibold">
+                              Esta Divisão ainda não possui seções. Cadastre-as em Divisões
+                              antes de conceder a permissão.
+                            </p>
+                          )}
+                          {opcoes.length > 0 && (
+                            <p className="mt-1 text-[10px] text-gray-400">
+                              A seção escolhida pertence à Divisão{" "}
+                              <span className="font-semibold text-gray-600">
+                                {nomeDivisao(divisaoDoUsuario)}
+                              </span>
+                              .
+                            </p>
+                          )}
+                        </>
                       );
                     })()}
                   </div>
@@ -3547,14 +3393,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Divisão Ativa</span>
                 </label>
 
-                {/* Seções desta Divisão — alimentam o campo Seção do colaborador */}
+                {/* Seções desta Divisão — lotação de colaboradores e permissões */}
                 <div className="pt-4 border-t border-gray-150">
                   <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
                     Seções desta Divisão
                   </label>
                   <p className="text-[11px] text-gray-500 mb-3">
-                    As seções cadastradas aqui ficam disponíveis para vincular aos colaboradores
-                    desta Divisão.
+                    Único lugar para criar seções. Após confirmar e salvar, elas ficam
+                    disponíveis em Colaboradores e Permissão, sempre vinculadas a esta Divisão.
                   </p>
 
                   <div className="flex gap-2 mb-3">
@@ -3587,7 +3433,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <button
                       type="button"
                       onClick={adicionarSecaoDivisao}
-                      disabled={!novaSecaoNome.trim()}
+                      disabled={!novaSecaoNome.trim() || !novaSecaoCodigo.trim()}
                       className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:cursor-not-allowed"
                     >
                       <Plus size={13} />
@@ -3617,12 +3463,17 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 {secao.codigo}
                               </span>
                             )}
+                            {secao.ativo === false && (
+                              <span className="ml-2 text-[10px] font-bold text-amber-700 uppercase">
+                                Inativa
+                              </span>
+                            )}
                           </span>
                           <button
                             type="button"
                             onClick={() => removerSecaoDivisao(secao.id)}
                             className="p-1 hover:bg-red-50 text-red-600 rounded cursor-pointer"
-                            title="Remover seção"
+                            title={secao.ativo === false ? "Remover seção inativa" : "Remover seção"}
                           >
                             <Trash2 size={13} />
                           </button>
@@ -3687,103 +3538,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <button
                     type="button"
                     onClick={() => setPostoModalOpen(false)}
-                    className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-xs cursor-pointer"
-                  >
-                    Confirmar
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-
-        {/* SEÇÃO ADD/EDIT MODAL */}
-        {secaoModalOpen && currentSecao && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-sm w-full overflow-hidden"
-            >
-              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
-                <h3 className="text-sm font-bold uppercase tracking-wider">
-                  {secaoOriginalNome !== null ? "Editar Seção" : "Adicionar Seção"}
-                </h3>
-                <button
-                  onClick={() => {
-                    setSecaoModalOpen(false);
-                    setCurrentSecao(null);
-                    setSecaoOriginalNome(null);
-                  }}
-                  className="text-gray-400 hover:text-white cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSecaoSubmit} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Nome da Seção *</label>
-                  <input
-                    type="text"
-                    value={currentSecao.nome}
-                    onChange={(e) => setCurrentSecao({ ...currentSecao, nome: e.target.value })}
-                    placeholder="Ex: Seç Gest Educ"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
-                    required
-                  />
-                  <p className="mt-1 text-[10px] text-gray-400">
-                    Nome editável. Ao renomear e salvar, colaboradores e permissões com a seção antiga são atualizados.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Código da OPM *</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={currentSecao.codigo ?? ""}
-                    onChange={(e) =>
-                      setCurrentSecao({
-                        ...currentSecao,
-                        codigo: normalizeSecaoCodigo(e.target.value),
-                      })
-                    }
-                    placeholder="Ex: 202002530"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-mono font-semibold"
-                    required
-                  />
-                  <p className="mt-1 text-[10px] text-gray-400">Identidade numérica da OPM (editável).</p>
-                </div>
-
-                <div className="pt-2">
-                  <label className="inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={currentSecao.ativo !== false}
-                      onChange={(e) => setCurrentSecao({ ...currentSecao, ativo: e.target.checked })}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Seção Ativa</span>
-                  </label>
-                </div>
-
-                <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSecaoModalOpen(false);
-                      setCurrentSecao(null);
-                      setSecaoOriginalNome(null);
-                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar
