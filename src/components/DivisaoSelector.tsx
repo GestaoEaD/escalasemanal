@@ -9,25 +9,29 @@ import {
   sortDivisoes,
   usuarioDivisaoCadastro,
 } from "../utils/divisaoContext";
-import { canAccessAnyDivisao } from "../utils/permissions";
-import { Building2, Lock, ChevronRight } from "lucide-react";
+import { canAccessAnyDivisao, canAccessConfig } from "../utils/permissions";
+import { Building2, Lock, ChevronRight, Settings } from "lucide-react";
 import { motion } from "motion/react";
 
 interface DivisaoSelectorProps {
   usuario: Usuario;
   onSelectDivisao: (divisao: Divisao) => void;
   onLogout: () => void;
+  /** Gerente usa para cadastrar a primeira Divisão sem precisar entrar em nenhuma. */
+  onOpenConfig?: () => void;
 }
 
 export default function DivisaoSelector({
   usuario,
   onSelectDivisao,
   onLogout,
+  onOpenConfig,
 }: DivisaoSelectorProps) {
   const [divisoes, setDivisoes] = useState<Divisao[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isGerente = canAccessAnyDivisao(usuario);
+  const showConfig = Boolean(onOpenConfig) && canAccessConfig(usuario);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,15 +83,29 @@ export default function DivisaoSelector({
   return (
     <div className="bg-gray-50 flex-1 pb-10">
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 sm:mt-12">
-        <div className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
-            Selecione a Divisão
-          </h1>
-          <p className="mt-2 text-sm text-gray-500 max-w-2xl">
-            {isGerente
-              ? "Como Gerente, você pode entrar em qualquer Divisão."
-              : "Entre na Divisão vinculada ao seu cadastro. As demais permanecem bloqueadas."}
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
+              Selecione a Divisão
+            </h1>
+            <p className="mt-2 text-sm text-gray-500 max-w-2xl">
+              {isGerente
+                ? "Como Gerente, você pode entrar em qualquer Divisão ou abrir Configurações para cadastrar novas."
+                : "Entre na Divisão vinculada ao seu cadastro. As demais permanecem bloqueadas."}
+            </p>
+          </div>
+          {showConfig && (
+            <button
+              type="button"
+              id="divisao-config-btn"
+              onClick={onOpenConfig}
+              className="inline-flex items-center justify-center gap-1.5 self-start px-3 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer border border-blue-200 shadow-xs"
+              title="Abrir Configurações"
+            >
+              <Settings size={15} />
+              <span>Configurações</span>
+            </button>
+          )}
         </div>
 
         {loading && (
@@ -97,7 +115,7 @@ export default function DivisaoSelector({
           <p className="text-sm text-red-600 font-semibold">{error}</p>
         )}
 
-        {!loading && !error && (
+        {!loading && !error && divisoes.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {divisoes.map((d, i) => {
               const allowed = canEnterDivisao(usuario, d.codigo);
@@ -161,9 +179,26 @@ export default function DivisaoSelector({
         )}
 
         {!loading && divisoes.length === 0 && !error && (
-          <p className="text-sm text-amber-700 font-medium">
-            Nenhuma Divisão cadastrada. Aguarde a migração ou contate o Gerente.
-          </p>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 max-w-xl">
+            <p className="text-sm text-amber-900 font-semibold">
+              Nenhuma Divisão cadastrada.
+            </p>
+            <p className="mt-1 text-xs text-amber-800">
+              {isGerente
+                ? "Abra Configurações → Divisões e cadastre a primeira Divisão (com as seções). Depois volte aqui para entrar nela."
+                : "Aguarde o Gerente cadastrar a Divisão do seu vínculo."}
+            </p>
+            {showConfig && (
+              <button
+                type="button"
+                onClick={onOpenConfig}
+                className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg cursor-pointer shadow-xs"
+              >
+                <Settings size={14} />
+                Abrir Configurações
+              </button>
+            )}
+          </div>
         )}
 
         <div className="mt-10 flex justify-end">

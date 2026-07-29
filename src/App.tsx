@@ -58,6 +58,9 @@ function SessionLoadingScreen() {
 
 function needsDivisaoSelection(usuario: Usuario, route: AppRoute): boolean {
   if (route.view === "aprovacao") return false;
+  // Gerente (e Admin) precisa abrir Configurações sem Divisão ativa —
+  // é o único jeito de cadastrar a primeira Divisão.
+  if (route.view === "config" || route.view === "pendencias") return false;
   if (route.view === "divisoes") return true;
   const active = String(usuario.activeDivisaoId || "").trim();
   return !active;
@@ -137,10 +140,12 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [applyRoute]);
 
-  // Após auth: se não há Divisão ativa, força /divisoes (exceto aprovação)
+  // Após auth: se não há Divisão ativa, força /divisoes (exceto aprovação/config)
   useEffect(() => {
     if (authPhase !== "authenticated" || !usuario) return;
-    if (route.view === "aprovacao") return;
+    if (route.view === "aprovacao" || route.view === "config" || route.view === "pendencias") {
+      return;
+    }
     if (needsDivisaoSelection(usuario, route) && route.view !== "divisoes") {
       navigate({ view: "divisoes" }, "replace");
     }
@@ -414,12 +419,29 @@ export default function App() {
         />
       );
     }
+  } else if (route.view === "config") {
+    if (!canAccessConfig(usuario)) {
+      page = <SessionLoadingScreen />;
+    } else {
+      page = (
+        <Configuracoes
+          usuario={usuario}
+          onBack={goHome}
+          onUsuarioUpdate={setUsuario}
+        />
+      );
+    }
   } else if (route.view === "divisoes" || needsDivisaoSelection(usuario, route)) {
     page = (
       <DivisaoSelector
         usuario={usuario}
         onSelectDivisao={handleSelectDivisao}
         onLogout={handleLogout}
+        onOpenConfig={
+          canAccessConfig(usuario)
+            ? () => navigate({ view: "config" })
+            : undefined
+        }
       />
     );
   } else if (route.view === "selector" && needsSecaoSelection(usuario, route)) {
@@ -485,18 +507,6 @@ export default function App() {
           onLogout={handleLogout}
           onOpenConfig={() => navigate({ view: "config" })}
           onOpenApproval={openApproval}
-        />
-      );
-    }
-  } else if (route.view === "config") {
-    if (!canAccessConfig(usuario)) {
-      page = <SessionLoadingScreen />;
-    } else {
-      page = (
-        <Configuracoes
-          usuario={usuario}
-          onBack={goHome}
-          onUsuarioUpdate={setUsuario}
         />
       );
     }
@@ -568,14 +578,14 @@ export default function App() {
       onHome={hideShellChrome ? goDivisoes : goHome}
       onTrocarDivisao={hideShellChrome ? undefined : goDivisoes}
       onLogout={handleLogout}
-      onOpenConfig={
-        hideShellChrome ? undefined : () => navigate({ view: "config" })
-      }
+      onOpenConfig={() => navigate({ view: "config" })}
       onOpenPendencias={
-        hideShellChrome ? undefined : () => navigate({ view: "pendencias" })
+        hideShellChrome || !canApproveScales(usuario)
+          ? undefined
+          : () => navigate({ view: "pendencias" })
       }
       hidePendenciasBtn={route.view === "pendencias" || hideShellChrome}
-      hideConfigBtn={hideShellChrome}
+      hideConfigBtn={route.view === "config"}
     >
       {page}
     </AppShell>
