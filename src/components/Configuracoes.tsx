@@ -1126,12 +1126,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         }
       }
 
-      // Uma operação de auditoria com todas as alterações internas
+      // Uma operação de auditoria com todas as alterações internas.
+      // Pós-commit: falhar aqui não pode reportar como erro um salvamento já concluído.
       await auditConfiguracao({
         usuario,
         alteracoes,
         detalhes: "Salvamento de configurações administrativas",
-      });
+      }).catch((e) => console.warn("Falha ao registrar auditoria do salvamento:", e));
 
       // Set original states to the newly saved ones
       setOrigColaboradores(JSON.parse(JSON.stringify(colsToSave)));

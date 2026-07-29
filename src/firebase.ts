@@ -18,6 +18,8 @@ import {
   serverTimestamp,
   runTransaction,
   onSnapshot,
+  FieldValue,
+  GeoPoint,
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
@@ -63,4 +65,6 @@ export {
   serverTimestamp,
   runTransaction,
   onSnapshot,
+  FieldValue,
+  GeoPoint,
 };

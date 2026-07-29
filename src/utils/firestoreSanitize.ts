@@ -1,6 +1,7 @@
 /**
  * Utilitários para evitar "Unsupported field value: undefined" no Firestore.
  */
+import { FieldValue, GeoPoint } from "../firebase";
 
 function isFirestoreTimestamp(value: unknown): boolean {
   return (
@@ -28,12 +29,29 @@ function isFirestoreBytes(value: unknown): boolean {
   );
 }
 
+/**
+ * Sentinels como serverTimestamp(), increment() e arrayUnion() são instâncias de
+ * FieldValue cuja única chave própria é `_methodName`. Copiá-las como mapa produz
+ * um objeto comum e o Firestore grava um mapa literal no lugar do valor especial —
+ * o que, no caso de serverTimestamp(), reprova a rule `timestamp == request.time`.
+ */
+function isFirestoreFieldValue(value: unknown): boolean {
+  if (value instanceof FieldValue) return true;
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { _methodName?: unknown })._methodName === "string"
+  );
+}
+
 /** Tipos especiais do Firestore/JS que não devem ser "abertos" como mapa. */
 function isFirestoreSpecialType(value: unknown): boolean {
   if (value instanceof Date) return true;
   if (isFirestoreTimestamp(value)) return true;
   if (isFirestoreDocumentReference(value)) return true;
   if (isFirestoreBytes(value)) return true;
+  if (isFirestoreFieldValue(value)) return true;
+  if (value instanceof GeoPoint) return true;
   return false;
 }
 
