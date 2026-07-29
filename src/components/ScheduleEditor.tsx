@@ -588,6 +588,7 @@ export default function ScheduleEditor({
                   historico: cleanHistorico(
                     Array.isArray(data.historico) ? data.historico : []
                   ),
+                  secaoId: activeSecaoId,
                 } as unknown as Record<string, unknown>)
               );
             }
@@ -1438,6 +1439,7 @@ export default function ScheduleEditor({
           prepareFirestoreWrite(`escalas_semanais/${docId}`, {
             id: docId,
             divisaoId,
+            secaoId: activeSecaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
@@ -1510,6 +1512,7 @@ export default function ScheduleEditor({
           prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
             id: docId,
             divisaoId,
+            secaoId: activeSecaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,

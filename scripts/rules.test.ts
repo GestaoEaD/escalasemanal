@@ -317,6 +317,50 @@ async function main() {
       status: "aguardando_aprovacao",
     })
   );
+  // Salvar na UI reescreve o documento inteiro (setDoc sem merge):
+  // o payload precisa reenviar divisaoId/secaoId, senão a atualização é negada.
+  await verifica("[Operador] salvar escala reescrevendo com secaoId", "ALLOW", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
+      id: "esc-edit-a1",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      ano: 2026,
+      semana: 32,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
+  await verifica("[Operador] NÃO salvar escala reescrevendo sem secaoId", "DENY", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
+      id: "esc-edit-a1",
+      divisaoId: DIV_A,
+      ano: 2026,
+      semana: 32,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
+  await verifica("[Gerente] NÃO remover secaoId ao reescrever escala", "DENY", () =>
+    setDoc(doc(dbDe("Gerente"), "escalas_semanais", "esc-edit-a1"), {
+      id: "esc-edit-a1",
+      divisaoId: DIV_A,
+      ano: 2026,
+      semana: 32,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
+  await verifica("[Gerente] NÃO mover escala para outra Divisão", "DENY", () =>
+    setDoc(doc(dbDe("Gerente"), "escalas_semanais", "esc-edit-a1"), {
+      id: "esc-edit-a1",
+      divisaoId: DIV_B,
+      secaoId: secaoA1,
+      ano: 2026,
+      semana: 32,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
   await verifica("[Gestor] aprovar própria seção", "ALLOW", () =>
     updateDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-a1"), {
       status: "aprovada",
