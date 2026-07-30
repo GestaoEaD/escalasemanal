@@ -252,8 +252,19 @@ const clearedCel: FrequenciaCelula = {
   origem: "edicao_manual",
   editadoManualmente: true,
 };
-assert(displayFrequenciaCelula(emptyCel) === "A", "A para sem lançamento");
+assert(displayFrequenciaCelula(emptyCel) === "", "vazio sem fallback");
+assert(
+  displayFrequenciaCelula(emptyCel, { emptyFallback: "A" }) === "A",
+  "A para sem lançamento com fallback de afastamento"
+);
 assert(displayFrequenciaCelula(clearedCel) === "", "vazio para apagado manual");
+assert(
+  displayFrequenciaCelula(
+    { valor: "-", origem: "escala_semanal", editadoManualmente: false },
+    { emptyFallback: "A" }
+  ) === "A",
+  "hífen legado usa fallback"
+);
 assert(isWeekendDay(2026, 1, 3) === true, "03/01/2026 é sábado");
 assert(isWeekendDay(2026, 1, 4) === true, "04/01/2026 é domingo");
 assert(isWeekendDay(2026, 1, 5) === false, "05/01/2026 é segunda");

@@ -19,7 +19,7 @@ import {
   submitFrequenciaForApproval,
 } from "../../utils/frequenciaService";
 import { daysInMonth, dayKey } from "../../utils/frequenciaIds";
-import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia } from "../../utils/frequenciaCalculo";
+import { recalcAllRows, buildLegendaLookup, listValoresControleFrequencia, getValorAfastamentoControleFrequencia } from "../../utils/frequenciaCalculo";
 import {
   displayFrequenciaCelula,
   isWeekendDay,
@@ -273,6 +273,9 @@ export default function FrequenciaEditor({
     setSyncing(true);
     setError(null);
     try {
+      const divisaoId = resolveActiveDivisaoId(usuario);
+      const legs = await loadLegendas(divisaoId);
+      setLegendas(legs);
       const result = await ensureAndSyncControleFrequencia({
         ano: year,
         mes: month,
@@ -283,7 +286,7 @@ export default function FrequenciaEditor({
       });
       let next = {
         ...result.doc,
-        rows: recalcAllRows(result.doc.rows, legendas),
+        rows: recalcAllRows(result.doc.rows, legs),
         observacoes: result.doc.observacoes,
       };
       if (docData) {
@@ -299,12 +302,12 @@ export default function FrequenciaEditor({
           }
           return { ...r, dias };
         });
-        next = { ...next, rows: recalcAllRows(mergedRows, legendas) };
+        next = { ...next, rows: recalcAllRows(mergedRows, legs) };
       }
       setDocData(next);
       setDirty(true);
       await auditSyncFrequencia(next, usuario);
-      setSuccess("Sincronização concluída (edições manuais preservadas).");
+      setSuccess("Sincronização concluída com as escalas e legendas atuais (edições manuais preservadas).");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Falha na sincronização.");
     } finally {
@@ -467,9 +470,13 @@ export default function FrequenciaEditor({
 
   const visibleObs = (docData?.observacoes || []).filter((o) => !o.excluido);
   const lookup = useMemo(() => buildLegendaLookup(legendas), [legendas]);
+  const afastamentoValor = useMemo(
+    () => getValorAfastamentoControleFrequencia(legendas),
+    [legendas]
+  );
   const optionValues = useMemo(() => {
     const allowed = listValoresControleFrequencia(legendas);
-    return ["", "A", ...allowed.filter((v) => v !== "A" && v !== "-")];
+    return ["", ...allowed];
   }, [legendas]);
 
   const showSubmit =
@@ -834,8 +841,10 @@ export default function FrequenciaEditor({
                           origem: "vazio" as const,
                           editadoManualmente: false,
                         };
-                        const shown = displayFrequenciaCelula(cel);
                         const weekend = weekendByKey[k];
+                        const shown = displayFrequenciaCelula(cel, {
+                          emptyFallback: weekend ? afastamentoValor : "",
+                        });
                         return (
                           <td
                             key={k}
@@ -845,15 +854,12 @@ export default function FrequenciaEditor({
                               <input
                                 value={shown}
                                 onChange={(e) => {
-                                  const next = e.target.value;
-                                  const wasEmptyNonManual =
-                                    !cel.editadoManualmente &&
-                                    !String(cel.valor || "").trim();
-                                  if (wasEmptyNonManual && next === "A") return;
-                                  setCell(row.re, k, next);
+                                  setCell(row.re, k, e.target.value);
                                 }}
                                 onFocus={(e) => {
-                                  if (e.target.value === "A") e.target.select();
+                                  if (afastamentoValor && e.target.value === afastamentoValor) {
+                                    e.target.select();
+                                  }
                                 }}
                                 list={`freq-opts-${row.re}`}
                                 title={

@@ -166,6 +166,14 @@ export function getRepresentacaoConsolidada(legenda: Legenda): string | undefine
 }
 
 /**
+ * Valor persistido usado no Controle de Frequência.
+ * Prefere `representacoes.escalaConsolidada`; sem ela, não inventa (retorna "").
+ */
+export function resolveValorControleFrequencia(legenda: Legenda): string {
+  return getRepresentacaoConsolidada(legenda) || "";
+}
+
+/**
  * Futuro A.A.: conta dia trabalhado somente se explicitamente configurado.
  * Ausência de regra = não conta (não configurado).
  */

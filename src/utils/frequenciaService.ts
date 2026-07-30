@@ -66,6 +66,13 @@ function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
 export async function loadLegendas(
   _divisaoId: string = DIVISAO_EAD_ID
 ): Promise<Legenda[]> {
+  // Garante representações CF nas legendas oficiais (idempotente via flag de status).
+  try {
+    const { ensureLegendasFrequenciaRepresentacoes } = await import("./seedData");
+    await ensureLegendasFrequenciaRepresentacoes();
+  } catch (err) {
+    console.warn("[loadLegendas] backfill de representações:", err);
+  }
   const snap = await getDocs(collection(db, "legendas"));
   const list: Legenda[] = [];
   snap.forEach((d) => list.push(normalizeLegenda(d.data())));

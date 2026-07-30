@@ -95,8 +95,9 @@ export type ScaleDocsByWeek = Record<
 
 /**
  * Monta/atualiza linhas sincronizadas preservando edições manuais.
- * - Conversão só via representacoes.escalaConsolidada
- * - Sáb/dom: afastamento configurado (legenda A → representação CF) se não houver valor válido
+ * - Conversão via representacoes.escalaConsolidada das legendas (Configurações)
+ * - Prioridade: Escala Alteração > Escala Semanal
+ * - Sáb/dom sem valor válido: afastamento = consolidada da legenda A
  */
 export function syncFrequenciaRows(options: {
   ano: number;

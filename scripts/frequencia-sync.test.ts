@@ -11,17 +11,17 @@ import type {
   ScheduleRow,
 } from "../src/types";
 
-function legendaA(): Legenda {
+function legenda(partial: Partial<Legenda> & { sigla: string }): Legenda {
   return {
-    id: "A",
-    sigla: "A",
-    descricao: "Afastamento",
+    id: partial.sigla,
+    sigla: partial.sigla,
+    descricao: partial.descricao || partial.sigla,
     cor: "#ccc",
-    ordem: 1,
+    ordem: partial.ordem || 1,
     ativo: true,
-    representacoes: [{ tipo: "texto", valor: "A" }],
-    regras: { padrao_fim_semana: true },
-  } as unknown as Legenda;
+    representacoes: partial.representacoes,
+    regras: partial.regras,
+  } as Legenda;
 }
 
 function row(partial: Partial<ScheduleRow> & { re: string }): ScheduleRow {
@@ -74,6 +74,22 @@ const colab = {
   divisaoId: "d",
 } as any;
 
+const legendas: Legenda[] = [
+  legenda({
+    sigla: "EN",
+    representacoes: { escalaSemanal: "EN", escalaConsolidada: "1" },
+    regras: { diaTrabalhado: true, meiaDiaria: { participa: true, valor: 1 }, aa: { contaDia: true } },
+  }),
+  legenda({
+    sigla: "A",
+    representacoes: { escalaSemanal: "A", escalaConsolidada: "A" },
+  }),
+  legenda({
+    sigla: "LT",
+    representacoes: { escalaSemanal: "LT", escalaConsolidada: "LT" },
+  }),
+];
+
 let passed = 0;
 function check(name: string, fn: () => void) {
   try {
@@ -86,18 +102,36 @@ function check(name: string, fn: () => void) {
   }
 }
 
-check("retorna rows sincronizadas", () => {
+check("converte EN da Semanal para consolidada 1", () => {
+  // 05/01/2026 é segunda
   const sem = escala([row({ re: "1", seg: "EN" })]);
   const { rows } = syncFrequenciaRows({
     ano: 2026,
     mes: 1,
     secao: "Secao X",
     colaboradores: [colab],
-    legendas: [legendaA()],
+    legendas,
     scaleDocs: { "2026_01": { semanal: sem, alteracao: null } },
     existingRows: [baseFreqRow("1")],
   });
-  assert.ok(rows.length >= 1);
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "1");
+  assert.equal(rows[0]?.dias?.["05"]?.origem, "escala_semanal");
+});
+
+check("Alteração tem prioridade sobre Semanal", () => {
+  const sem = escala([row({ re: "1", seg: "EN" })]);
+  const alt = escala([row({ re: "1", seg: "LT" })]);
+  const { rows } = syncFrequenciaRows({
+    ano: 2026,
+    mes: 1,
+    secao: "Secao X",
+    colaboradores: [colab],
+    legendas,
+    scaleDocs: { "2026_01": { semanal: sem, alteracao: alt } },
+    existingRows: [baseFreqRow("1")],
+  });
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "LT");
+  assert.equal(rows[0]?.dias?.["05"]?.origem, "escala_alteracao");
 });
 
 check("Manual preservado", () => {
@@ -105,7 +139,7 @@ check("Manual preservado", () => {
     {
       ...baseFreqRow("1"),
       dias: {
-        "2026-01-05": {
+        "05": {
           valor: "MANUAL",
           origem: "manual",
           editadoManualmente: true,
@@ -119,28 +153,29 @@ check("Manual preservado", () => {
     mes: 1,
     secao: "Secao X",
     colaboradores: [colab],
-    legendas: [legendaA()],
+    legendas,
     scaleDocs: { "2026_01": { semanal: sem, alteracao: null } },
     existingRows: existing,
   });
-  const manual = rows[0]?.dias?.["2026-01-05"] as any;
+  const manual = rows[0]?.dias?.["05"] as any;
   assert.equal(manual?.editadoManualmente, true);
   assert.equal(manual?.valor, "MANUAL");
 });
 
-check("Alteração tem prioridade quando convertível", () => {
-  const sem = escala([row({ re: "1", seg: "EN" })]);
-  const alt = escala([row({ re: "1", seg: "LT" })]);
+check("fim de semana usa consolidada da legenda A", () => {
+  // 03/01/2026 é sábado → semana 2025_52 (29 Dez a 04 Jan)
+  const sem = escala([row({ re: "1", sab: "", dom: "" })]);
   const { rows } = syncFrequenciaRows({
     ano: 2026,
     mes: 1,
     secao: "Secao X",
     colaboradores: [colab],
-    legendas: [legendaA()],
-    scaleDocs: { "2026_01": { semanal: sem, alteracao: alt } },
+    legendas,
+    scaleDocs: { "2025_52": { semanal: sem, alteracao: null } },
     existingRows: [baseFreqRow("1")],
   });
-  assert.ok(rows[0]);
+  assert.equal(rows[0]?.dias?.["03"]?.valor, "A");
+  assert.equal(rows[0]?.dias?.["03"]?.origem, "padrao_fim_semana");
 });
 
 console.log(`\n${passed} checks finished`);

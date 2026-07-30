@@ -3670,8 +3670,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 {legendaModalSection === "representacoes" && (
                   <>
                     <p className="text-[11px] text-gray-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                      Preparação para a futura Escala Consolidada. Nenhum campo desta seção é
-                      obrigatório. Se vazio, permanece como &quot;não configurado&quot;.
+                      Valores usados na sincronização Escala Semanal/Alteração → Controle de
+                      Frequência. A representação do Controle é gravada nas células após o sync.
+                      Se vazia, a legenda não preenche o Controle.
                     </p>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
@@ -3709,11 +3710,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                             },
                           })
                         }
-                        placeholder="Ex: 1 (opcional)"
+                        placeholder="Ex: 1 (obrigatório para sincronizar esta legenda)"
                         className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       />
                       <p className="mt-1 text-[10px] text-gray-400">
-                        Opcional. Valor exibido/somado no Controle de Frequência (e consolidação futura).
+                        Valor persistido e exibido/somado no Controle de Frequência após sincronizar com as escalas.
                       </p>
                     </div>
                   </>

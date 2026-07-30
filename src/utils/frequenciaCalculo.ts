@@ -8,6 +8,7 @@ import {
   getRepresentacaoConsolidada,
   getValorMeiaDiaria,
   normalizeLegenda,
+  resolveValorControleFrequencia,
 } from "./legendaModel";
 
 /** Índice de legendas por sigla, representação semanal e consolidada. */
@@ -44,8 +45,9 @@ export function hasRepresentacaoControleFrequencia(
 }
 
 /**
- * Converte código da escala para representação do Controle de Frequência.
- * Sem representacoes.escalaConsolidada → string vazia (não reutiliza a sigla).
+ * Converte código da escala para o valor do Controle de Frequência
+ * conforme `representacoes.escalaConsolidada` persistida em Configurações.
+ * Sem consolidada configurada → string vazia (não reutiliza a sigla).
  */
 export function convertEscalaValorToFrequencia(
   escalaValor: string,
@@ -56,7 +58,7 @@ export function convertEscalaValorToFrequencia(
   if (raw === "-") raw = "A";
   const legenda = findLegendaForValor(raw, lookup);
   if (!legenda) return "";
-  return getRepresentacaoConsolidada(legenda) || "";
+  return resolveValorControleFrequencia(legenda);
 }
 
 /**
@@ -76,7 +78,7 @@ export function getValorAfastamentoControleFrequencia(
 ): string {
   const leg = findLegendaAfastamento(legendas);
   if (!leg) return "";
-  return getRepresentacaoConsolidada(leg) || "";
+  return resolveValorControleFrequencia(leg);
 }
 
 /** Lista valores permitidos no Controle (apenas consolidada configurada). */
@@ -85,10 +87,12 @@ export function listValoresControleFrequencia(legendas: Legenda[]): string[] {
   for (const raw of legendas) {
     const l = normalizeLegenda(raw);
     if (l.ativo === false) continue;
-    const cons = getRepresentacaoConsolidada(l);
+    const cons = resolveValorControleFrequencia(l);
     if (cons) set.add(cons);
   }
-  return Array.from(set).sort();
+  return Array.from(set).sort((a, b) =>
+    a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" })
+  );
 }
 
 /**
@@ -103,7 +107,7 @@ export function findLegendaParaCalculoFrequencia(
   if (raw === "-") raw = "A";
   const legenda = findLegendaForValor(raw, lookup);
   if (!legenda) return undefined;
-  const cons = getRepresentacaoConsolidada(legenda);
+  const cons = resolveValorControleFrequencia(legenda);
   if (!cons) return undefined;
   if (raw.toUpperCase() !== cons.toUpperCase()) return undefined;
   return legenda;

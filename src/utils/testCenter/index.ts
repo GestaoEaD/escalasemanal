@@ -1400,18 +1400,30 @@ export function buildAllTestCases(opts: {
         origem: "vazio",
         editadoManualmente: false,
       });
+      const emptyWeekend = displayFrequenciaCelula(
+        {
+          valor: "",
+          origem: "vazio",
+          editadoManualmente: false,
+        },
+        { emptyFallback: "A" }
+      );
       const cleared = displayFrequenciaCelula({
         valor: "",
         origem: "edicao_manual",
         editadoManualmente: true,
       });
-      const hyphenLegacy = displayFrequenciaCelula({
-        valor: "-",
-        origem: "escala_semanal",
-        editadoManualmente: false,
-      });
-      if (empty !== "A") return fail("Sem lançamento deveria exibir A", empty);
-      if (hyphenLegacy !== "A") return fail("Hífen legado deveria exibir A", hyphenLegacy);
+      const hyphenLegacy = displayFrequenciaCelula(
+        {
+          valor: "-",
+          origem: "escala_semanal",
+          editadoManualmente: false,
+        },
+        { emptyFallback: "A" }
+      );
+      if (empty !== "") return fail("Sem lançamento sem fallback deveria ser vazio", empty);
+      if (emptyWeekend !== "A") return fail("Fim de semana deveria usar fallback A", emptyWeekend);
+      if (hyphenLegacy !== "A") return fail("Hífen legado deveria usar fallback A", hyphenLegacy);
       if (cleared !== "") return fail("Apagado manual deveria exibir vazio", cleared);
       if (!isWeekendDay(2026, 1, 3) || !isWeekendDay(2026, 1, 4)) {
         return fail("Sáb/dom de jan/2026 não detectados");

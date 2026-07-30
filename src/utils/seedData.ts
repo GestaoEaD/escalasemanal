@@ -113,7 +113,19 @@ export const OFFICIAL_POSTOS = [
 ];
 
 export const OFFICIAL_LEGENDAS = [
-  { ordem: 1, sigla: "EN", descricao: "EXPEDIENTE NORMAL", cor: "verde", ativo: true },
+  {
+    ordem: 1,
+    sigla: "EN",
+    descricao: "EXPEDIENTE NORMAL",
+    cor: "verde",
+    ativo: true,
+    representacoes: { escalaSemanal: "EN", escalaConsolidada: "1" },
+    regras: {
+      diaTrabalhado: true,
+      meiaDiaria: { participa: true, valor: 1 },
+      aa: { contaDia: true },
+    },
+  },
   {
     ordem: 2,
     sigla: "A",
@@ -123,20 +135,187 @@ export const OFFICIAL_LEGENDAS = [
     ativo: true,
     representacoes: { escalaSemanal: "A", escalaConsolidada: "A" },
   },
-  { ordem: 3, sigla: "F", descricao: "FOLGA", cor: "amarelo", ativo: true },
-  { ordem: 4, sigla: "FC", descricao: "FOLGA COMPENSAÇÃO", cor: "laranja", ativo: true },
-  { ordem: 5, sigla: "M", descricao: "FOLGA MANHÃ", cor: "azul-claro", ativo: true },
-  { ordem: 6, sigla: "T", descricao: "FOLGA TARDE", cor: "azul-medio", ativo: true },
-  { ordem: 7, sigla: "MC", descricao: "MANHÃ COMPENSAÇÃO", cor: "roxo-claro", ativo: true },
-  { ordem: 8, sigla: "TC", descricao: "TARDE COMPENSAÇÃO", cor: "roxo-escuro", ativo: true },
-  { ordem: 9, sigla: "FÉRIAS", descricao: "FÉRIAS", cor: "verde-escuro", ativo: true },
-  { ordem: 10, sigla: "LP", descricao: "LICENÇA-PRÊMIO", cor: "cinza", ativo: true },
-  { ordem: 11, sigla: "DS", descricao: "DISPENSA", cor: "vermelho-claro", ativo: true },
-  { ordem: 12, sigla: "LT", descricao: "LICENÇA PARA TRATAMENTO", cor: "vermelho", ativo: true },
-  { ordem: 13, sigla: "CONVAL", descricao: "CONVALESCENÇA", cor: "bordo", ativo: true },
-  { ordem: 14, sigla: "EX", descricao: "ESCALA EXTRA", cor: "azul-escuro", ativo: true },
-  { ordem: 15, sigla: "OBS", descricao: "OBSERVAÇÃO", cor: "cinza-escuro", ativo: true },
+  {
+    ordem: 3,
+    sigla: "F",
+    descricao: "FOLGA",
+    cor: "amarelo",
+    ativo: true,
+    representacoes: { escalaSemanal: "F", escalaConsolidada: "F" },
+  },
+  {
+    ordem: 4,
+    sigla: "FC",
+    descricao: "FOLGA COMPENSAÇÃO",
+    cor: "laranja",
+    ativo: true,
+    representacoes: { escalaSemanal: "FC", escalaConsolidada: "FC" },
+  },
+  {
+    ordem: 5,
+    sigla: "M",
+    descricao: "FOLGA MANHÃ",
+    cor: "azul-claro",
+    ativo: true,
+    representacoes: { escalaSemanal: "M", escalaConsolidada: "M" },
+    regras: { meiaDiaria: { participa: true, valor: 0.5 } },
+  },
+  {
+    ordem: 6,
+    sigla: "T",
+    descricao: "FOLGA TARDE",
+    cor: "azul-medio",
+    ativo: true,
+    representacoes: { escalaSemanal: "T", escalaConsolidada: "T" },
+    regras: { meiaDiaria: { participa: true, valor: 0.5 } },
+  },
+  {
+    ordem: 7,
+    sigla: "MC",
+    descricao: "MANHÃ COMPENSAÇÃO",
+    cor: "roxo-claro",
+    ativo: true,
+    representacoes: { escalaSemanal: "MC", escalaConsolidada: "MC" },
+  },
+  {
+    ordem: 8,
+    sigla: "TC",
+    descricao: "TARDE COMPENSAÇÃO",
+    cor: "roxo-escuro",
+    ativo: true,
+    representacoes: { escalaSemanal: "TC", escalaConsolidada: "TC" },
+  },
+  {
+    ordem: 9,
+    sigla: "FÉRIAS",
+    descricao: "FÉRIAS",
+    cor: "verde-escuro",
+    ativo: true,
+    representacoes: { escalaSemanal: "FÉRIAS", escalaConsolidada: "FÉRIAS" },
+  },
+  {
+    ordem: 10,
+    sigla: "LP",
+    descricao: "LICENÇA-PRÊMIO",
+    cor: "cinza",
+    ativo: true,
+    representacoes: { escalaSemanal: "LP", escalaConsolidada: "LP" },
+  },
+  {
+    ordem: 11,
+    sigla: "DS",
+    descricao: "DISPENSA",
+    cor: "vermelho-claro",
+    ativo: true,
+    representacoes: { escalaSemanal: "DS", escalaConsolidada: "DS" },
+  },
+  {
+    ordem: 12,
+    sigla: "LT",
+    descricao: "LICENÇA PARA TRATAMENTO",
+    cor: "vermelho",
+    ativo: true,
+    representacoes: { escalaSemanal: "LT", escalaConsolidada: "LT" },
+  },
+  {
+    ordem: 13,
+    sigla: "CONVAL",
+    descricao: "CONVALESCENÇA",
+    cor: "bordo",
+    ativo: true,
+    representacoes: { escalaSemanal: "CONVAL", escalaConsolidada: "CONVAL" },
+  },
+  {
+    ordem: 14,
+    sigla: "EX",
+    descricao: "ESCALA EXTRA",
+    cor: "azul-escuro",
+    ativo: true,
+    representacoes: { escalaSemanal: "EX", escalaConsolidada: "EX" },
+    regras: { diaTrabalhado: true, aa: { contaDia: true } },
+  },
+  {
+    ordem: 15,
+    sigla: "OBS",
+    descricao: "OBSERVAÇÃO",
+    cor: "cinza-escuro",
+    ativo: true,
+    representacoes: { escalaSemanal: "OBS", escalaConsolidada: "OBS" },
+  },
 ];
+
+/**
+ * Backfill de representações do Controle de Frequência nas legendas oficiais.
+ * Não sobrescreve `escalaConsolidada` já configurada pelo administrador.
+ */
+export async function ensureLegendasFrequenciaRepresentacoes(): Promise<{
+  updated: number;
+}> {
+  const statusDocRef = doc(db, "configuracoes", "status");
+  const statusSnap = await getDoc(statusDocRef);
+  if (statusSnap.exists() && statusSnap.data()?.legendas_cf_representacoes_seeded === true) {
+    return { updated: 0 };
+  }
+
+  let updated = 0;
+  for (const official of OFFICIAL_LEGENDAS) {
+    const desired = official as {
+      representacoes?: { escalaSemanal?: string; escalaConsolidada?: string };
+      regras?: Record<string, unknown>;
+      nome?: string;
+    };
+    if (!desired.representacoes?.escalaConsolidada) continue;
+    const ref = doc(db, "legendas", legendaDocId(official.sigla));
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        sigla: official.sigla,
+        descricao: official.descricao,
+        cor: official.cor,
+        ativo: official.ativo,
+        ordem: official.ordem,
+        ...(desired.nome ? { nome: desired.nome } : {}),
+        representacoes: desired.representacoes,
+        ...(desired.regras ? { regras: desired.regras } : {}),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+      updated += 1;
+      continue;
+    }
+    const data = snap.data() as {
+      representacoes?: { escalaSemanal?: string; escalaConsolidada?: string };
+      regras?: Record<string, unknown>;
+    };
+    const hasCons = Boolean(String(data.representacoes?.escalaConsolidada || "").trim());
+    if (hasCons) continue;
+    const patch: Record<string, unknown> = {
+      representacoes: {
+        escalaSemanal:
+          String(data.representacoes?.escalaSemanal || "").trim() ||
+          desired.representacoes.escalaSemanal ||
+          official.sigla,
+        escalaConsolidada: desired.representacoes.escalaConsolidada,
+      },
+      updatedAt: Timestamp.now(),
+    };
+    if (!data.regras && desired.regras) {
+      patch.regras = desired.regras;
+    }
+    await setDoc(ref, patch, { merge: true });
+    updated += 1;
+  }
+
+  await setDoc(
+    statusDocRef,
+    { legendas_cf_representacoes_seeded: true },
+    { merge: true }
+  );
+  if (updated > 0) {
+    console.log(`Legendas: ${updated} representação(ões) do Controle de Frequência aplicadas.`);
+  }
+  return { updated };
+}
 
 /** Códigos institucionais conhecidos — aplicados em seed e migração. */
 export const KNOWN_SECAO_CODIGOS: Record<string, string> = {
@@ -222,6 +401,7 @@ export async function seedDatabaseIfEmpty() {
     // Gestores iniciais (perfil via Firestore — sem lista fixa de permissões no código de auth)
     await ensureInitialGestores();
     await ensureLegendaAfastamento();
+    await ensureLegendasFrequenciaRepresentacoes();
     await ensureSecoesCodigos();
 
     if (needsSeeding) {
@@ -284,6 +464,7 @@ export async function seedDatabaseIfEmpty() {
           ordem: l.ordem,
           ...(("nome" in l && l.nome) ? { nome: l.nome } : {}),
           ...(("representacoes" in l && l.representacoes) ? { representacoes: l.representacoes } : {}),
+          ...(("regras" in l && l.regras) ? { regras: l.regras } : {}),
           createdAt: Timestamp.now()
         });
       });
