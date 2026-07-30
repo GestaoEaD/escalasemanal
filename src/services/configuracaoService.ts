@@ -510,15 +510,26 @@ export async function saveConfiguracoesBatch(
   if (canPostos) {
     // --- 3. AUDIT & SAVE: POSTOS ---
     for (const rem of postoBlock.removed) {
-      batchDelete(batch, "postos", tenantDocId(rem.divisaoId as string, rem.chave));
+      batchDelete(
+        batch,
+        "postos",
+        tenantDocId(String(rem.divisaoId || activeDivisaoId), rem.chave)
+      );
       createAuditLog("Postos", "Exclusão", rem.chave, "Todos", rem.chave, "");
     }
     for (const p of postoBlock.current) {
-      const original = postoBlock.original.find((op) => op.sigla === p.sigla);
-      const docId = tenantDocId(String(p.divisaoId || activeDivisaoId), p.sigla);
+      // A sigla só identifica o posto dentro da Divisão: "CAP PM" existe em
+      // todas, cada uma com sua ordem e descrição.
+      const divisaoPosto = normalizeDivisaoId(String(p.divisaoId || activeDivisaoId));
+      const original = postoBlock.original.find(
+        (op) =>
+          op.sigla === p.sigla &&
+          normalizeDivisaoId(String(op.divisaoId || activeDivisaoId)) === divisaoPosto
+      );
+      const docId = tenantDocId(divisaoPosto, p.sigla);
       batchSet(batch, "postos", docId, {
         ...p,
-        divisaoId: String(p.divisaoId || activeDivisaoId),
+        divisaoId: divisaoPosto,
       } as unknown as Record<string, unknown>);
 
       if (!original) {

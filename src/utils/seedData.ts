@@ -246,17 +246,11 @@ export const OFFICIAL_LEGENDAS = [
 
 /**
  * Backfill de representações do Controle de Frequência nas legendas oficiais.
- * Não sobrescreve `escalaConsolidada` já configurada pelo administrador.
+ * Idempotente: só preenche `escalaConsolidada` ausente — nunca sobrescreve o que o admin configurou.
  */
 export async function ensureLegendasFrequenciaRepresentacoes(): Promise<{
   updated: number;
 }> {
-  const statusDocRef = doc(db, "configuracoes", "status");
-  const statusSnap = await getDoc(statusDocRef);
-  if (statusSnap.exists() && statusSnap.data()?.legendas_cf_representacoes_seeded === true) {
-    return { updated: 0 };
-  }
-
   let updated = 0;
   for (const official of OFFICIAL_LEGENDAS) {
     const desired = official as {
@@ -306,12 +300,13 @@ export async function ensureLegendasFrequenciaRepresentacoes(): Promise<{
     updated += 1;
   }
 
-  await setDoc(
-    statusDocRef,
-    { legendas_cf_representacoes_seeded: true },
-    { merge: true }
-  );
   if (updated > 0) {
+    const statusDocRef = doc(db, "configuracoes", "status");
+    await setDoc(
+      statusDocRef,
+      { legendas_cf_representacoes_seeded: true, legendas_cf_representacoes_at: Timestamp.now() },
+      { merge: true }
+    );
     console.log(`Legendas: ${updated} representação(ões) do Controle de Frequência aplicadas.`);
   }
   return { updated };

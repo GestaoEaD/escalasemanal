@@ -3,6 +3,10 @@
  * Executar: npx tsx scripts/frequencia-sync.test.ts
  */
 import assert from "node:assert/strict";
+import {
+  buildLegendaLookup,
+  convertEscalaValorToFrequencia,
+} from "../src/utils/frequenciaCalculo";
 import { syncFrequenciaRows } from "../src/utils/frequenciaSync";
 import type {
   ControleFrequenciaRow,
@@ -116,6 +120,40 @@ check("converte EN da Semanal para consolidada 1", () => {
   });
   assert.equal(rows[0]?.dias?.["05"]?.valor, "1");
   assert.equal(rows[0]?.dias?.["05"]?.origem, "escala_semanal");
+  assert.equal(rows[0]?.dias?.["05"]?.valorEscalaOriginal, "EN");
+});
+
+check("remapeia célula antiga EN → 1 mesmo sem valor novo na escala", () => {
+  const existing: ControleFrequenciaRow[] = [
+    {
+      ...baseFreqRow("1"),
+      dias: {
+        "05": {
+          valor: "EN",
+          origem: "escala_semanal",
+          editadoManualmente: false,
+        } as any,
+      },
+    },
+  ];
+  const sem = escala([row({ re: "1", seg: "" })]);
+  const { rows } = syncFrequenciaRows({
+    ano: 2026,
+    mes: 1,
+    secao: "Secao X",
+    colaboradores: [colab],
+    legendas,
+    scaleDocs: { "2026_01": { semanal: sem, alteracao: null } },
+    existingRows: existing,
+  });
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "1");
+});
+
+check("mapeia todas as legendas oficiais de teste (sigla → consolidada)", () => {
+  const lookup = buildLegendaLookup(legendas);
+  assert.equal(convertEscalaValorToFrequencia("EN", lookup), "1");
+  assert.equal(convertEscalaValorToFrequencia("A", lookup), "A");
+  assert.equal(convertEscalaValorToFrequencia("LT", lookup), "LT");
 });
 
 check("Alteração tem prioridade sobre Semanal", () => {

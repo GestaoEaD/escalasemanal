@@ -296,6 +296,18 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [removedLegendas, setRemovedLegendas] = useState<RemocaoCatalogo[]>([]);
   const [removedDivisoes, setRemovedDivisoes] = useState<string[]>([]);
 
+  // Postos são catálogo por Divisão: a mesma sigla existe em todas elas. O
+  // Gerente carrega a coleção inteira (precisa dela para lotar colaborador em
+  // outra Divisão), então a aba precisa operar só sobre a Divisão ativa — sem
+  // isso cada posto aparece repetido uma vez por Divisão.
+  const postosDivisaoAtiva = useMemo(
+    () =>
+      postos
+        .filter((p) => normalizeDivisaoId(p.divisaoId) === normalizeDivisaoId(activeDivisaoId))
+        .sort((a, b) => (a.ordem || 0) - (b.ordem || 0)),
+    [postos, activeDivisaoId]
+  );
+
   // Search and Pagination local states
   const [colSearch, setColSearch] = useState("");
   const [colActiveFilter, setColActiveFilter] = useState<"todos" | "ativos" | "inativos">("todos");
@@ -644,12 +656,32 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     let list: any[] = [];
     let setter: any = null;
 
+    // Postos reordenam dentro da Divisão ativa; as demais Divisões mantêm a
+    // ordem que já tinham.
+    if (tab === "postos") {
+      const subset = [...postosDivisaoAtiva];
+      if (direction === "up" && index === 0) return;
+      if (direction === "down" && index === subset.length - 1) return;
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      const temp = subset[index];
+      subset[index] = subset[targetIndex];
+      subset[targetIndex] = temp;
+      const reordenados = new Map(
+        updateOrderFields(subset).map((p) => [String(p.sigla), p])
+      );
+      setPostos((prev) =>
+        prev.map((p) =>
+          normalizeDivisaoId(p.divisaoId) === normalizeDivisaoId(activeDivisaoId)
+            ? reordenados.get(String(p.sigla)) ?? p
+            : p
+        )
+      );
+      return;
+    }
+
     if (tab === "colaboradores") {
       list = [...colaboradores];
       setter = setColaboradores;
-    } else if (tab === "postos") {
-      list = [...postos];
-      setter = setPostos;
     } else if (tab === "legendas") {
       list = [...legendas];
       setter = setLegendas;
@@ -684,12 +716,30 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       setUsuarios((prev) => prev.filter((u) => u.re !== id));
       setRemovedUsuarios((prev) => [...prev, id]);
     } else if (type === "postos") {
-      const divisaoId = String(postos.find((p) => p.sigla === id)?.divisaoId || activeDivisaoId);
-      setPostos((prev) => {
-        const filtered = prev.filter((p) => p.sigla !== id);
-        return updateOrderFields(filtered);
-      });
-      setRemovedPostos((prev) => [...prev, { chave: id, divisaoId }]);
+      // A exclusão vale só para a Divisão ativa: o posto de mesma sigla nas
+      // outras Divisões continua intacto.
+      const divisaoId = normalizeDivisaoId(activeDivisaoId);
+      const restantes = updateOrderFields(
+        postosDivisaoAtiva.filter((p) => p.sigla !== id)
+      );
+      const reordenados = new Map(restantes.map((p) => [String(p.sigla), p]));
+      setPostos((prev) =>
+        prev
+          .filter(
+            (p) =>
+              !(p.sigla === id && normalizeDivisaoId(p.divisaoId) === divisaoId)
+          )
+          .map((p) =>
+            normalizeDivisaoId(p.divisaoId) === divisaoId
+              ? reordenados.get(String(p.sigla)) ?? p
+              : p
+          )
+      );
+      setRemovedPostos((prev) =>
+        prev.some((r) => r.chave === id && normalizeDivisaoId(r.divisaoId) === divisaoId)
+          ? prev
+          : [...prev, { chave: id, divisaoId }]
+      );
     } else if (type === "secoes") {
       const target = secoes.find((s) => s.id === id);
       if (!target) {
@@ -1029,39 +1079,52 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       return;
     }
 
-    const duplicada = postos.some(
+    // Sigla repetida só é conflito dentro da mesma Divisão — "CAP PM" existe em
+    // todas elas, cada uma no seu documento.
+    const divisaoPosto = normalizeDivisaoId(String(currentPosto.divisaoId || activeDivisaoId));
+    const duplicada = postosDivisaoAtiva.some(
       (p) => p.sigla === novaSigla && p.sigla !== postoOriginalSigla
     );
     if (duplicada) {
-      alert("Já existe um posto/graduação com esta sigla.");
+      alert("Já existe um posto/graduação com esta sigla nesta Divisão.");
       return;
     }
 
     let updatedList = [...postos];
     const editIndex = postoOriginalSigla !== null
-      ? postos.findIndex((p) => p.sigla === postoOriginalSigla)
+      ? postos.findIndex(
+          (p) =>
+            p.sigla === postoOriginalSigla &&
+            normalizeDivisaoId(p.divisaoId) === divisaoPosto
+        )
       : -1;
 
     if (editIndex > -1) {
       updatedList[editIndex] = {
         ...currentPosto,
         sigla: novaSigla,
-        divisaoId: String(currentPosto.divisaoId || activeDivisaoId),
+        divisaoId: divisaoPosto,
       };
       if (postoOriginalSigla !== null && postoOriginalSigla !== novaSigla) {
-        const divisaoId = String(currentPosto.divisaoId || activeDivisaoId);
         setRemovedPostos((prev) =>
-          prev.some((r) => r.chave === postoOriginalSigla)
+          prev.some(
+            (r) =>
+              r.chave === postoOriginalSigla &&
+              normalizeDivisaoId(r.divisaoId) === divisaoPosto
+          )
             ? prev
-            : [...prev, { chave: postoOriginalSigla, divisaoId }]
+            : [...prev, { chave: postoOriginalSigla, divisaoId: divisaoPosto }]
         );
       }
     } else {
-      const maxOrdem = postos.reduce((max, p) => (p.ordem && p.ordem > max ? p.ordem : max), 0);
+      const maxOrdem = postosDivisaoAtiva.reduce(
+        (max, p) => (p.ordem && p.ordem > max ? p.ordem : max),
+        0
+      );
       updatedList.push({
         ...currentPosto,
         sigla: novaSigla,
-        divisaoId: String(currentPosto.divisaoId || activeDivisaoId),
+        divisaoId: divisaoPosto,
         ordem: maxOrdem + 1
       });
     }
@@ -1963,7 +2026,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       const secaoInicial = listSecoesDaDivisao(activeDivisaoId)[0];
                       setCurrentUser({
                         re: "",
-                        postoGrad: postos[0]?.sigla || "SD PM",
+                        postoGrad: listPostosDaDivisao(activeDivisaoId)[0]?.sigla || "SD PM",
                         nomeCompleto: "",
                         nome: "",
                         email: "",
@@ -2224,12 +2287,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Postos e Graduações</h2>
-                    <p className="text-xs text-gray-500">Cadastro de patentes e graduações utilizadas nos menus de seleção do sistema.</p>
+                    <p className="text-xs text-gray-500">
+                      Catálogo de patentes e graduações da Divisão {nomeDivisao(activeDivisaoId)},
+                      usado nos menus de seleção do sistema.
+                    </p>
                   </div>
                   <button
                     id="new-posto-btn"
                     onClick={() => {
-                      setCurrentPosto({ sigla: "", descricao: "" });
+                      setCurrentPosto({ sigla: "", descricao: "", divisaoId: activeDivisaoId });
                       setPostoOriginalSigla(null);
                       setPostoModalOpen(true);
                     }}
@@ -2251,13 +2317,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
-                      {postos.length === 0 ? (
+                      {postosDivisaoAtiva.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum posto cadastrado.</td>
                         </tr>
                       ) : (
-                        postos.map((p, idx) => (
-                          <tr key={p.sigla} className="hover:bg-gray-50">
+                        postosDivisaoAtiva.map((p, idx) => (
+                          <tr key={`${p.divisaoId}__${p.sigla}`} className="hover:bg-gray-50">
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center space-x-1.5">
                                 <span className="font-bold text-gray-500">{p.ordem || idx + 1}</span>
@@ -2271,7 +2337,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                   </button>
                                   <button
                                     onClick={() => handleMoveItem("postos", idx, "down")}
-                                    disabled={idx === postos.length - 1}
+                                    disabled={idx === postosDivisaoAtiva.length - 1}
                                     className="p-0.5 text-gray-400 hover:text-gray-900 disabled:opacity-30 cursor-pointer"
                                   >
                                     <ArrowDown size={11} />
@@ -2317,8 +2383,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Legendas da Escala</h2>
                     <p className="text-xs text-gray-500">
-                      Configure códigos, representações e regras operacionais. A Escala Consolidada será
-                      preparada nesta configuração (sem geração automática nesta etapa).
+                      Cada legenda define o código na Escala Semanal/Alteração e o valor correspondente
+                      no Controle de Frequência (ex.: EN → 1). O sync do Controle aplica esse mapeamento.
                     </p>
                   </div>
                   <button
@@ -2346,7 +2412,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         <th className="px-4 py-3">Sigla</th>
                         <th className="px-4 py-3">Nome</th>
                         <th className="px-4 py-3">Descrição</th>
-                        <th className="px-4 py-3">Consolidada</th>
+                        <th className="px-4 py-3">Escala → Frequência</th>
                         <th className="px-4 py-3">Visual/Cor</th>
                         <th className="px-4 py-3 text-center">Situação</th>
                         <th className="px-4 py-3 text-right">Ações</th>
@@ -2385,9 +2451,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                             <td className="px-4 py-3 text-gray-600">{l.nome || "—"}</td>
                             <td className="px-4 py-3 text-gray-600">{l.descricao}</td>
                             <td className="px-4 py-3 font-mono text-gray-700">
-                              {l.representacoes?.escalaConsolidada?.trim() || (
-                                <span className="text-gray-400 font-sans">Não config.</span>
-                              )}
+                              {(() => {
+                                const escala =
+                                  l.representacoes?.escalaSemanal?.trim() || l.sigla;
+                                const freq = l.representacoes?.escalaConsolidada?.trim();
+                                if (!freq) {
+                                  return (
+                                    <span className="text-gray-400 font-sans">
+                                      {escala} → (não config.)
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span title="Código na Escala → valor no Controle de Frequência">
+                                    {escala} → {freq}
+                                  </span>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3">
                               <span
@@ -2947,7 +3027,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
                       required
                     >
-                      {postos.map((p) => (
+                      {listPostosDaDivisao(
+                        String(currentUser.divisaoId || activeDivisaoId)
+                      ).map((p) => (
                         <option key={p.sigla} value={p.sigla}>{p.sigla}</option>
                       ))}
                     </select>
@@ -3030,6 +3112,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         const secoesDaDivisao = listSecoesDaDivisao(nextDivisaoId).filter(
                           (s) => s.ativo !== false
                         );
+                        const postosDaDivisao = listPostosDaDivisao(nextDivisaoId);
                         setCurrentUser((prev) =>
                           prev
                             ? {
@@ -3037,6 +3120,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 divisaoId: nextDivisaoId,
                                 secaoId: secoesDaDivisao[0]?.id || "",
                                 secao: secoesDaDivisao[0]?.nome || "",
+                                postoGrad:
+                                  postosDaDivisao.find((p) => p.sigla === prev.postoGrad)?.sigla ||
+                                  postosDaDivisao[0]?.sigla ||
+                                  prev.postoGrad,
                               }
                             : prev
                         );

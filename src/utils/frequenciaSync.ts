@@ -19,6 +19,7 @@ import {
   buildLegendaLookup,
   convertEscalaValorToFrequencia,
   getValorAfastamentoControleFrequencia,
+  remapFrequenciaValorComLegendas,
   recalcRowTotais,
 } from "./frequenciaCalculo";
 import {
@@ -95,7 +96,8 @@ export type ScaleDocsByWeek = Record<
 
 /**
  * Monta/atualiza linhas sincronizadas preservando edições manuais.
- * - Conversão via representacoes.escalaConsolidada das legendas (Configurações)
+ * - Mapeia cada código da Escala via legendas: sigla/escalaSemanal → escalaConsolidada
+ *   (ex.: EN → 1 conforme Configurações)
  * - Prioridade: Escala Alteração > Escala Semanal
  * - Sáb/dom sem valor válido: afastamento = consolidada da legenda A
  */
@@ -213,6 +215,24 @@ export function syncFrequenciaRows(options: {
             valor = converted;
             origem = "escala_semanal";
           }
+        }
+      }
+
+      // Garante efeito das legendas: se ainda restar código de escala (EN), vira consolidada (1).
+      if (valor) {
+        const remapped = remapFrequenciaValorComLegendas(valor, lookup);
+        if (remapped) valor = remapped;
+      } else if (existing && String(existing.valor || "").trim()) {
+        // Sem valor novo nas escalas: remapeia célula antiga (EN → 1) com legendas atuais.
+        const remapped = remapFrequenciaValorComLegendas(existing.valor, lookup);
+        if (remapped && remapped.toUpperCase() !== String(existing.valor).trim().toUpperCase()) {
+          dias[key] = {
+            ...existing,
+            valor: remapped,
+            editadoManualmente: false,
+            valorEscalaOriginal: existing.valorEscalaOriginal || existing.valor,
+          };
+          continue;
         }
       }
 

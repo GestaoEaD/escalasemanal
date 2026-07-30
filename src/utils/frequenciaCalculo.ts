@@ -47,6 +47,7 @@ export function hasRepresentacaoControleFrequencia(
 /**
  * Converte código da escala para o valor do Controle de Frequência
  * conforme `representacoes.escalaConsolidada` persistida em Configurações.
+ * Exemplos: EN → 1, A → A, F → F (conforme cadastro).
  * Sem consolidada configurada → string vazia (não reutiliza a sigla).
  */
 export function convertEscalaValorToFrequencia(
@@ -59,6 +60,21 @@ export function convertEscalaValorToFrequencia(
   const legenda = findLegendaForValor(raw, lookup);
   if (!legenda) return "";
   return resolveValorControleFrequencia(legenda);
+}
+
+/**
+ * Aplica o mapeamento Escala → CF a um valor já gravado na Frequência.
+ * Se o valor for código de escala (sigla/semanal), troca pela consolidada.
+ * Se já for a consolidada, mantém. Desconhecido / sem consolidada → inalterado.
+ */
+export function remapFrequenciaValorComLegendas(
+  valorCelula: string,
+  lookup: Map<string, Legenda>
+): string {
+  const raw = String(valorCelula || "").trim();
+  if (!raw) return "";
+  const mapped = convertEscalaValorToFrequencia(raw, lookup);
+  return mapped || raw;
 }
 
 /**

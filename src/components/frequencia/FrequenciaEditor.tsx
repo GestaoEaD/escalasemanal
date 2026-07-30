@@ -140,7 +140,8 @@ export default function FrequenciaEditor({
         secao: currentSecaoNome,
         secaoId,
         usuario,
-        forceResync: false,
+        // Sempre reaplica Escala Semanal/Alteração → consolidada das legendas (EN→1, etc.).
+        forceResync: true,
       });
       setLegendas(legs);
       let next = result.doc;
