@@ -152,6 +152,13 @@ async function semear() {
     await setDoc(doc(db, "colaboradores", "col-a1"), { re: "1", nome: "A1", divisaoId: DIV_A, secaoId: secaoA1 });
     await setDoc(doc(db, "colaboradores", "col-a2"), { re: "2", nome: "A2", divisaoId: DIV_A, secaoId: secaoA2 });
     await setDoc(doc(db, "colaboradores", "col-b1"), { re: "3", nome: "B1", divisaoId: DIV_B, secaoId: secaoB1 });
+    // Cadastro legado sem secaoId: a tela de escala lista a Divisão inteira e
+    // um único documento assim não pode derrubar a consulta do Operador.
+    await setDoc(doc(db, "colaboradores", "col-a-legado"), {
+      re: "4",
+      nome: "Legado",
+      divisaoId: DIV_A,
+    });
     await setDoc(doc(db, "colaboradores", `${DIV_A}__555555-5`), {
       re: "555555-5",
       nome: "NovoOp",
@@ -202,6 +209,15 @@ async function semear() {
       divisaoId: DIV_A,
       ano: 2026,
       semana: 33,
+      status: "em_edicao",
+      rows: [],
+    });
+    // Escala legada, gravada antes da migração para documento por Divisão.
+    await setDoc(doc(db, "escalas_semanais", "esc-legado-secao"), {
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      ano: 2026,
+      semana: 34,
       status: "em_edicao",
       rows: [],
     });
@@ -382,6 +398,33 @@ async function main() {
       semana: 41,
       status: "em_edicao",
       rows: [],
+    })
+  );
+  await verifica("[Operador] salvar escala legada preservando o secaoId", "ALLOW", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-legado-secao"), {
+      id: "esc-legado-secao",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      ano: 2026,
+      semana: 34,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
+  await verifica("[Operador] NÃO trocar o secaoId da escala legada", "DENY", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-legado-secao"), {
+      id: "esc-legado-secao",
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+      ano: 2026,
+      semana: 34,
+      status: "em_edicao",
+      rows: [],
+    })
+  );
+  await verifica("[Operador] enviar escala legada para aprovação", "ALLOW", () =>
+    updateDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-legado-secao"), {
+      status: "aguardando_aprovacao",
     })
   );
   await verifica("[Gestor] NÃO criar escala", "DENY", () =>
@@ -929,6 +972,71 @@ async function main() {
       email: "inativo@gmail.com",
       ativo: true,
     })
+  );
+
+  // As telas de escala carregam coleções inteiras da Divisão. Em consultas o
+  // Firestore nega o resultado completo se um único documento reprovar, então
+  // cada `list` da UI precisa de teste próprio — `get` passando não basta.
+  console.log("\n=== Consultas (list) das telas de escala ===");
+  for (const perfil of TODOS) {
+    await verifica(`[${perfil}] listar colaboradores da própria Divisão`, "ALLOW", () =>
+      getDocs(
+        query(collection(dbDe(perfil), "colaboradores"), where("divisaoId", "==", DIV_A))
+      )
+    );
+  }
+  await verifica("[Operador] NÃO listar colaboradores de outra Divisão", "DENY", () =>
+    getDocs(query(collection(dbDe("Operador"), "colaboradores"), where("divisaoId", "==", DIV_B)))
+  );
+  await verifica("[Operador] NÃO listar colaboradores sem filtro de Divisão", "DENY", () =>
+    getDocs(collection(dbDe("Operador"), "colaboradores"))
+  );
+  for (const colecao of ["escalas_semanais", "escalas_alteracao"] as const) {
+    await verifica(`[Operador] listar ${colecao} da própria Divisão`, "ALLOW", () =>
+      getDocs(
+        query(
+          collection(dbDe("Operador"), colecao),
+          where("divisaoId", "==", DIV_A),
+          where("ano", "==", 2026)
+        )
+      )
+    );
+    await verifica(`[Operador] NÃO listar ${colecao} de outra Divisão`, "DENY", () =>
+      getDocs(
+        query(
+          collection(dbDe("Operador"), colecao),
+          where("divisaoId", "==", DIV_B),
+          where("ano", "==", 2026)
+        )
+      )
+    );
+  }
+  await verifica("[Operador] listar seções da própria Divisão", "ALLOW", () =>
+    getDocs(query(collection(dbDe("Operador"), "secoes"), where("divisaoId", "==", DIV_A)))
+  );
+  await verifica("[Operador] listar postos da própria Divisão", "ALLOW", () =>
+    getDocs(query(collection(dbDe("Operador"), "postos"), where("divisaoId", "==", DIV_A)))
+  );
+  await verifica("[Operador] listar legendas", "ALLOW", () =>
+    getDocs(collection(dbDe("Operador"), "legendas"))
+  );
+  await verifica("[Gestor] listar solicitações AGUARDANDO da Divisão", "ALLOW", () =>
+    getDocs(
+      query(
+        collection(dbDe("Gestor"), "solicitacoes_aprovacao"),
+        where("status", "==", "AGUARDANDO"),
+        where("divisaoId", "==", DIV_A)
+      )
+    )
+  );
+  await verifica("[Operador] NÃO listar solicitações de outra Divisão", "DENY", () =>
+    getDocs(
+      query(
+        collection(dbDe("Operador"), "solicitacoes_aprovacao"),
+        where("status", "==", "AGUARDANDO"),
+        where("divisaoId", "==", DIV_B)
+      )
+    )
   );
 
   // Fora do Gmail, ponto distingue endereços: não pode virar a mesma conta.

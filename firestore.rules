@@ -148,13 +148,12 @@ service cloud.firestore {
         );
     }
 
+    // Leitura de cadastro é por Divisão: `secaoId` particiona, não é ACL dentro
+    // da Divisão. Exigir a chave aqui derrubava as consultas por Divisão que as
+    // telas de escala fazem, porque um único documento legado sem `secaoId`
+    // reprova a regra e o Firestore nega o resultado inteiro.
     function sectionRead() {
-      return isRegistered()
-        && (
-          docInexistente()
-          || callerPerfil() == 'Gerente'
-          || (hasSecaoId(resource.data) && sameDivisao(resource.data))
-        );
+      return tenantRead();
     }
 
     function sectionCreateOk() {
@@ -166,6 +165,9 @@ service cloud.firestore {
         );
     }
 
+    // O documento gravado precisa ter Seção, mas o documento anterior pode ser
+    // legado sem `secaoId` — exigir a chave no estado antigo impediria justamente
+    // a correção do cadastro legado.
     function sectionUpdateOk() {
       return tenantFieldsPresentes(request.resource.data)
         // divisaoId é imutável para todos os perfis: o ID do documento o embute.
@@ -174,7 +176,7 @@ service cloud.firestore {
         && isRegistered()
         && (
           callerPerfil() == 'Gerente'
-          || (hasSecaoId(resource.data) && sameDivisao(resource.data))
+          || sameDivisao(resource.data)
         );
     }
 
@@ -298,9 +300,20 @@ service cloud.firestore {
         );
     }
 
+    // Escala legada pode ter `secaoId` gravado antes da migração; o merge do app
+    // preserva a chave e travaria salvar/enviar. Herdar o valor é permitido,
+    // introduzir ou trocar não.
+    function secaoIdNaoIntroduzida() {
+      return !request.resource.data.keys().hasAny(['secaoId'])
+        || (
+          resource.data.keys().hasAny(['secaoId'])
+          && request.resource.data.secaoId == resource.data.secaoId
+        );
+    }
+
     function divisaoWorkflowUpdateOk() {
       return request.resource.data.keys().hasAny(['divisaoId'])
-        && !request.resource.data.keys().hasAny(['secaoId'])
+        && secaoIdNaoIntroduzida()
         && resource.data.get('divisaoId', request.resource.data.divisaoId)
           == request.resource.data.divisaoId
         && isRegistered()

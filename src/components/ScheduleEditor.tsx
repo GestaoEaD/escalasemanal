@@ -750,7 +750,11 @@ export default function ScheduleEditor({
 
     } catch (err: any) {
       console.error("Error loading escala data:", err);
-      setSaveError("Erro ao carregar dados do Firestore. Verifique as regras de segurança.");
+      setSaveError(
+        err?.code === "permission-denied"
+          ? "Sem permissão para ler os dados desta Divisão. Confirme com o Administrador se o seu acesso está ativo e lotado na Divisão correta."
+          : "Erro ao carregar dados do Firestore."
+      );
     } finally {
       setLoading(false);
     }
@@ -1851,7 +1855,7 @@ export default function ScheduleEditor({
 
   const requestSubmitForApproval = (tipo: TipoEscalaDocumento) => {
     if (!canSubmitForApproval(usuario)) {
-      alert("Somente Administradores podem enviar escalas para aprovação.");
+      alert("Seu perfil não pode enviar escalas para aprovação.");
       return;
     }
     const dirty = tipo === "semanal" ? isWeeklyDirty : isAltDirty;
@@ -1895,7 +1899,7 @@ export default function ScheduleEditor({
   const handleCancelApprovalRequest = async (tipo: TipoEscalaDocumento) => {
     const canCancel = tipo === "semanal" ? showCancelWeekly : showCancelAlt;
     if (!canCancel) {
-      alert("Somente Administradores podem cancelar a solicitação de aprovação.");
+      alert("Seu perfil não pode cancelar a solicitação de aprovação.");
       return;
     }
     const label = getEscalaDocumentoLabel(tipo);
