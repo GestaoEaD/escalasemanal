@@ -14,10 +14,12 @@
     "lint": "tsc --noEmit",
     "security:secrets": "node scripts/check-secrets.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project escalaead-rules-test \"tsx scripts/rules.test.ts\"",
+    "test:sync": "tsx scripts/frequencia-sync.test.ts",
     "deploy:rules": "node scripts/deploy-firestore-rules.mjs",
     "audit:divisao": "node scripts/audit-divisao-secao-colaborador.mjs",
     "audit:hierarquia": "node scripts/audit-hierarquia-secao.mjs",
     "repair:escala-secaoid": "node scripts/repair-escala-secaoid.mjs",
+    "migrate:escalas-divisao": "node scripts/migrate-escalas-divisao.mjs",
     "migrate:hierarquia": "node scripts/migrate-hierarquia-secao.mjs",
     "migrate:tenant-ids": "node scripts/migrate-tenant-doc-ids.mjs",
     "migrate:escalaead": "node scripts/migrate-to-escalaead.mjs"

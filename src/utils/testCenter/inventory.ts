@@ -200,7 +200,7 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
     tela: "Configurações",
     botao: "Salvar Configurações",
     funcaoEsperada:
-      "Admin: Colaboradores/Permissão/Postos/Logs da Divisão; Gerente: + Divisões (com seções)/Legendas/Gerais/Testes",
+      "Admin: Seções/Colaboradores/Permissão/Logs da Divisão; Gerente: + Divisões/Postos/Legendas/Gerais/Testes",
     perfilPermitido: "Administrador / Gerente (módulos conforme perfil)",
     acaoFirestore: "writeBatch nas coleções autorizadas",
     geraLog: "Sim (ALTERAR_CONFIGURACAO)",
@@ -236,7 +236,7 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
       "Recarregar células a partir de Alteração > Semanal; preserva edição manual",
     perfilPermitido: "Admin / Operador (mês editável)",
     acaoFirestore: "setDoc controle_frequencia + leitura escalas",
-    geraLog: "Sim (SYNC_CONTROLE_FREQUENCIA)",
+    geraLog: "Sim (SINCRONIZAR_FREQUENCIA)",
   },
   {
     tela: "Controle de Frequência",
@@ -244,7 +244,7 @@ export const COMMAND_INVENTORY: CommandInventoryItem[] = [
     funcaoEsperada: "Persistir tabela, totais e observações",
     perfilPermitido: "Admin / Operador (conforme status e mês)",
     acaoFirestore: "setDoc controle_frequencia",
-    geraLog: "Sim (SALVAR_CONTROLE_FREQUENCIA)",
+    geraLog: "Sim (EDITAR_FREQUENCIA)",
   },
   {
     tela: "Controle de Frequência",

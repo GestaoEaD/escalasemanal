@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { getWeeksForYear, WeekInfo } from "../utils/dateUtils";
 import { EscalaStatus, TipoEscalaDocumento, Usuario } from "../types";
-import { db, doc, getDoc } from "../firebase";
+import { loadEscalasAno } from "../services/escalaService";
 import { canApproveScales, isGestor } from "../utils/permissions";
 import { normalizeEscalaStatus } from "../utils/approvalService";
 import {
@@ -23,11 +23,11 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { resolveActiveDivisaoId } from "../utils/divisaoContext";
-import { buildEscalaDocId, escalaWeekKeyFromDocId } from "../utils/divisaoIds";
+import { escalaWeekKeyFromDocId } from "../utils/divisaoIds";
 
 interface WeekSelectorProps {
   usuario: Usuario;
-  secaoId: string;
+  secaoId?: string;
   secaoLabel?: string;
   /** Ano inicial (ex.: restaurado da URL / navegação). */
   initialYear?: number;
@@ -47,7 +47,7 @@ const EMPTY_SUMMARY: PendingApprovalsSummary = {
 
 export default function WeekSelector({
   usuario,
-  secaoId,
+  secaoId: _secaoId,
   secaoLabel,
   initialYear = 2026,
   onSelectWeek,
@@ -67,7 +67,6 @@ export default function WeekSelector({
   const today = useMemo(() => new Date(), []);
   const canApprove = canApproveScales(usuario);
   const divisaoId = resolveActiveDivisaoId(usuario);
-  const currentSecaoId = String(secaoId || "").trim();
 
   const weeks = useMemo(() => {
     return getWeeksForYear(selectedYear);
@@ -107,41 +106,33 @@ export default function WeekSelector({
   useEffect(() => {
     let cancelled = false;
     const loadStatuses = async () => {
-      if (!currentSecaoId || !divisaoId) return;
+      if (!divisaoId) return;
       try {
-        // getDoc por ID conhecido evita índice composto e respeita rules por seção.
-        const weekNums = weeks.map((w) => w.numero);
-        const weeklyEntries = await Promise.all(
-          weekNums.map(async (num) => {
-            const id = buildEscalaDocId(divisaoId, currentSecaoId, selectedYear, num);
-            const snap = await getDoc(doc(db, "escalas_semanais", id));
-            if (!snap.exists()) return null;
-            const data = snap.data();
-            const weekKey =
-              escalaWeekKeyFromDocId((data.id as string) || snap.id) ||
-              `${selectedYear}_${String(num).padStart(2, "0")}`;
-            return [weekKey, normalizeEscalaStatus(data.status)] as const;
-          })
-        );
-        const altEntries = await Promise.all(
-          weekNums.map(async (num) => {
-            const id = buildEscalaDocId(divisaoId, currentSecaoId, selectedYear, num);
-            const snap = await getDoc(doc(db, "escalas_alteracao", id));
-            if (!snap.exists()) return null;
-            const data = snap.data();
-            const weekKey =
-              escalaWeekKeyFromDocId((data.id as string) || snap.id) ||
-              `${selectedYear}_${String(num).padStart(2, "0")}`;
-            return [weekKey, normalizeEscalaStatus(data.status)] as const;
-          })
-        );
+        const [weeklyDocs, altDocs] = await Promise.all([
+          loadEscalasAno({
+            collectionName: "escalas_semanais",
+            usuario,
+            year: selectedYear,
+          }),
+          loadEscalasAno({
+            collectionName: "escalas_alteracao",
+            usuario,
+            year: selectedYear,
+          }),
+        ]);
         const weeklyMap: Record<string, EscalaStatus> = {};
-        for (const entry of weeklyEntries) {
-          if (entry) weeklyMap[entry[0]] = entry[1];
+        for (const data of weeklyDocs) {
+          const weekKey =
+            escalaWeekKeyFromDocId(String(data.id || "")) ||
+            `${selectedYear}_${String(data.semana).padStart(2, "0")}`;
+          weeklyMap[weekKey] = normalizeEscalaStatus(data.status);
         }
         const altMap: Record<string, EscalaStatus> = {};
-        for (const entry of altEntries) {
-          if (entry) altMap[entry[0]] = entry[1];
+        for (const data of altDocs) {
+          const weekKey =
+            escalaWeekKeyFromDocId(String(data.id || "")) ||
+            `${selectedYear}_${String(data.semana).padStart(2, "0")}`;
+          altMap[weekKey] = normalizeEscalaStatus(data.status);
         }
         if (!cancelled) {
           setWeeklyStatusByWeek(weeklyMap);
@@ -155,7 +146,7 @@ export default function WeekSelector({
     return () => {
       cancelled = true;
     };
-  }, [selectedYear, divisaoId, currentSecaoId, weeks]);
+  }, [selectedYear, divisaoId, usuario]);
 
   const currentWeekId = useMemo(() => {
     const todayYear = today.getFullYear();

@@ -74,13 +74,14 @@ async function rewriteEscalaCollection(
     const ano = Number(data.ano);
     const semana = Number(data.semana);
     if (!Number.isFinite(ano) || !Number.isFinite(semana)) continue;
-    const newId = buildEscalaDocId(divisaoId, String(data.secaoId || ""), ano, semana);
+    const newId = buildEscalaDocId(divisaoId, ano, semana);
     if (d.id === newId && data.divisaoId === divisaoId) continue;
     const next = {
       ...data,
       id: newId,
       divisaoId,
     };
+    delete (next as Record<string, unknown>).secaoId;
     await setDoc(
       doc(db, collectionName, newId),
       prepareFirestoreWrite(`${collectionName}/${newId}`, next)
@@ -128,7 +129,6 @@ async function rewriteSolicitacoes(divisaoId: string): Promise<number> {
       const [ano, sem] = escalaId.split("_");
       escalaId = buildEscalaDocId(
         divisaoId,
-        String(data.secaoId || data.secao || ""),
         Number(ano),
         Number(sem)
       );

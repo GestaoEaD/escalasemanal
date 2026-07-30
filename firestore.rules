@@ -200,6 +200,111 @@ service cloud.firestore {
         && statusNovo() == 'em_edicao';
     }
 
+    // Operador só acessa a própria Seção em controle_frequencia; demais
+    // perfis (Admin/Gestor/Gerente) continuam com escopo de Divisão.
+    function frequenciaReadOk() {
+      return isRegistered()
+        && (
+          docInexistente()
+          || callerPerfil() == 'Gerente'
+          || (
+            hasSecaoId(resource.data) && sameDivisao(resource.data)
+            && (callerPerfil() != 'Operador'
+              || resource.data.secaoId == callerIndex().secaoId)
+          )
+        );
+    }
+
+    function frequenciaWriteSecaoOk() {
+      return callerPerfil() != 'Operador'
+        || (hasSecaoId(request.resource.data)
+          && request.resource.data.secaoId == callerIndex().secaoId);
+    }
+
+    // Escalas Semanal/Alteração: documento por Divisão (sem secaoId no doc).
+    function divisaoWorkflowCreateOk() {
+      return request.resource.data.keys().hasAny(['divisaoId'])
+        && !request.resource.data.keys().hasAny(['secaoId'])
+        && isRegistered()
+        && (
+          callerPerfil() == 'Gerente'
+          || sameDivisao(request.resource.data)
+        );
+    }
+
+    function divisaoWorkflowUpdateOk() {
+      return request.resource.data.keys().hasAny(['divisaoId'])
+        && !request.resource.data.keys().hasAny(['secaoId'])
+        && resource.data.get('divisaoId', request.resource.data.divisaoId)
+          == request.resource.data.divisaoId
+        && isRegistered()
+        && (
+          callerPerfil() == 'Gerente'
+          || sameDivisao(resource.data)
+        );
+    }
+
+    // Ao aprovar/reabrir, o Gestor/Gerente só pode alterar metadados de
+    // workflow — nunca o conteúdo (rows, observações etc.) do documento.
+    function divisaoWorkflowMetaOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'aprovacao', 'historico', 'versao', 'lastSaved', 'updatedAt', 'solicitacaoId']);
+    }
+
+    function canWriteDivisaoWorkflowDoc() {
+      return divisaoWorkflowUpdateOk()
+        && (
+          (canSubmitRole()
+            && (
+              (statusNovo() == statusAtual()
+                && !(statusAtual() in ['aprovada', 'aguardando_aprovacao']))
+              || (statusAtual() in ['em_edicao', 'revisao_solicitada']
+                && statusNovo() == 'aguardando_aprovacao')
+              || (statusAtual() == 'aguardando_aprovacao'
+                && statusNovo() == 'em_edicao')
+            ))
+          || (canApproveRole()
+            && divisaoWorkflowMetaOnly()
+            && (
+              (statusAtual() == 'aguardando_aprovacao'
+                && statusNovo() in ['aprovada', 'revisao_solicitada'])
+              || (statusAtual() == 'aprovada'
+                && statusNovo() == 'em_edicao')
+            ))
+        );
+    }
+
+    function canCreateDivisaoWorkflowDoc() {
+      return canSubmitRole()
+        && divisaoWorkflowCreateOk()
+        && statusNovo() == 'em_edicao';
+    }
+
+    // solicitacoes_aprovacao só transiciona AGUARDANDO -> FINALIZADA, e o
+    // "resultado" gravado precisa condizer com o papel de quem grava:
+    // aprovador registra APROVADA/REVISAO_SOLICITADA, autor cancela.
+    function solicitacaoStatusAtual() {
+      return resource.data.get('status', 'AGUARDANDO');
+    }
+
+    function solicitacaoStatusNovo() {
+      return request.resource.data.get('status', 'AGUARDANDO');
+    }
+
+    function solicitacaoResultadoNovo() {
+      return request.resource.data.get('resultado', null);
+    }
+
+    function canFinalizeSolicitacao() {
+      return solicitacaoStatusAtual() == 'AGUARDANDO'
+        && solicitacaoStatusNovo() == 'FINALIZADA'
+        && (
+          (canApproveRole()
+            && solicitacaoResultadoNovo() in ['APROVADA', 'REVISAO_SOLICITADA'])
+          || (canSubmitRole() && solicitacaoResultadoNovo() == 'CANCELADA')
+        );
+    }
+
     function usuarioDoc(re) {
       return get(/databases/$(database)/documents/usuarios/$(re)).data;
     }
@@ -283,14 +388,17 @@ service cloud.firestore {
         && request.resource.data.timestamp == request.time
         && (
           callerPerfil() == 'Gerente'
-          || !request.resource.data.keys().hasAny(['divisaoId'])
-          || request.resource.data.divisaoId == callerDivisao()
+          || (request.resource.data.keys().hasAny(['divisaoId'])
+            && request.resource.data.divisaoId == callerDivisao())
         );
       allow update, delete: if false;
     }
 
     match /counters/{id} {
-      allow read, write: if isRegistered();
+      allow read: if isRegistered();
+      // allocateLogId() (counters/logs) é gravado por qualquer usuário
+      // registrado ao auditar sua própria ação; demais contadores só Gerente.
+      allow write: if isGerente() || (id == 'logs' && isRegistered());
     }
 
     match /usuarios/{re} {
@@ -354,9 +462,9 @@ service cloud.firestore {
 
     match /postos/{id} {
       allow read: if tenantRead();
-      allow create: if canEditCadastro() && tenantCreateOk();
-      allow update: if canEditCadastro() && tenantUpdateOk();
-      allow delete: if tenantDeleteOk();
+      allow create: if isGerente() && tenantCreateOk();
+      allow update: if isGerente() && tenantUpdateOk();
+      allow delete: if isGerente();
     }
 
     match /legendas/{id} {
@@ -370,23 +478,23 @@ service cloud.firestore {
     }
 
     match /escalas_semanais/{id} {
-      allow read: if sectionRead();
-      allow create: if canCreateWorkflowDoc();
-      allow update: if canWriteWorkflowDoc();
+      allow read: if tenantRead();
+      allow create: if canCreateDivisaoWorkflowDoc();
+      allow update: if canWriteDivisaoWorkflowDoc();
       allow delete: if tenantDeleteOk();
     }
 
     match /escalas_alteracao/{id} {
-      allow read: if sectionRead();
-      allow create: if canCreateWorkflowDoc();
-      allow update: if canWriteWorkflowDoc();
+      allow read: if tenantRead();
+      allow create: if canCreateDivisaoWorkflowDoc();
+      allow update: if canWriteDivisaoWorkflowDoc();
       allow delete: if tenantDeleteOk();
     }
 
     match /controle_frequencia/{id} {
-      allow read: if sectionRead();
-      allow create: if canCreateWorkflowDoc();
-      allow update: if canWriteWorkflowDoc();
+      allow read: if frequenciaReadOk();
+      allow create: if canCreateWorkflowDoc() && frequenciaWriteSecaoOk();
+      allow update: if canWriteWorkflowDoc() && frequenciaWriteSecaoOk();
       allow delete: if tenantDeleteOk();
     }
 
@@ -394,7 +502,8 @@ service cloud.firestore {
       allow read: if sectionRead();
       allow create: if canSubmitRole() && sectionCreateOk();
       allow update: if sectionUpdateOk()
-        && request.resource.data.secaoId == resource.data.secaoId;
+        && request.resource.data.secaoId == resource.data.secaoId
+        && canFinalizeSolicitacao();
       allow delete: if tenantDeleteOk();
     }
 
@@ -403,16 +512,16 @@ service cloud.firestore {
         && (
           docInexistente()
           || callerPerfil() == 'Gerente'
-          || !resource.data.keys().hasAny(['divisaoId'])
-          || resource.data.divisaoId == callerDivisao()
+          || (resource.data.keys().hasAny(['divisaoId'])
+            && resource.data.divisaoId == callerDivisao())
         );
       allow create, update: if isRegistered()
         && request.resource.data.keys().hasAny(['re'])
         && request.resource.data.re == callerRe()
         && (
-          !request.resource.data.keys().hasAny(['divisaoId'])
-          || request.resource.data.divisaoId == callerDivisao()
-          || callerPerfil() == 'Gerente'
+          callerPerfil() == 'Gerente'
+          || (request.resource.data.keys().hasAny(['divisaoId'])
+            && request.resource.data.divisaoId == callerDivisao())
         );
       allow delete: if isRegistered()
         && (

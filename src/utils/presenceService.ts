@@ -11,6 +11,8 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
+  query,
+  where,
 } from "../firebase";
 import { Usuario } from "../types";
 import { normalizeEmail } from "./usuarioHelpers";
@@ -164,15 +166,28 @@ export function countOnlineFromDocs(
  * Assina a coleção de presença e reporta quantos estão online.
  * Retorna unsubscribe.
  */
-export function subscribeOnlineCount(onCount: (count: number) => void): () => void {
+/**
+ * Assina presença filtrada por Divisão (multi-tenant).
+ * Gerente sem divisaoId: conta global via coleção filtrada é insegura —
+ * exige divisaoId do caller.
+ */
+export function subscribeOnlineCount(
+  onCount: (count: number) => void,
+  divisaoId?: string
+): () => void {
   let latest: PresenceDoc[] = [];
 
   const emit = () => {
     onCount(countOnlineFromDocs(latest));
   };
 
+  const targetDiv = String(divisaoId || "").trim();
+  const q = targetDiv
+    ? query(collection(db, COLLECTION), where("divisaoId", "==", targetDiv))
+    : collection(db, COLLECTION);
+
   const unsub = onSnapshot(
-    collection(db, COLLECTION),
+    q,
     (snap) => {
       latest = snap.docs.map((d) => d.data() as PresenceDoc);
       emit();
@@ -183,7 +198,6 @@ export function subscribeOnlineCount(onCount: (count: number) => void): () => vo
     }
   );
 
-  // Reavalia a janela de 90s mesmo sem novos writes.
   const tick = setInterval(emit, 15_000);
 
   return () => {

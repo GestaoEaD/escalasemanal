@@ -164,6 +164,8 @@ export interface ScheduleRow {
   postoGrad: string;
   nome: string;
   secao: string;
+  /** Lotação do colaborador (para agrupamento/exportação na escala da Divisão). */
+  secaoId?: string;
   seg: string;
   ter: string;
   qua: string;
@@ -181,10 +183,12 @@ export interface LastSaved {
 }
 
 export interface EscalaDocument {
-  id: string; // Format: "{divisaoId}__{secaoId}__{ano}__{semana}"
+  /** Format: `{divisaoId}__{ano}__{semana}` (legado: com secaoId no meio). */
+  id: string;
   /** Tenant — obrigatório. */
   divisaoId: string;
-  secaoId: string;
+  /** Legado — escalas atuais são por Divisão e não gravam secaoId no documento. */
+  secaoId?: string;
   ano: number;
   semana: number;
   periodo: string;
@@ -265,8 +269,14 @@ export interface AuditAlteracao {
 export type AuditOperacaoTipo =
   | "SALVAR_ESCALA_SEMANAL"
   | "SALVAR_ESCALA_ALTERACAO"
+  | "EDITAR_ESCALA_SEMANAL"
+  | "EDITAR_ESCALA_ALTERACAO"
+  | "CRIAR_ESCALA_SEMANAL"
+  | "CRIAR_ESCALA_ALTERACAO"
   | "ENVIAR_ESCALA_SEMANAL"
   | "ENVIAR_ESCALA_ALTERACAO"
+  | "ENVIAR_ESCALA_SEMANAL_APROVACAO"
+  | "ENVIAR_ESCALA_ALTERACAO_APROVACAO"
   | "APROVAR_ESCALA_SEMANAL"
   | "APROVAR_ESCALA_ALTERACAO"
   | "SOLICITAR_REVISAO_SEMANAL"
@@ -276,17 +286,31 @@ export type AuditOperacaoTipo =
   | "REABRIR_ESCALA_SEMANAL"
   | "REABRIR_ESCALA_ALTERACAO"
   | "EXPORTAR"
+  | "EXPORTAR_ESCALA"
+  | "EXPORTAR_FREQUENCIA"
   | "LOGIN"
   | "LOGOUT"
   | "ALTERAR_CONFIGURACAO"
+  | "CRIAR_DIVISAO"
+  | "EDITAR_DIVISAO"
+  | "EXCLUIR_DIVISAO"
+  | "CRIAR_SECAO"
+  | "EDITAR_SECAO"
+  | "EXCLUIR_SECAO"
+  | "CRIAR_COLABORADOR"
+  | "EDITAR_COLABORADOR"
+  | "EXCLUIR_COLABORADOR"
   | "CRIAR_USUARIO"
   | "EDITAR_USUARIO"
   | "EXCLUIR_USUARIO"
+  | "ALTERAR_PERMISSAO"
   | "ABRIR_LINK_APROVACAO"
   | "LOAD_PREVIOUS_WEEK_DATA"
   | "CLEAR_WEEKLY_SCHEDULE"
   | "SALVAR_CONTROLE_FREQUENCIA"
+  | "EDITAR_FREQUENCIA"
   | "SYNC_CONTROLE_FREQUENCIA"
+  | "SINCRONIZAR_FREQUENCIA"
   | "ENVIAR_CONTROLE_FREQUENCIA"
   | "APROVAR_CONTROLE_FREQUENCIA"
   | "SOLICITAR_REVISAO_CONTROLE_FREQUENCIA"
@@ -373,30 +397,50 @@ export interface AuditLog {
 }
 
 export const AUDIT_OPERACAO_LABELS: Record<AuditOperacaoTipo, string> = {
-  SALVAR_ESCALA_SEMANAL: "Salvar",
-  SALVAR_ESCALA_ALTERACAO: "Salvar",
-  ENVIAR_ESCALA_SEMANAL: "Enviar Aprovação",
-  ENVIAR_ESCALA_ALTERACAO: "Enviar Aprovação",
-  APROVAR_ESCALA_SEMANAL: "Aprovou",
-  APROVAR_ESCALA_ALTERACAO: "Aprovou",
-  SOLICITAR_REVISAO_SEMANAL: "Solicitou Revisão",
-  SOLICITAR_REVISAO_ALTERACAO: "Solicitou Revisão",
-  CANCELAR_SOLICITACAO_SEMANAL: "Cancelou Solicitação",
-  CANCELAR_SOLICITACAO_ALTERACAO: "Cancelou Solicitação",
-  REABRIR_ESCALA_SEMANAL: "Reabriu Escala",
-  REABRIR_ESCALA_ALTERACAO: "Reabriu Escala",
+  SALVAR_ESCALA_SEMANAL: "Salvar Escala Semanal",
+  SALVAR_ESCALA_ALTERACAO: "Salvar Escala Alteração",
+  EDITAR_ESCALA_SEMANAL: "Editar Escala Semanal",
+  EDITAR_ESCALA_ALTERACAO: "Editar Escala Alteração",
+  CRIAR_ESCALA_SEMANAL: "Criar Escala Semanal",
+  CRIAR_ESCALA_ALTERACAO: "Criar Escala Alteração",
+  ENVIAR_ESCALA_SEMANAL: "Enviar Escala Semanal",
+  ENVIAR_ESCALA_ALTERACAO: "Enviar Escala Alteração",
+  ENVIAR_ESCALA_SEMANAL_APROVACAO: "Enviar Escala Semanal p/ Aprovação",
+  ENVIAR_ESCALA_ALTERACAO_APROVACAO: "Enviar Escala Alteração p/ Aprovação",
+  APROVAR_ESCALA_SEMANAL: "Aprovar Escala Semanal",
+  APROVAR_ESCALA_ALTERACAO: "Aprovar Escala Alteração",
+  SOLICITAR_REVISAO_SEMANAL: "Solicitar Revisão Semanal",
+  SOLICITAR_REVISAO_ALTERACAO: "Solicitar Revisão Alteração",
+  CANCELAR_SOLICITACAO_SEMANAL: "Cancelar Solicitação Semanal",
+  CANCELAR_SOLICITACAO_ALTERACAO: "Cancelar Solicitação Alteração",
+  REABRIR_ESCALA_SEMANAL: "Reabrir Escala Semanal",
+  REABRIR_ESCALA_ALTERACAO: "Reabrir Escala Alteração",
   EXPORTAR: "Exportar",
+  EXPORTAR_ESCALA: "Exportar Escala",
+  EXPORTAR_FREQUENCIA: "Exportar Frequência",
   LOGIN: "Login",
   LOGOUT: "Logout",
   ALTERAR_CONFIGURACAO: "Alterar Configuração",
+  CRIAR_DIVISAO: "Criar Divisão",
+  EDITAR_DIVISAO: "Editar Divisão",
+  EXCLUIR_DIVISAO: "Excluir Divisão",
+  CRIAR_SECAO: "Criar Seção",
+  EDITAR_SECAO: "Editar Seção",
+  EXCLUIR_SECAO: "Excluir Seção",
+  CRIAR_COLABORADOR: "Criar Colaborador",
+  EDITAR_COLABORADOR: "Editar Colaborador",
+  EXCLUIR_COLABORADOR: "Excluir Colaborador",
   CRIAR_USUARIO: "Criar Usuário",
   EDITAR_USUARIO: "Editar Usuário",
   EXCLUIR_USUARIO: "Excluir Usuário",
+  ALTERAR_PERMISSAO: "Alterar Permissão",
   ABRIR_LINK_APROVACAO: "Abriu Link Aprovação",
   LOAD_PREVIOUS_WEEK_DATA: "Dados Semana Anterior",
   CLEAR_WEEKLY_SCHEDULE: "Limpar Escala",
   SALVAR_CONTROLE_FREQUENCIA: "Salvar Frequência",
+  EDITAR_FREQUENCIA: "Editar Frequência",
   SYNC_CONTROLE_FREQUENCIA: "Sincronizar Frequência",
+  SINCRONIZAR_FREQUENCIA: "Sincronizar Frequência",
   ENVIAR_CONTROLE_FREQUENCIA: "Enviar Frequência",
   APROVAR_CONTROLE_FREQUENCIA: "Aprovar Frequência",
   SOLICITAR_REVISAO_CONTROLE_FREQUENCIA: "Revisão Frequência",

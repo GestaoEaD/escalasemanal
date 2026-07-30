@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { db, doc, getDoc, setDoc, deleteDoc, collection, getDocs, Timestamp, query, where } from "../firebase";
+import { db, collection, getDocs, Timestamp, query, where } from "../firebase";
 import { 
   Usuario, 
   ScheduleRow, 
@@ -27,7 +27,13 @@ import {
   submitScaleForApproval,
 } from "../utils/approvalService";
 import { getTokenApprovalUrl } from "../utils/solicitacaoAprovacaoService";
-import { auditExportacao, auditSalvarEscala, statusLabel } from "../utils/auditService";
+import { auditSalvarEscala, statusLabel } from "../utils/auditService";
+import {
+  loadEscalaDivisao,
+  persistEscalaDivisao,
+  auditExportEscala,
+} from "../services/escalaService";
+import { persistColaborador } from "../services/colaboradorService";
 import {
   auditLoadPreviousWeek,
   fetchPreviousWeeklyScale,
@@ -47,7 +53,6 @@ import {
   isGestor,
 } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
-import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { buildEscalaDocId } from "../utils/divisaoIds";
 import { colaboradorDocId } from "../utils/tenantDocIds";
 import { resolveActiveDivisaoId } from "../utils/divisaoContext";
@@ -142,7 +147,8 @@ interface ScheduleEditorProps {
   usuario: Usuario;
   year: number;
   week: WeekInfo;
-  secaoId: string;
+  /** Opcional — usado só como default no cadastro de colaborador; escala é por Divisão. */
+  secaoId?: string;
   onBack: () => void;
   onLogout: () => void;
   onOpenConfig?: () => void;
@@ -153,7 +159,7 @@ export default function ScheduleEditor({
   usuario,
   year,
   week,
-  secaoId,
+  secaoId = "",
   onBack,
   onLogout: _onLogout,
   onOpenConfig: _onOpenConfig,
@@ -162,8 +168,8 @@ export default function ScheduleEditor({
   // Document IDs in Firestore
   const divisaoId = resolveActiveDivisaoId(usuario);
   const activeSecaoId = String(secaoId || usuario.activeSecaoId || usuario.secaoId || "").trim();
-  // Firestore: `{divisaoId}__{secaoId}__{ano}__{semana}` — week.id local permanece `YYYY_WW`
-  const docId = buildEscalaDocId(divisaoId, activeSecaoId, year, week.numero);
+  // Firestore: `{divisaoId}__{ano}__{semana}` — week.id local permanece `YYYY_WW`
+  const docId = buildEscalaDocId(divisaoId, year, week.numero);
   const dayHeaders = useMemo(
     () => getWeekDayColumnHeaders(week.startDate),
     [week.startDate]
@@ -315,6 +321,7 @@ export default function ScheduleEditor({
           postoGrad: col.postoGrad,
           nome: col.nome, // Nome de Guerra
           secao: col.secao,
+          secaoId: col.secaoId || row.secaoId,
           ordem: col.ordem ?? 999,
           observacao: sanitizeWeeklyObservacao(row.observacao),
         };
@@ -327,7 +334,11 @@ export default function ScheduleEditor({
     }).filter((row) => {
       // Keep only rows of collaborators that exist in the master pool!
       return collaboratorsPool.some((c) => c.re === row.re);
-    }).sort((a, b) => a.ordem - b.ordem);
+    }).sort((a, b) => {
+      const sa = String(a.secao || "").localeCompare(String(b.secao || ""), "pt-BR");
+      if (sa !== 0) return sa;
+      return a.ordem - b.ordem;
+    });
   }, [localWeeklyRows, collaboratorsPool]);
 
   const resolvedAlterationRows = React.useMemo(() => {
@@ -339,6 +350,7 @@ export default function ScheduleEditor({
           postoGrad: col.postoGrad,
           nome: col.nome, // Nome de Guerra
           secao: col.secao,
+          secaoId: col.secaoId || row.secaoId,
           ordem: col.ordem ?? 999
         };
       }
@@ -349,25 +361,50 @@ export default function ScheduleEditor({
     }).filter((row) => {
       // Keep only rows of collaborators that exist in the master pool!
       return collaboratorsPool.some((c) => c.re === row.re);
-    }).sort((a, b) => a.ordem - b.ordem);
+    }).sort((a, b) => {
+      const sa = String(a.secao || "").localeCompare(String(b.secao || ""), "pt-BR");
+      if (sa !== 0) return sa;
+      return a.ordem - b.ordem;
+    });
   }, [localAlterationRows, collaboratorsPool]);
 
   /** Colaboradores da escala aberta, na ordem de exibição (semanal primeiro, depois exclusivos da alteração). */
   const exportCollaborators = React.useMemo(() => {
     const seen = new Set<string>();
-    const list: { re: string; label: string }[] = [];
+    const list: { re: string; label: string; secao: string }[] = [];
     for (const row of resolvedWeeklyRows) {
       if (seen.has(row.re)) continue;
       seen.add(row.re);
-      list.push({ re: row.re, label: `${row.postoGrad} ${row.nome}`.trim() });
+      list.push({
+        re: row.re,
+        label: `${row.postoGrad} ${row.nome}`.trim(),
+        secao: row.secao || "Sem seção",
+      });
     }
     for (const row of resolvedAlterationRows) {
       if (seen.has(row.re)) continue;
       seen.add(row.re);
-      list.push({ re: row.re, label: `${row.postoGrad} ${row.nome}`.trim() });
+      list.push({
+        re: row.re,
+        label: `${row.postoGrad} ${row.nome}`.trim(),
+        secao: row.secao || "Sem seção",
+      });
     }
     return list;
   }, [resolvedWeeklyRows, resolvedAlterationRows]);
+
+  const exportCollaboratorsBySecao = React.useMemo(() => {
+    const map = new Map<string, { re: string; label: string; secao: string }[]>();
+    for (const col of exportCollaborators) {
+      const key = col.secao || "Sem seção";
+      const list = map.get(key) || [];
+      list.push(col);
+      map.set(key, list);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) =>
+      a.localeCompare(b, "pt-BR")
+    );
+  }, [exportCollaborators]);
 
   const exportAllSelected =
     exportCollaborators.length > 0 &&
@@ -383,6 +420,20 @@ export default function ScheduleEditor({
 
   const toggleExportAllCollaborators = (checked: boolean) => {
     setExportSelectedRes(checked ? exportCollaborators.map((c) => c.re) : []);
+  };
+
+  const toggleExportSecaoCollaborators = (secao: string, checked: boolean) => {
+    const resOfSecao = exportCollaborators
+      .filter((c) => (c.secao || "Sem seção") === secao)
+      .map((c) => c.re);
+    setExportSelectedRes((prev) => {
+      if (checked) {
+        const next = new Set(prev);
+        resOfSecao.forEach((re) => next.add(re));
+        return Array.from(next);
+      }
+      return prev.filter((re) => !resOfSecao.includes(re));
+    });
   };
 
   const toggleExportCollaborator = (re: string, checked: boolean) => {
@@ -411,19 +462,21 @@ export default function ScheduleEditor({
     setLoading(true);
     setSaveError(null);
     try {
-      // 1. Fetch Collaborators Pool (Seção ativa)
+      // 1. Fetch Collaborators Pool (toda a Divisão)
       const colSnapshot = await getDocs(
-        query(collection(db, "colaboradores"), where("secaoId", "==", activeSecaoId))
+        query(collection(db, "colaboradores"), where("divisaoId", "==", divisaoId))
       );
       const colList: Colaborador[] = [];
       colSnapshot.forEach((docSnap) => {
         const data = normalizeColaboradorCadastro(docSnap.data() as Colaborador);
-        if (String(data.divisaoId || "") === divisaoId) {
-          colList.push(data);
-        }
+        colList.push(data);
       });
-      // Sort by official order field
-      const sortedCols = colList.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      // Sort by seção then official order field
+      const sortedCols = colList.sort((a, b) => {
+        const sa = String(a.secao || "").localeCompare(String(b.secao || ""), "pt-BR");
+        if (sa !== 0) return sa;
+        return (a.ordem || 0) - (b.ordem || 0);
+      });
       setCollaboratorsPool(sortedCols);
 
       // 2. Fetch Legendas Pool
@@ -436,12 +489,9 @@ export default function ScheduleEditor({
       setLegendasList(legList);
 
       // 3. Fetch scales documents from Firestore
-      const weeklyDocRef = doc(db, "escalas_semanais", docId);
-      const alterationDocRef = doc(db, "escalas_alteracao", docId);
-
-      const [weeklySnap, alterationSnap] = await Promise.all([
-        getDoc(weeklyDocRef),
-        getDoc(alterationDocRef),
+      const [weeklyDoc, alterationDoc] = await Promise.all([
+        loadEscalaDivisao({ collectionName: "escalas_semanais", usuario, year, week }),
+        loadEscalaDivisao({ collectionName: "escalas_alteracao", usuario, year, week }),
       ]);
 
       const activeCols = sortedCols.filter((c) => c.ativo !== false);
@@ -450,8 +500,8 @@ export default function ScheduleEditor({
       let rosterSyncNote = "";
 
       // Process Weekly Scale
-      if (weeklySnap.exists()) {
-        const data = weeklySnap.data() as EscalaDocument;
+      if (weeklyDoc) {
+        const data = weeklyDoc;
         let loadedRows = (data.rows || []).map((row) => applyWeekendDefault({
           ...row,
           observacao: sanitizeWeeklyObservacao(row.observacao),
@@ -464,13 +514,22 @@ export default function ScheduleEditor({
           isScheduleRosterEditable(weeklyStatusLoaded) &&
           canEditScale(usuario, week, weeklyStatusLoaded)
         ) {
-          const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols, activeSecaoId);
+          const synced = syncScheduleRosterWithCadastro(loadedRows, sortedCols);
           if (synced.changed) {
             loadedRows = synced.rows.map(applyWeekendDefault);
-            await setDoc(
-              weeklyDocRef,
-              prepareFirestoreWrite(`escalas_semanais/${docId}`, {
-                ...data,
+            const { secaoId: _legacySecao, ...dataWithoutSecao } = data as EscalaDocument & {
+              secaoId?: string;
+            };
+            await persistEscalaDivisao({
+              collectionName: "escalas_semanais",
+              usuario,
+              year,
+              week,
+              skipEditPermission: true,
+              data: {
+                ...dataWithoutSecao,
+                id: docId,
+                divisaoId,
                 rows: loadedRows.map(cleanScheduleRow),
                 status: weeklyStatusLoaded,
                 versao: data.versao && data.versao > 0 ? data.versao : 1,
@@ -478,9 +537,8 @@ export default function ScheduleEditor({
                 historico: cleanHistorico(
                   Array.isArray(data.historico) ? data.historico : []
                 ),
-                secaoId: activeSecaoId,
-              } as unknown as Record<string, unknown>)
-            );
+              },
+            });
             const parts: string[] = [];
             if (synced.added.length > 0) {
               parts.push(`${synced.added.length} incluído(s) do cadastro`);
@@ -519,6 +577,7 @@ export default function ScheduleEditor({
           postoGrad: c.postoGrad,
           nome: c.nome,
           secao: c.secao,
+          secaoId: c.secaoId,
           ...initialDays,
           observacao: sanitizeWeeklyObservacao(c.observacao),
         }));
@@ -544,10 +603,15 @@ export default function ScheduleEditor({
           aprovacao: null,
           historico: [criacao],
         };
-        await setDoc(
-          weeklyDocRef,
-          prepareFirestoreWrite(`escalas_semanais/${docId}/create`, docData as unknown as Record<string, unknown>)
-        );
+        await persistEscalaDivisao({
+          collectionName: "escalas_semanais",
+          usuario,
+          year,
+          week,
+          isNew: true,
+          skipEditPermission: true,
+          data: docData as unknown as Record<string, unknown>,
+        });
         
         setDbWeeklyRows(rows);
         setLocalWeeklyRows(rows);
@@ -562,8 +626,8 @@ export default function ScheduleEditor({
 
       // Process Alterations Scale
       if (hasWeeklySaved) {
-        if (alterationSnap.exists()) {
-          const data = alterationSnap.data() as EscalaDocument;
+        if (alterationDoc) {
+          const data = alterationDoc;
           let loadedAltRows = (data.rows || []).map(applyWeekendDefault);
           const hasStatusField = data.status !== undefined && data.status !== null;
           const altStatusLoaded = hasStatusField
@@ -577,10 +641,19 @@ export default function ScheduleEditor({
             const synced = syncScheduleRosterWithCadastro(loadedAltRows, sortedCols);
             if (synced.changed) {
               loadedAltRows = synced.rows.map(applyWeekendDefault);
-              await setDoc(
-                alterationDocRef,
-                prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
-                  ...data,
+              const { secaoId: _legacySecaoAlt, ...altWithoutSecao } = data as EscalaDocument & {
+                secaoId?: string;
+              };
+              await persistEscalaDivisao({
+                collectionName: "escalas_alteracao",
+                usuario,
+                year,
+                week,
+                skipEditPermission: true,
+                data: {
+                  ...altWithoutSecao,
+                  id: docId,
+                  divisaoId,
                   rows: loadedAltRows.map(cleanScheduleRow),
                   status: altStatusLoaded,
                   versao: data.versao && data.versao > 0 ? data.versao : 1,
@@ -588,9 +661,8 @@ export default function ScheduleEditor({
                   historico: cleanHistorico(
                     Array.isArray(data.historico) ? data.historico : []
                   ),
-                  secaoId: activeSecaoId,
-                } as unknown as Record<string, unknown>)
-              );
+                },
+              });
             }
           }
 
@@ -636,10 +708,15 @@ export default function ScheduleEditor({
             aprovacao: null,
             historico: [criacaoAlt],
           };
-          await setDoc(
-            alterationDocRef,
-            prepareFirestoreWrite(`escalas_alteracao/${docId}/create`, docData as unknown as Record<string, unknown>)
-          );
+          await persistEscalaDivisao({
+            collectionName: "escalas_alteracao",
+            usuario,
+            year,
+            week,
+            isNew: true,
+            skipEditPermission: true,
+            data: docData as unknown as Record<string, unknown>,
+          });
 
           setDbAlterationRows(rows);
           setLocalAlterationRows(rows);
@@ -721,11 +798,11 @@ export default function ScheduleEditor({
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
-        const colDocId = colaboradorDocId(divisaoId, col.re);
-        await setDoc(
-          doc(db, "colaboradores", colDocId),
-          prepareFirestoreWrite(`colaboradores/${colDocId}`, newColDoc as unknown as Record<string, unknown>)
-        );
+        await persistColaborador({
+          usuario,
+          colaborador: newColDoc as Colaborador,
+          isNew: true,
+        });
         setCollaboratorsPool((prev) => [...prev, newColDoc].sort((a, b) => (a.ordem || 0) - (b.ordem || 0)));
       } catch (err) {
         console.error("Failed to add new collaborator to global pool:", err);
@@ -739,6 +816,7 @@ export default function ScheduleEditor({
       postoGrad: col.postoGrad,
       nome: col.nome,
       secao: col.secao,
+      secaoId: col.secaoId || activeSecaoId || undefined,
       ...initialDays,
       observacao: activePanelForModal === "semanal"
         ? sanitizeWeeklyObservacao(col.observacao)
@@ -771,15 +849,13 @@ export default function ScheduleEditor({
           updatedAt: Timestamp.now()
         };
         
-        const newDocId = colaboradorDocId(String(updatedColDoc.divisaoId || divisaoId), updated.re);
         const oldDocId = colaboradorDocId(String(existing?.divisaoId || divisaoId), oldRe);
-        await setDoc(
-          doc(db, "colaboradores", newDocId),
-          prepareFirestoreWrite(`colaboradores/${newDocId}`, updatedColDoc as unknown as Record<string, unknown>)
-        );
-        if (oldDocId !== newDocId) {
-          await deleteDoc(doc(db, "colaboradores", oldDocId));
-        }
+        await persistColaborador({
+          usuario,
+          colaborador: updatedColDoc as Colaborador,
+          oldDocId,
+          isNew: false,
+        });
 
         setCollaboratorsPool((prev) => 
           prev.map((c) => (c.re === oldRe ? updatedColDoc : c))
@@ -799,6 +875,7 @@ export default function ScheduleEditor({
             postoGrad: updated.postoGrad,
             nome: updated.nome,
             secao: updated.secao,
+            secaoId: updated.secaoId || r.secaoId,
             observacao: updated.observacao || r.observacao
           };
         }
@@ -871,7 +948,6 @@ export default function ScheduleEditor({
       const result = await fetchPreviousWeeklyScale(
         year,
         week.numero,
-        activeSecaoId,
         divisaoId
       );
       if (result.status === "error") {
@@ -992,9 +1068,13 @@ export default function ScheduleEditor({
   const handleConfirmClearWeekly = async () => {
     let statusForClear = weeklyStatus;
     try {
-      const weeklySnap = await getDoc(doc(db, "escalas_semanais", docId));
-      if (weeklySnap.exists()) {
-        const serverData = weeklySnap.data() as EscalaDocument;
+      const serverData = await loadEscalaDivisao({
+        collectionName: "escalas_semanais",
+        usuario,
+        year,
+        week,
+      });
+      if (serverData) {
         const serverStatus = normalizeEscalaStatus(serverData.status);
         statusForClear = serverStatus;
         if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
@@ -1143,6 +1223,7 @@ export default function ScheduleEditor({
       postoGrad: row.postoGrad,
       nome: row.nome,
       secao: row.secao,
+      secaoId: row.secaoId,
       seg: row.seg,
       ter: row.ter,
       qua: row.qua,
@@ -1209,10 +1290,13 @@ export default function ScheduleEditor({
 
     try {
       if (panel === "semanal") {
-        const weeklyDocRef = doc(db, "escalas_semanais", docId);
-        const weeklySnap = await getDoc(weeklyDocRef);
-        if (weeklySnap.exists()) {
-          const serverData = weeklySnap.data() as EscalaDocument;
+        const serverData = await loadEscalaDivisao({
+          collectionName: "escalas_semanais",
+          usuario,
+          year,
+          week,
+        });
+        if (serverData) {
           const serverStatus = normalizeEscalaStatus(serverData.status);
           if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
             setWeeklyStatus(serverStatus);
@@ -1246,10 +1330,13 @@ export default function ScheduleEditor({
           }
         }
       } else {
-        const alterationDocRef = doc(db, "escalas_alteracao", docId);
-        const alterationSnap = await getDoc(alterationDocRef);
-        if (alterationSnap.exists()) {
-          const serverData = alterationSnap.data() as EscalaDocument;
+        const serverData = await loadEscalaDivisao({
+          collectionName: "escalas_alteracao",
+          usuario,
+          year,
+          week,
+        });
+        if (serverData) {
           const serverStatus = normalizeEscalaStatus(serverData.status);
           if (serverStatus === "aprovada" || serverStatus === "aguardando_aprovacao") {
             setAltStatus(serverStatus);
@@ -1297,6 +1384,9 @@ export default function ScheduleEditor({
     const target = panel || pendingSavePanel || "semanal";
     const editable = target === "semanal" ? isWeeklyEditable : isAltEditable;
     const label = getEscalaDocumentoLabel(target);
+    // Primeiro salvamento explícito do documento (sem lastSaved anterior) → CRIAR_*; demais → EDITAR_*.
+    const isNewDocument =
+      target === "semanal" ? !dbWeeklySaved : !dbAlterationSaved;
     if (!editable) {
       setSaveError(`A ${label} não pode ser editada no status atual.`);
       setSaving(false);
@@ -1434,12 +1524,15 @@ export default function ScheduleEditor({
           collaboratorsPool
         ).map(cleanScheduleRow);
 
-        await setDoc(
-          doc(db, "escalas_semanais", docId),
-          prepareFirestoreWrite(`escalas_semanais/${docId}`, {
+        await persistEscalaDivisao({
+          collectionName: "escalas_semanais",
+          usuario,
+          year,
+          week,
+          skipEditPermission: true,
+          data: {
             id: docId,
             divisaoId,
-            secaoId: activeSecaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
@@ -1450,8 +1543,8 @@ export default function ScheduleEditor({
             versao: nextVersao,
             aprovacao: cleanAprovacao(nextAprovacao),
             historico: cleanHistorico(nextHistorico),
-          } as unknown as Record<string, unknown>)
-        );
+          },
+        });
 
         setDbWeeklyRows(JSON.parse(JSON.stringify(weeklyRowsToSave)));
         setLocalWeeklyRows(JSON.parse(JSON.stringify(weeklyRowsToSave)));
@@ -1507,12 +1600,15 @@ export default function ScheduleEditor({
           collaboratorsPool
         ).map(cleanScheduleRow);
 
-        await setDoc(
-          doc(db, "escalas_alteracao", docId),
-          prepareFirestoreWrite(`escalas_alteracao/${docId}`, {
+        await persistEscalaDivisao({
+          collectionName: "escalas_alteracao",
+          usuario,
+          year,
+          week,
+          skipEditPermission: true,
+          data: {
             id: docId,
             divisaoId,
-            secaoId: activeSecaoId,
             ano: year,
             semana: week.numero,
             periodo: week.periodo,
@@ -1523,8 +1619,8 @@ export default function ScheduleEditor({
             versao: nextVersao,
             aprovacao: cleanAprovacao(nextAprovacao),
             historico: cleanHistorico(nextHistorico),
-          } as unknown as Record<string, unknown>)
-        );
+          },
+        });
 
         setDbAlterationRows(JSON.parse(JSON.stringify(alterationRowsToSave)));
         setLocalAlterationRows(JSON.parse(JSON.stringify(alterationRowsToSave)));
@@ -1546,6 +1642,7 @@ export default function ScheduleEditor({
         statusAnterior: statusAntesLabel,
         statusAtual: savedStatus,
         alteracoes,
+        isNew: isNewDocument,
       });
 
       setSaveSuccess(true);
@@ -2366,8 +2463,25 @@ export default function ScheduleEditor({
                         </td>
                       </tr>
                     ) : (
-                      resolvedWeeklyRows.map((row) => (
-                        <tr key={row.re} className="hover:bg-gray-50/50">
+                      (() => {
+                        let lastSecao = "";
+                        return resolvedWeeklyRows.map((row) => {
+                          const secaoLabel = row.secao || "Sem seção";
+                          const showHeader = secaoLabel !== lastSecao;
+                          lastSecao = secaoLabel;
+                          return (
+                            <React.Fragment key={row.re}>
+                              {showHeader && (
+                                <tr className="bg-slate-100">
+                                  <td
+                                    colSpan={12}
+                                    className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-600"
+                                  >
+                                    {secaoLabel}
+                                  </td>
+                                </tr>
+                              )}
+                        <tr className="hover:bg-gray-50/50">
                           <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-900">{row.postoGrad}</td>
                           <td className="px-3 py-2 whitespace-nowrap font-mono text-gray-500">{row.re}</td>
                           <td className="px-3 py-2 whitespace-nowrap font-bold text-gray-800" title={`Seção: ${row.secao}`}>
@@ -2413,7 +2527,10 @@ export default function ScheduleEditor({
                             </button>
                           </td>
                         </tr>
-                      ))
+                            </React.Fragment>
+                          );
+                        });
+                      })()
                     )}
                   </tbody>
                 </table>
@@ -2481,9 +2598,25 @@ export default function ScheduleEditor({
                             </td>
                           </tr>
                         ) : (
-                          resolvedAlterationRows.map((row) => (
+                          (() => {
+                            let lastSecao = "";
+                            return resolvedAlterationRows.map((row) => {
+                              const secaoLabel = row.secao || "Sem seção";
+                              const showHeader = secaoLabel !== lastSecao;
+                              lastSecao = secaoLabel;
+                              return (
+                                <React.Fragment key={row.re}>
+                                  {showHeader && (
+                                    <tr className="bg-slate-100">
+                                      <td
+                                        colSpan={12}
+                                        className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-600"
+                                      >
+                                        {secaoLabel}
+                                      </td>
+                                    </tr>
+                                  )}
                             <tr
-                              key={row.re}
                               className={`transition-colors duration-500 hover:bg-gray-50/50 ${
                                 highlightedRe === row.re ? "bg-purple-100" : ""
                               }`}
@@ -2533,7 +2666,10 @@ export default function ScheduleEditor({
                                 </button>
                               </td>
                             </tr>
-                          ))
+                                </React.Fragment>
+                              );
+                            });
+                          })()
                         )}
                       </tbody>
                     </table>
@@ -3003,29 +3139,67 @@ export default function ScheduleEditor({
                         onChange={(e) => toggleExportAllCollaborators(e.target.checked)}
                         className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                       />
-                      <span className="text-xs font-bold text-gray-800">Todos</span>
+                      <span className="text-xs font-bold text-gray-800">Selecionar todos</span>
                       <span className="text-[10px] text-gray-400 ml-auto">
                         {exportSelectedRes.length}/{exportCollaborators.length}
                       </span>
                     </label>
-                    <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
-                      {exportCollaborators.map((col) => {
-                        const checked = exportSelectedRes.includes(col.re);
+                    <div className="max-h-56 overflow-y-auto">
+                      {exportCollaboratorsBySecao.map(([secaoNome, cols]) => {
+                        const allSecaoSelected = cols.every((c) =>
+                          exportSelectedRes.includes(c.re)
+                        );
+                        const someSecaoSelected = cols.some((c) =>
+                          exportSelectedRes.includes(c.re)
+                        );
                         return (
-                          <label
-                            key={col.re}
-                            className="flex items-center space-x-3 px-3 py-2 cursor-pointer hover:bg-gray-50 group"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => toggleExportCollaborator(col.re, e.target.checked)}
-                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 shrink-0"
-                            />
-                            <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 truncate">
-                              {col.label}
-                            </span>
-                          </label>
+                          <div key={secaoNome} className="border-b border-gray-100 last:border-b-0">
+                            <label className="flex items-center space-x-3 px-3 py-2 bg-slate-50 cursor-pointer sticky top-0">
+                              <input
+                                type="checkbox"
+                                checked={allSecaoSelected}
+                                ref={(el) => {
+                                  if (el) {
+                                    el.indeterminate = someSecaoSelected && !allSecaoSelected;
+                                  }
+                                }}
+                                onChange={(e) =>
+                                  toggleExportSecaoCollaborators(secaoNome, e.target.checked)
+                                }
+                                className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 shrink-0"
+                              />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 truncate">
+                                {secaoNome}
+                              </span>
+                              <span className="text-[10px] text-gray-400 ml-auto shrink-0">
+                                {cols.filter((c) => exportSelectedRes.includes(c.re)).length}/
+                                {cols.length}
+                              </span>
+                            </label>
+                            <div className="divide-y divide-gray-100">
+                              {cols.map((col) => {
+                                const checked = exportSelectedRes.includes(col.re);
+                                return (
+                                  <label
+                                    key={col.re}
+                                    className="flex items-center space-x-3 px-3 py-2 pl-8 cursor-pointer hover:bg-gray-50 group"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) =>
+                                        toggleExportCollaborator(col.re, e.target.checked)
+                                      }
+                                      className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 shrink-0"
+                                    />
+                                    <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 truncate">
+                                      {col.label}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
@@ -3137,9 +3311,10 @@ export default function ScheduleEditor({
                       formatHomologacaoResumo(altStatus, altAprovacao, altVersao)
                     );
                   }
-                  void auditExportacao({
+                  void auditExportEscala({
                     usuario,
-                    anoSemana: docId,
+                    escalaId: docId,
+                    documento: exportAlteration && !exportWeekly ? "ALTERACAO" : "SEMANAL",
                     detalhes: `Formato: ${exportFormat.toUpperCase()} · Semanal: ${exportWeekly} · Alteração: ${exportAlteration} · Colaboradores: ${exportSelectedRes.length}`,
                   }).catch((err) => console.warn("Falha ao auditar exportação:", err));
                   setIsExportModalOpen(false);

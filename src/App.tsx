@@ -24,11 +24,14 @@ import {
 import { signOutGoogle } from "./utils/googleAuthService";
 import { markUsuarioGoogleLogin } from "./utils/usuarioHelpers";
 import { resolveActiveDivisaoId } from "./utils/divisaoContext";
-import { canAccessSecao, resolveActiveSecaoId } from "./utils/secaoContext";
+import {
+  canAccessSecao,
+  canAccessSecaoFrequenciaCtx,
+  resolveActiveSecaoId,
+} from "./utils/secaoContext";
 import { loadSecaoById } from "./utils/secaoCodigo";
 import Login from "./components/Login";
 import DivisaoSelector from "./components/DivisaoSelector";
-import SecaoSelector from "./components/SecaoSelector";
 import WeekSelector from "./components/WeekSelector";
 import ScheduleEditor from "./components/ScheduleEditor";
 import Configuracoes from "./components/Configuracoes";
@@ -66,17 +69,6 @@ function needsDivisaoSelection(usuario: Usuario, route: AppRoute): boolean {
   return !active;
 }
 
-function needsSecaoSelection(usuario: Usuario, route: AppRoute): boolean {
-  if (route.view === "aprovacao" || route.view === "divisoes") return false;
-  if (route.view === "config" || route.view === "pendencias") return false;
-  if (route.view === "secao" || route.view === "editor" || route.view === "frequencia") {
-    return false;
-  }
-  const activeDivisao = String(usuario.activeDivisaoId || "").trim();
-  if (!activeDivisao) return false;
-  return !String(usuario.activeSecaoId || "").trim();
-}
-
 export default function App() {
   const [authPhase, setAuthPhase] = useState<AuthPhase>("loading");
   const [usuario, setUsuario] = useState<Usuario | null>(null);
@@ -98,7 +90,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    seedDatabaseIfEmpty();
+    if (import.meta.env.DEV) {
+      seedDatabaseIfEmpty();
+    }
   }, []);
 
   useEffect(() => {
@@ -163,30 +157,11 @@ export default function App() {
       return;
     }
     if (route.view === "editor") {
-      const resolvedSecaoId = String(route.secaoId || "").trim();
-      if (!resolvedSecaoId) {
-        const activeSecaoId = resolveActiveSecaoId(usuario);
-        if (activeSecaoId) {
-          navigate(
-            { view: "editor", year: route.year, weekId: route.weekId, secaoId: activeSecaoId },
-            "replace"
-          );
-        } else {
-          navigate({ view: "selector" }, "replace");
-        }
-        return;
-      }
-      if (!canAccessSecao(usuario, resolvedSecaoId, resolveActiveDivisaoId(usuario))) {
-        navigate({ view: "selector" }, "replace");
-        return;
-      }
-      if (String(usuario.activeSecaoId || "").trim() !== resolvedSecaoId) {
-        setUsuario(setActiveSecaoInSession(usuario, resolvedSecaoId));
-      }
+      // Escala por Divisão — secaoId na rota é opcional/legado.
       if (!selectedWeek) {
         navigate({ view: "selector" }, "replace");
-        return;
       }
+      return;
     } else if (route.view === "secao") {
       if (!canAccessSecao(usuario, route.secaoId, resolveActiveDivisaoId(usuario))) {
         navigate({ view: "selector" }, "replace");
@@ -197,12 +172,16 @@ export default function App() {
       }
     } else if (route.view === "frequencia") {
       const secaoId = String(route.secaoId || "").trim();
-      if (secaoId && !canAccessSecao(usuario, secaoId, resolveActiveDivisaoId(usuario))) {
+      if (
+        secaoId &&
+        !canAccessSecaoFrequenciaCtx(
+          usuario,
+          secaoId,
+          resolveActiveDivisaoId(usuario)
+        )
+      ) {
         navigate({ view: "selector" }, "replace");
         return;
-      }
-      if (secaoId && String(usuario.activeSecaoId || "").trim() !== secaoId) {
-        setUsuario(setActiveSecaoInSession(usuario, secaoId));
       }
     } else if (route.view === "aprovacao") {
       const hasTarget =
@@ -381,12 +360,10 @@ export default function App() {
   const handleSelectWeek = (year: number, week: WeekInfo) => {
     setSelectedYear(year);
     setSelectedWeek(week);
-    const currentSecaoId = String(route.secaoId || usuario?.activeSecaoId || "").trim();
     navigate({
       view: "editor",
       year,
       weekId: week.id,
-      ...(currentSecaoId ? { secaoId: currentSecaoId } : {}),
     });
   };
 
@@ -438,18 +415,6 @@ export default function App() {
         onSelectDivisao={handleSelectDivisao}
       />
     );
-  } else if (route.view === "selector" && needsSecaoSelection(usuario, route)) {
-    page = (
-      <SecaoSelector
-        usuario={usuario}
-        onSelectSecao={(secao) => {
-          setUsuario(setActiveSecaoInSession(usuario, secao.id));
-          setSecaoLabel(secao.nome);
-          navigate({ view: "secao", secaoId: secao.id });
-        }}
-        onLogout={handleLogout}
-      />
-    );
   } else if (route.view === "secao") {
     page = (
       <WeekSelector
@@ -467,7 +432,6 @@ export default function App() {
           navigate({
             view: "frequencia",
             year,
-            secaoId: route.secaoId,
           });
         }}
       />
@@ -487,8 +451,7 @@ export default function App() {
       );
     }
   } else if (route.view === "editor") {
-    const editorSecaoId = String(route.secaoId || usuario.activeSecaoId || "").trim();
-    if (!selectedWeek || !editorSecaoId) {
+    if (!selectedWeek) {
       page = <SessionLoadingScreen />;
     } else {
       page = (
@@ -496,7 +459,7 @@ export default function App() {
           usuario={usuario}
           year={selectedYear}
           week={selectedWeek}
-          secaoId={editorSecaoId}
+          secaoId={String(route.secaoId || usuario.activeSecaoId || "").trim()}
           onBack={goHome}
           onLogout={handleLogout}
           onOpenConfig={() => navigate({ view: "config" })}
@@ -505,13 +468,12 @@ export default function App() {
       );
     }
   } else if (route.view === "frequencia") {
-    const secaoId = String(route.secaoId || "").trim();
     page = (
       <FrequenciaApp
         usuario={usuario}
         year={route.year}
         month={route.month ?? null}
-        secaoId={secaoId || null}
+        secaoId={route.secaoId || null}
         secao={route.secao || null}
         onBack={goHome}
         onOpenApproval={openApproval}
@@ -520,49 +482,33 @@ export default function App() {
             view: "frequencia",
             year: next.year,
             month: next.month,
-            secaoId: secaoId || next.secaoId,
-            secao: next.secao || route.secao,
+            secaoId: next.secaoId,
+            secao: next.secao,
           });
         }}
       />
     );
   } else {
-    const activeSecaoId = String(usuario.activeSecaoId || "").trim();
-    if (activeSecaoId) {
-      page = (
-        <WeekSelector
-          usuario={usuario}
-          secaoId={activeSecaoId}
-          secaoLabel={secaoLabel}
-          initialYear={selectedYear}
-          onSelectWeek={handleSelectWeek}
-          onLogout={handleLogout}
-          onOpenConfig={() => navigate({ view: "config" })}
-          onOpenApproval={openApproval}
-          onOpenPendencias={() => navigate({ view: "pendencias" })}
-          onOpenFrequencia={(year) => {
-            setSelectedYear(year);
-            navigate({
-              view: "frequencia",
-              year,
-              secaoId: activeSecaoId,
-            });
-          }}
-        />
-      );
-    } else {
-      page = (
-        <SecaoSelector
-          usuario={usuario}
-          onSelectSecao={(secao) => {
-            setUsuario(setActiveSecaoInSession(usuario, secao.id));
-            setSecaoLabel(secao.nome);
-            navigate({ view: "secao", secaoId: secao.id });
-          }}
-          onLogout={handleLogout}
-        />
-      );
-    }
+    page = (
+      <WeekSelector
+        usuario={usuario}
+        secaoId={String(usuario.activeSecaoId || "").trim() || undefined}
+        secaoLabel={secaoLabel || divisaoLabel}
+        initialYear={selectedYear}
+        onSelectWeek={handleSelectWeek}
+        onLogout={handleLogout}
+        onOpenConfig={() => navigate({ view: "config" })}
+        onOpenApproval={openApproval}
+        onOpenPendencias={() => navigate({ view: "pendencias" })}
+        onOpenFrequencia={(year) => {
+          setSelectedYear(year);
+          navigate({
+            view: "frequencia",
+            year,
+          });
+        }}
+      />
+    );
   }
 
   return (

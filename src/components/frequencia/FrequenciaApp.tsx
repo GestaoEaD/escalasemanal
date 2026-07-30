@@ -1,3 +1,6 @@
+/**
+ * FrequenciaApp — fluxo Ano → Mês → Seção → Editor.
+ */
 import React from "react";
 import { TipoEscalaDocumento, Usuario } from "../../types";
 import FrequenciaMonthSelector from "./FrequenciaMonthSelector";
@@ -16,7 +19,6 @@ export type FrequenciaNavState = {
 interface Props {
   usuario: Usuario;
   year: number;
-  /** Controlado pela URL: secao → mês → editor. */
   month?: number | null;
   secaoId?: string | null;
   secao?: string | null;
@@ -63,8 +65,8 @@ export default function FrequenciaApp({
 
   const displaySecao = secaoNome || secao || secaoId || "";
 
-  // Editor: seção + mês
-  if (secaoId && month) {
+  // Editor: mês + seção
+  if (month && secaoId) {
     return (
       <FrequenciaEditor
         usuario={usuario}
@@ -72,35 +74,34 @@ export default function FrequenciaApp({
         month={month}
         secaoId={secaoId}
         secao={displaySecao}
-        onBack={() => onNavigateFrequencia({ year, secaoId, secao: secao || undefined })}
+        onBack={() => onNavigateFrequencia({ year, month })}
         onOpenApproval={onOpenApproval}
       />
     );
   }
 
-  // Meses da seção
-  if (secaoId) {
+  // Após escolher o mês: selecionar Seção
+  if (month) {
     return (
-      <FrequenciaMonthSelector
+      <FrequenciaSecaoSelector
         usuario={usuario}
         year={year}
-        secaoId={secaoId}
-        secao={displaySecao}
-        onBack={() => onNavigateFrequencia({ year, secao: secao || undefined })}
-        onSelectMonth={(m) =>
-          onNavigateFrequencia({ year, secaoId, secao: secao || undefined, month: m })
+        month={month}
+        onBack={() => onNavigateFrequencia({ year })}
+        onSelectSecao={(nextSecaoId) =>
+          onNavigateFrequencia({ year, month, secaoId: nextSecaoId })
         }
       />
     );
   }
 
-  // Primeiro passo: seções
+  // Primeiro passo: mês
   return (
-    <FrequenciaSecaoSelector
+    <FrequenciaMonthSelector
       usuario={usuario}
       year={year}
       onBack={onBack}
-      onSelectSecao={(secaoId) => onNavigateFrequencia({ year, secaoId })}
+      onSelectMonth={(m) => onNavigateFrequencia({ year, month: m })}
     />
   );
 }

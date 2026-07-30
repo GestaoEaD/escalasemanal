@@ -1,12 +1,11 @@
 /**
  * Contexto de Seção — seleção de documento e checagem de acesso.
  *
- * Matriz final: dentro da própria Divisão, Operador/Gestor/Admin acessam
- * qualquer Seção. Somente Gerente cruza Divisões.
- * `secaoId` identifica lotação e o documento ativo — não é ACL intra-Divisão.
+ * Escalas: dentro da própria Divisão, Op/Gestor/Admin acessam qualquer Seção.
+ * Frequência: Operador só a própria lotação; Admin/Gestor a Divisão; Gerente todas.
  */
 import { Usuario } from "../types";
-import { isGerente } from "./permissions";
+import { isAdministrador, isGerente, isGestor, isOperador } from "./permissions";
 import { normalizeDivisaoId } from "./divisaoIds";
 
 export class SecaoAccessError extends Error {
@@ -33,10 +32,7 @@ export function usuarioSecoesResponsaveisIds(usuario: Usuario | null | undefined
 }
 
 /**
- * Seções acessíveis ao usuário.
- * - Gerente: "ALL" (todas as Divisões)
- * - Admin / Gestor / Operador: todas as Seções da própria Divisão
- *   (`allSecaoIdsInDivisao` se informado, senão "ALL" no escopo da Divisão)
+ * Seções acessíveis em Escalas / navegação geral (por Divisão).
  */
 export function accessibleSecaoIds(
   usuario: Usuario | null | undefined,
@@ -44,10 +40,29 @@ export function accessibleSecaoIds(
 ): string[] | "ALL" {
   if (!usuario?.re) return [];
   if (isGerente(usuario)) return "ALL";
-
-  // Op/Gestor/Admin: toda a Divisão.
   if (!allSecaoIdsInDivisao) return "ALL";
   return Array.from(new Set(allSecaoIdsInDivisao.map(normalizeSecaoId).filter(Boolean)));
+}
+
+/**
+ * Seções acessíveis no Controle de Frequência.
+ * Operador: só a própria lotação; Admin/Gestor: Divisão; Gerente: todas.
+ */
+export function accessibleSecaoIdsFrequencia(
+  usuario: Usuario | null | undefined,
+  allSecaoIdsInDivisao?: string[]
+): string[] | "ALL" {
+  if (!usuario?.re) return [];
+  if (isGerente(usuario)) return "ALL";
+  if (isAdministrador(usuario) || isGestor(usuario)) {
+    if (!allSecaoIdsInDivisao) return "ALL";
+    return Array.from(new Set(allSecaoIdsInDivisao.map(normalizeSecaoId).filter(Boolean)));
+  }
+  if (isOperador(usuario)) {
+    const own = usuarioSecaoId(usuario);
+    return own ? [own] : [];
+  }
+  return [];
 }
 
 export function canAccessSecao(
@@ -65,8 +80,23 @@ export function canAccessSecao(
   const target = normalizeSecaoId(secaoId);
   if (!target) return false;
 
-  // Dentro da própria Divisão, qualquer Seção é acessível.
   return true;
+}
+
+export function canAccessSecaoFrequenciaCtx(
+  usuario: Usuario | null | undefined,
+  secaoId: string,
+  divisaoId?: string
+): boolean {
+  if (!usuario?.re) return false;
+  const target = normalizeSecaoId(secaoId);
+  if (!target) return false;
+  if (isGerente(usuario)) return true;
+  if (divisaoId && normalizeDivisaoId(usuario.divisaoId) !== normalizeDivisaoId(divisaoId)) {
+    return false;
+  }
+  if (isAdministrador(usuario) || isGestor(usuario)) return true;
+  return usuarioSecaoId(usuario) === target;
 }
 
 export function assertSecaoAccess(
@@ -81,10 +111,6 @@ export function assertSecaoAccess(
   }
 }
 
-/**
- * Filtra itens por Seção apenas quando o usuário não tem acesso à Divisão
- * do item. Dentro da própria Divisão, retorna todos os itens com secaoId.
- */
 export function filterByAccessibleSecao<T extends { secaoId?: string; divisaoId?: string }>(
   items: T[],
   usuario: Usuario | null | undefined,

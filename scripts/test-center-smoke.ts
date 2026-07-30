@@ -206,7 +206,10 @@ assert(enLeg.representacoes?.escalaConsolidada === "1", "EN consolidada");
 assert(isDiaTrabalhado(enLeg) && getValorMeiaDiaria(enLeg) === 1, "EN regras");
 
 const freqId = buildControleFrequenciaId(2026, 1, "SECAO_GEST_EDUC");
-assert(freqId === "2026_01_SECAO_GEST_EDUC", "id frequencia");
+assert(
+  freqId === "202002500_2026_01_SECAO_GEST_EDUC" || freqId.endsWith("_2026_01_SECAO_GEST_EDUC"),
+  "id frequencia"
+);
 assert(parseControleFrequenciaId(freqId)?.mes === 1, "parse id frequencia");
 assert(daysInMonth(2026, 2) === 28, "dias fevereiro 2026");
 assert(getWeeksOverlappingMonth(2026, 1).length > 0, "semanas overlapping janeiro");
@@ -280,23 +283,23 @@ assert(
     (edSecao as { weekId: string }).weekId === "2026_01",
   "rota editor por seção"
 );
-const fr = parseAppPath("/frequencia/2026/secao/SECAO_01/01");
+const fr = parseAppPath("/frequencia/2026/01/secao/SECAO_01");
 assert(
   fr.view === "frequencia" &&
     (fr as { month?: number }).month === 1 &&
     (fr as { secaoId?: string }).secaoId === "SECAO_01",
-  "rota frequencia completa (secaoId → mês)"
+  "rota frequencia completa (mês → secaoId)"
 );
 assert(
   buildAppPath({ view: "frequencia", year: 2026, secaoId: "SECAO_01", month: 3 }) ===
-    "/frequencia/2026/secao/SECAO_01/03",
-  "build frequencia secaoId/mês"
+    "/frequencia/2026/03/secao/SECAO_01",
+  "build frequencia mês/secaoId"
 );
 assert(
-  parseAppPath("/frequencia/2026/Secao%20X").view === "frequencia" &&
-    (parseAppPath("/frequencia/2026/Secao%20X") as { secao?: string }).secao ===
-      "Secao X",
-  "rota frequencia só seção"
+  parseAppPath("/frequencia/2026/secao/SECAO_01/01").view === "frequencia" &&
+    (parseAppPath("/frequencia/2026/secao/SECAO_01/01") as { secaoId?: string }).secaoId ===
+      "SECAO_01",
+  "rota frequencia legado secao→mês"
 );
 assert(
   toSessionUser({

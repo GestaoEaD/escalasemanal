@@ -16,6 +16,7 @@ export function normalizeColaboradorCadastro(raw: Colaborador): Colaborador {
     postoGrad: String(raw.postoGrad || "").trim(),
     nome: String(raw.nome || "").trim(),
     secao: normalizeSecaoNome(raw.secao),
+    secaoId: String(raw.secaoId || "").trim(),
     observacao: raw.observacao || "",
     ativo: normalizeAtivoFlag(raw.ativo),
     ordem: typeof raw.ordem === "number" ? raw.ordem : Number(raw.ordem) || 0,
@@ -42,6 +43,7 @@ export function applyCadastroToScheduleRows(
       postoGrad: col.postoGrad,
       nome: col.nome,
       secao: normalizeSecaoNome(col.secao),
+      secaoId: String(col.secaoId || row.secaoId || "").trim() || undefined,
     });
   });
 }
@@ -91,6 +93,7 @@ export function syncScheduleRosterWithCadastro(
           postoGrad: col.postoGrad,
           nome: col.nome,
           secao: normalizeSecaoNome(col.secao),
+          secaoId: String(col.secaoId || row.secaoId || "").trim() || undefined,
         })
       );
     } else {
@@ -113,6 +116,7 @@ export function syncScheduleRosterWithCadastro(
       postoGrad: col.postoGrad,
       nome: col.nome,
       secao: normalizeSecaoNome(col.secao),
+      secaoId: String(col.secaoId || "").trim() || undefined,
       observacao: col.observacao,
     });
     added.push(row);

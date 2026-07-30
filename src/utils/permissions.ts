@@ -49,16 +49,48 @@ export function canAccessConfig(usuario: Usuario | null | undefined): boolean {
   return isAdministrador(usuario) || isGerente(usuario);
 }
 
-/** Cadastros da Divisão: Colaboradores e Postos (Seções nascem em Divisões). */
-export function canManageCadastrosDivisao(
+/** Colaboradores da Divisão — Admin ou Gerente. */
+export function canManageColaboradores(
   usuario: Usuario | null | undefined
 ): boolean {
   return isAdministrador(usuario) || isGerente(usuario);
 }
 
-/** Alias histórico — Seções passam a ser geridas dentro de Divisões. */
+/** Seções da Divisão — Admin (própria) ou Gerente. */
 export function canManageSecoes(usuario: Usuario | null | undefined): boolean {
-  return canManageCadastrosDivisao(usuario);
+  return isAdministrador(usuario) || isGerente(usuario);
+}
+
+/** Postos — somente Gerente. */
+export function canManagePostos(usuario: Usuario | null | undefined): boolean {
+  return isGerente(usuario);
+}
+
+/** Alias: cadastros de pessoas da Divisão (colaboradores). */
+export function canManageCadastrosDivisao(
+  usuario: Usuario | null | undefined
+): boolean {
+  return canManageColaboradores(usuario);
+}
+
+/**
+ * Seções visíveis no Controle de Frequência.
+ * Operador: só a própria lotação; Admin/Gestor: Divisão; Gerente: todas.
+ */
+export function canAccessSecaoFrequencia(
+  usuario: Usuario | null | undefined,
+  secaoId: string,
+  divisaoId?: string
+): boolean {
+  if (!usuario?.re) return false;
+  const target = String(secaoId || "").trim();
+  if (!target) return false;
+  if (isGerente(usuario)) return true;
+  if (divisaoId && normalizeDivisaoId(usuario.divisaoId) !== normalizeDivisaoId(divisaoId)) {
+    return false;
+  }
+  if (isAdministrador(usuario) || isGestor(usuario)) return true;
+  return String(usuario.secaoId || "").trim() === target;
 }
 
 /** Gerenciamento de usuários/perfis (Admin da Divisão ou Gerente). */

@@ -19,23 +19,26 @@ export function divisaoDocId(codigo: string): string {
   return normalizeDivisaoId(codigo);
 }
 
-/** ID de escala: `{divisaoId}__{secaoId}__{ano}__{semana2}` */
+/**
+ * ID canônico de escala (Semanal / Alteração): `{divisaoId}__{ano}__{semana2}`.
+ * Escalas pertencem à Divisão — não à Seção.
+ */
 export function buildEscalaDocId(
   divisaoId: string,
-  secaoId: string,
   ano: number,
   semana: number | string
 ): string {
   const d = normalizeDivisaoId(divisaoId) || DIVISAO_EAD_ID;
-  const s = normalizeSecaoIdForDoc(secaoId);
-  if (!s) throw new Error("secaoId é obrigatório para montar o ID da escala.");
   const w = String(semana).padStart(2, "0");
-  return `${d}__${s}__${ano}__${w}`;
+  return `${d}__${ano}__${w}`;
 }
 
 /**
- * Aceita ID novo `{divisaoId}__{secaoId}__{ano}__{semana}`,
- * legado tenant `{divisaoId}_{ano}_{semana}` e legado `{ano}_{semana}`.
+ * Aceita:
+ * - canônico `{divisaoId}__{ano}__{semana}`
+ * - legado por seção `{divisaoId}__{secaoId}__{ano}__{semana}`
+ * - legado tenant `{divisaoId}_{ano}_{semana}`
+ * - legado curto `{ano}_{semana}`
  */
 export function parseEscalaDocId(id: string): {
   divisaoId: string;
@@ -46,6 +49,27 @@ export function parseEscalaDocId(id: string): {
 } | null {
   const raw = String(id || "").trim();
   const parts = raw.split("__");
+
+  // Canônico: divisao__ano__semana
+  if (parts.length === 3) {
+    const ano = Number(parts[1]);
+    const semana = Number(parts[2]);
+    if (
+      Number.isFinite(ano) &&
+      ano >= 2000 &&
+      ano <= 2100 &&
+      Number.isFinite(semana) &&
+      semana >= 1 &&
+      semana <= 53
+    ) {
+      const divisaoId = normalizeDivisaoId(parts[0]);
+      if (divisaoId) {
+        return { divisaoId, secaoId: null, ano, semana, legacy: false };
+      }
+    }
+  }
+
+  // Legado por seção: divisao__secao__ano__semana
   if (parts.length === 4) {
     const ano = Number(parts[2]);
     const semana = Number(parts[3]);
@@ -60,12 +84,12 @@ export function parseEscalaDocId(id: string): {
       const divisaoId = normalizeDivisaoId(parts[0]);
       const secaoId = normalizeSecaoIdForDoc(parts[1]);
       if (divisaoId && secaoId) {
-        return { divisaoId, secaoId, ano, semana, legacy: false };
+        return { divisaoId, secaoId, ano, semana, legacy: true };
       }
     }
   }
 
-  // Legado tenant: qualquer_prefixo_YYYY_WW (últimos dois segmentos são ano/semana)
+  // Legado tenant: qualquer_prefixo_YYYY_WW
   const legacyTenantParts = raw.split("_");
   if (legacyTenantParts.length >= 3) {
     const semana = Number(legacyTenantParts[legacyTenantParts.length - 1]);

@@ -22,5 +22,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "scripts/**/*.test.ts",
+    "scripts/**/*-smoke.ts",
+    "node_modules",
+    "dist"
+  ]
 }

@@ -638,7 +638,7 @@ export default function FrequenciaEditor({
                 if (!docData || !canExportScale(usuario)) return;
                 exportFrequenciaToExcel({ doc: docData, codigoOpm });
                 void registerAuditOperation({
-                  tipo: "EXPORTAR",
+                  tipo: "EXPORTAR_FREQUENCIA",
                   escala: "FREQUENCIA",
                   usuario,
                   ano: docData.ano,
@@ -668,7 +668,7 @@ export default function FrequenciaEditor({
                   },
                 });
                 void registerAuditOperation({
-                  tipo: "EXPORTAR",
+                  tipo: "EXPORTAR_FREQUENCIA",
                   escala: "FREQUENCIA",
                   usuario,
                   ano: docData.ano,

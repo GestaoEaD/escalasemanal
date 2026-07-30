@@ -2,17 +2,8 @@
  * Serviço centralizado de auditoria.
  * Nenhum componente deve gravar diretamente na coleção `logs`.
  */
-import {
-  db,
-  collection,
-  doc,
-  getDocs,
-  query,
-  where,
-  setDoc,
-  serverTimestamp,
-  runTransaction,
-} from "../firebase";
+import { db, collection, getDocs, query, where, serverTimestamp } from "../firebase";
+import { allocateLogId, saveLog } from "../repositories/auditRepository";
 import {
   AuditAlteracao,
   AuditDocumentoTipo,
@@ -25,7 +16,6 @@ import {
   EscalaStatus,
   Usuario,
 } from "../types";
-import { prepareFirestoreWrite } from "./firestoreSanitize";
 import { parseEscalaDocId } from "./divisaoIds";
 import { resolveActiveDivisaoId } from "./divisaoContext";
 
@@ -73,18 +63,6 @@ export function statusLabel(status?: EscalaStatus | string | null): string {
     return ESCALA_STATUS_LABELS[status as EscalaStatus];
   }
   return String(status);
-}
-
-async function allocateLogId(): Promise<string> {
-  const counterRef = doc(db, "counters", "logs");
-  const next = await runTransaction(db, async (tx) => {
-    const snap = await tx.get(counterRef);
-    const current = snap.exists() ? Number(snap.data()?.next || 1) : 1;
-    const value = Number.isFinite(current) && current > 0 ? current : 1;
-    tx.set(counterRef, { next: value + 1 }, { merge: true });
-    return value;
-  });
-  return `LOG-${String(next).padStart(6, "0")}`;
 }
 
 function parseAnoSemana(anoSemana?: string): { ano?: number; semana?: number } {
@@ -163,10 +141,7 @@ export async function registerAuditOperation(
   if (input.motivo) op.motivo = input.motivo;
   if (input.origem) op.origem = input.origem;
 
-  await setDoc(
-    doc(db, LOGS_COLLECTION, id),
-    prepareFirestoreWrite(`logs/${id}`, op as unknown as Record<string, unknown>)
-  );
+  await saveLog(id, op as unknown as Record<string, unknown>);
 
   return op;
 }
@@ -180,14 +155,20 @@ export async function auditSalvarEscala(options: {
   statusAnterior?: string;
   statusAtual?: string;
   alteracoes: AuditAlteracao[];
+  isNew?: boolean;
 }): Promise<AuditOperation | null> {
-  if (!options.alteracoes.length) return null;
+  if (!options.alteracoes.length && !options.isNew) return null;
+  const isAlt = options.tipoDoc === "alteracao";
+  const tipo: AuditOperacaoTipo = options.isNew
+    ? isAlt
+      ? "CRIAR_ESCALA_ALTERACAO"
+      : "CRIAR_ESCALA_SEMANAL"
+    : isAlt
+      ? "EDITAR_ESCALA_ALTERACAO"
+      : "EDITAR_ESCALA_SEMANAL";
   return registerAuditOperation({
-    tipo:
-      options.tipoDoc === "alteracao"
-        ? "SALVAR_ESCALA_ALTERACAO"
-        : "SALVAR_ESCALA_SEMANAL",
-    escala: options.tipoDoc === "alteracao" ? "ALTERACAO" : "SEMANAL",
+    tipo,
+    escala: isAlt ? "ALTERACAO" : "SEMANAL",
     usuario: options.usuario,
     anoSemana: options.anoSemana,
     versao: options.versao,
@@ -226,7 +207,9 @@ export async function auditWorkflowEscala(options: {
         reabrir: "REABRIR_CONTROLE_FREQUENCIA",
       }
     : {
-        enviar: isAlt ? "ENVIAR_ESCALA_ALTERACAO" : "ENVIAR_ESCALA_SEMANAL",
+        enviar: isAlt
+          ? "ENVIAR_ESCALA_ALTERACAO_APROVACAO"
+          : "ENVIAR_ESCALA_SEMANAL_APROVACAO",
         aprovar: isAlt ? "APROVAR_ESCALA_ALTERACAO" : "APROVAR_ESCALA_SEMANAL",
         revisao: isAlt ? "SOLICITAR_REVISAO_ALTERACAO" : "SOLICITAR_REVISAO_SEMANAL",
         cancelar: isAlt
@@ -280,10 +263,18 @@ export async function auditExportacao(options: {
   anoSemana?: string;
   detalhes?: string;
   secaoId?: string;
+  documento?: AuditDocumentoTipo;
 }): Promise<AuditOperation> {
+  const docTipo = options.documento || "SISTEMA";
+  const tipo: AuditOperacaoTipo =
+    docTipo === "FREQUENCIA"
+      ? "EXPORTAR_FREQUENCIA"
+      : docTipo === "SEMANAL" || docTipo === "ALTERACAO"
+        ? "EXPORTAR_ESCALA"
+        : "EXPORTAR";
   return registerAuditOperation({
-    tipo: "EXPORTAR",
-    escala: "SISTEMA",
+    tipo,
+    escala: docTipo,
     usuario: options.usuario,
     anoSemana: options.anoSemana,
     detalhes: options.detalhes,
@@ -321,16 +312,62 @@ export async function auditConfiguracao(options: {
   });
 }
 
+/** Auditoria tipada de CRUD organizacional / permissões. */
+export async function auditCrudEntidade(options: {
+  usuario: Usuario;
+  tipo: AuditOperacaoTipo;
+  alteracoes?: AuditAlteracao[];
+  detalhes?: string;
+  secaoId?: string;
+}): Promise<AuditOperation> {
+  return registerAuditOperation({
+    tipo: options.tipo,
+    escala: "CONFIGURACAO",
+    usuario: options.usuario,
+    anoSemana: "Configurações",
+    alteracoes: options.alteracoes,
+    detalhes: options.detalhes,
+    secaoId: options.secaoId,
+  });
+}
+
+export async function auditAlterarPermissao(options: {
+  usuario: Usuario;
+  alteracoes: AuditAlteracao[];
+  detalhes?: string;
+}): Promise<AuditOperation | null> {
+  if (!options.alteracoes.length) return null;
+  return auditCrudEntidade({
+    usuario: options.usuario,
+    tipo: "ALTERAR_PERMISSAO",
+    alteracoes: options.alteracoes,
+    detalhes: options.detalhes || "Alteração de permissão/perfil",
+  });
+}
+
 /** Normaliza documento Firestore (novo ou legado) para AuditOperation. */
 export function normalizeAuditOperation(
   id: string,
   raw: Record<string, any>
 ): AuditOperation {
+  const canonicalTipo = (t: string): AuditOperacaoTipo => {
+    const map: Record<string, AuditOperacaoTipo> = {
+      SALVAR_ESCALA_SEMANAL: "EDITAR_ESCALA_SEMANAL",
+      SALVAR_ESCALA_ALTERACAO: "EDITAR_ESCALA_ALTERACAO",
+      ENVIAR_ESCALA_SEMANAL: "ENVIAR_ESCALA_SEMANAL_APROVACAO",
+      ENVIAR_ESCALA_ALTERACAO: "ENVIAR_ESCALA_ALTERACAO_APROVACAO",
+      SYNC_CONTROLE_FREQUENCIA: "SINCRONIZAR_FREQUENCIA",
+      SALVAR_CONTROLE_FREQUENCIA: "EDITAR_FREQUENCIA",
+      EXPORTAR: "EXPORTAR_ESCALA",
+    };
+    return (map[t] || t) as AuditOperacaoTipo;
+  };
+
   // Novo modelo
   if (raw.tipo && raw.usuario && typeof raw.usuario === "object") {
     return {
       id: raw.id || id,
-      tipo: raw.tipo as AuditOperacaoTipo,
+      tipo: canonicalTipo(String(raw.tipo)),
       escala: raw.escala,
       semana: raw.semana,
       ano: raw.ano,
@@ -359,6 +396,7 @@ export function normalizeAuditOperation(
       motivo: raw.motivo,
       legado: !!raw.legado,
       ...(raw.divisaoId ? { divisaoId: String(raw.divisaoId) } : {}),
+      ...(raw.secaoId ? { secaoId: String(raw.secaoId) } : {}),
     };
   }
 

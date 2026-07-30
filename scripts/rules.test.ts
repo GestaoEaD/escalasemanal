@@ -167,7 +167,6 @@ async function semear() {
 
     await setDoc(doc(db, "escalas_semanais", "esc-a1"), {
       divisaoId: DIV_A,
-      secaoId: secaoA1,
       ano: 2026,
       semana: 31,
       status: "aguardando_aprovacao",
@@ -175,15 +174,13 @@ async function semear() {
     });
     await setDoc(doc(db, "escalas_semanais", "esc-a2"), {
       divisaoId: DIV_A,
-      secaoId: secaoA2,
       ano: 2026,
-      semana: 31,
+      semana: 32,
       status: "aguardando_aprovacao",
       rows: [],
     });
     await setDoc(doc(db, "escalas_semanais", "esc-b1"), {
       divisaoId: DIV_B,
-      secaoId: secaoB1,
       ano: 2026,
       semana: 31,
       status: "aguardando_aprovacao",
@@ -192,9 +189,8 @@ async function semear() {
 
     await setDoc(doc(db, "escalas_semanais", "esc-edit-a1"), {
       divisaoId: DIV_A,
-      secaoId: secaoA1,
       ano: 2026,
-      semana: 32,
+      semana: 33,
       status: "em_edicao",
       rows: [],
     });
@@ -205,6 +201,41 @@ async function semear() {
       ano: 2026,
       mes: 7,
       status: "em_edicao",
+    });
+    await setDoc(doc(db, "controle_frequencia", "freq-a2"), {
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+      ano: 2026,
+      mes: 7,
+      status: "em_edicao",
+    });
+
+    const baseSolicitacao = (id: string) => ({
+      token: id,
+      tipoDocumento: "ESCALA_SEMANAL",
+      semana: 31,
+      ano: 2026,
+      escalaId: "esc-a1",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      versao: 1,
+      status: "AGUARDANDO",
+      criadoPor: { nome: "Operador", re: PERFIS.Operador.re, postoGrad: "" },
+      criadoEm: new Date("2026-01-01"),
+      expiraEm: new Date("2026-02-01"),
+      utilizado: false,
+      resultado: null,
+      finalizadoPor: null,
+    });
+    await setDoc(doc(db, "solicitacoes_aprovacao", "sol-a"), baseSolicitacao("sol-a"));
+    await setDoc(doc(db, "solicitacoes_aprovacao", "sol-b"), baseSolicitacao("sol-b"));
+    await setDoc(doc(db, "solicitacoes_aprovacao", "sol-c"), baseSolicitacao("sol-c"));
+    await setDoc(doc(db, "solicitacoes_aprovacao", "sol-d"), baseSolicitacao("sol-d"));
+
+    await setDoc(doc(db, "presenca_online", "presenca-sem-divisao"), {
+      re: "999",
+      nome: "SemDivisao",
+      lastSeen: new Date("2026-01-01"),
     });
 
     await setDoc(doc(db, "configuracoes", "gerais"), { nomeOrganizacao: "PMSP" });
@@ -242,26 +273,26 @@ async function main() {
     );
   }
 
-  console.log("\n=== Isolamento por seção ===");
-  await verifica("[Operador] ler própria seção", "ALLOW", () =>
+  console.log("\n=== Isolamento por Divisão (escalas) ===");
+  await verifica("[Operador] ler escala da própria Divisão", "ALLOW", () =>
     getDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-a1"))
   );
-  await verifica("[Operador] ler outra seção da mesma divisão", "ALLOW", () =>
+  await verifica("[Operador] ler outra escala da mesma Divisão", "ALLOW", () =>
     getDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-a2"))
   );
-  await verifica("[Administrador] ler todas as seções da própria Divisão", "ALLOW", () =>
+  await verifica("[Administrador] ler escala da própria Divisão", "ALLOW", () =>
     getDoc(doc(dbDe("Administrador"), "escalas_semanais", "esc-a2"))
   );
   await verifica("[Administrador] NÃO ler outra Divisão", "DENY", () =>
     getDoc(doc(dbDe("Administrador"), "escalas_semanais", "esc-b1"))
   );
-  await verifica("[Gestor] ler seção sob responsabilidade", "ALLOW", () =>
+  await verifica("[Gestor] ler escala da própria Divisão", "ALLOW", () =>
     getDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-a2"))
   );
-  await verifica("[Gestor] ler qualquer seção da própria Divisão", "ALLOW", () =>
+  await verifica("[Gestor] ler qualquer escala da própria Divisão", "ALLOW", () =>
     getDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-a1"))
   );
-  await verifica("[Gestor] NÃO ler seção fora da responsabilidade", "DENY", () =>
+  await verifica("[Gestor] NÃO ler escala de outra Divisão", "DENY", () =>
     getDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-b1"))
   );
   await verifica("[Gerente] ler cruzando Divisões", "ALLOW", () =>
@@ -282,20 +313,20 @@ async function main() {
     setDoc(doc(dbDe("Gestor"), "divisoes", "202003000"), { codigo: "202003000", nome: "Nova", ativo: true })
   );
 
-  console.log("\n=== Workflow por seção ===");
-  await verifica("[Operador] criar escala com secaoId", "ALLOW", () =>
+  console.log("\n=== Workflow por Divisão (escalas sem secaoId) ===");
+  await verifica("[Operador] criar escala sem secaoId", "ALLOW", () =>
     setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-op"), {
       divisaoId: DIV_A,
-      secaoId: secaoA1,
       ano: 2026,
       semana: 40,
       status: "em_edicao",
       rows: [],
     })
   );
-  await verifica("[Operador] NÃO criar escala sem secaoId", "DENY", () =>
-    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-op-sem-secao"), {
+  await verifica("[Operador] NÃO criar escala com secaoId", "DENY", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-op-com-secao"), {
       divisaoId: DIV_A,
+      secaoId: secaoA1,
       ano: 2026,
       semana: 41,
       status: "em_edicao",
@@ -305,47 +336,41 @@ async function main() {
   await verifica("[Gestor] NÃO criar escala", "DENY", () =>
     setDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-gestor"), {
       divisaoId: DIV_A,
-      secaoId: secaoA1,
       ano: 2026,
       semana: 42,
       status: "em_edicao",
       rows: [],
     })
   );
-  await verifica("[Operador] submeter própria seção", "ALLOW", () =>
-    updateDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
-      status: "aguardando_aprovacao",
+  // Salvar na UI reescreve o documento inteiro (setDoc sem merge):
+  // o payload precisa reenviar divisaoId e NÃO deve incluir secaoId.
+  await verifica("[Operador] salvar escala reescrevendo sem secaoId", "ALLOW", () =>
+    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
+      id: "esc-edit-a1",
+      divisaoId: DIV_A,
+      ano: 2026,
+      semana: 33,
+      status: "em_edicao",
+      rows: [],
     })
   );
-  // Salvar na UI reescreve o documento inteiro (setDoc sem merge):
-  // o payload precisa reenviar divisaoId/secaoId, senão a atualização é negada.
-  await verifica("[Operador] salvar escala reescrevendo com secaoId", "ALLOW", () =>
+  await verifica("[Operador] NÃO salvar escala reescrevendo com secaoId", "DENY", () =>
     setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
       id: "esc-edit-a1",
       divisaoId: DIV_A,
       secaoId: secaoA1,
       ano: 2026,
-      semana: 32,
+      semana: 33,
       status: "em_edicao",
       rows: [],
     })
   );
-  await verifica("[Operador] NÃO salvar escala reescrevendo sem secaoId", "DENY", () =>
-    setDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
-      id: "esc-edit-a1",
-      divisaoId: DIV_A,
-      ano: 2026,
-      semana: 32,
-      status: "em_edicao",
-      rows: [],
-    })
-  );
-  await verifica("[Gerente] NÃO remover secaoId ao reescrever escala", "DENY", () =>
+  await verifica("[Gerente] salvar escala sem secaoId", "ALLOW", () =>
     setDoc(doc(dbDe("Gerente"), "escalas_semanais", "esc-edit-a1"), {
       id: "esc-edit-a1",
       divisaoId: DIV_A,
       ano: 2026,
-      semana: 32,
+      semana: 33,
       status: "em_edicao",
       rows: [],
     })
@@ -354,19 +379,23 @@ async function main() {
     setDoc(doc(dbDe("Gerente"), "escalas_semanais", "esc-edit-a1"), {
       id: "esc-edit-a1",
       divisaoId: DIV_B,
-      secaoId: secaoA1,
       ano: 2026,
-      semana: 32,
+      semana: 33,
       status: "em_edicao",
       rows: [],
     })
   );
-  await verifica("[Gestor] aprovar própria seção", "ALLOW", () =>
+  await verifica("[Operador] submeter escala da própria Divisão", "ALLOW", () =>
+    updateDoc(doc(dbDe("Operador"), "escalas_semanais", "esc-edit-a1"), {
+      status: "aguardando_aprovacao",
+    })
+  );
+  await verifica("[Gestor] aprovar escala da própria Divisão", "ALLOW", () =>
     updateDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-a1"), {
       status: "aprovada",
     })
   );
-  await verifica("[Gestor] aprovar seção responsável", "ALLOW", () =>
+  await verifica("[Gestor] aprovar outra escala da própria Divisão", "ALLOW", () =>
     updateDoc(doc(dbDe("Gestor"), "escalas_semanais", "esc-a2"), {
       status: "aprovada",
     })
@@ -605,6 +634,107 @@ async function main() {
   await verifica("[Operador] NÃO registrar presença de outro RE", "DENY", () =>
     setDoc(doc(dbDe("Operador"), "presenca_online", "999"), {
       re: "999",
+      lastSeen: serverTimestamp(),
+    })
+  );
+
+  console.log("\n=== controle_frequencia — Operador restrito à própria Seção ===");
+  await verifica("[Operador] NÃO ler frequência de outra seção", "DENY", () =>
+    getDoc(doc(dbDe("Operador"), "controle_frequencia", "freq-a2"))
+  );
+  await verifica("[Administrador] ler frequência de outra seção (mesma Divisão)", "ALLOW", () =>
+    getDoc(doc(dbDe("Administrador"), "controle_frequencia", "freq-a2"))
+  );
+  await verifica("[Gestor] ler frequência de outra seção (mesma Divisão)", "ALLOW", () =>
+    getDoc(doc(dbDe("Gestor"), "controle_frequencia", "freq-a2"))
+  );
+  await verifica("[Operador] NÃO editar frequência de outra seção", "DENY", () =>
+    updateDoc(doc(dbDe("Operador"), "controle_frequencia", "freq-a2"), { mes: 9 })
+  );
+  await verifica("[Operador] editar frequência da própria seção", "ALLOW", () =>
+    updateDoc(doc(dbDe("Operador"), "controle_frequencia", "freq-a1"), { mes: 9 })
+  );
+  await verifica("[Operador] NÃO criar frequência em outra seção", "DENY", () =>
+    setDoc(doc(dbDe("Operador"), "controle_frequencia", "freq-op-outra-secao"), {
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+      ano: 2026,
+      mes: 10,
+      status: "em_edicao",
+    })
+  );
+  await verifica("[Operador] criar frequência na própria seção", "ALLOW", () =>
+    setDoc(doc(dbDe("Operador"), "controle_frequencia", "freq-op-propria-secao"), {
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      ano: 2026,
+      mes: 10,
+      status: "em_edicao",
+    })
+  );
+
+  console.log("\n=== solicitacoes_aprovacao — transições restritas por papel ===");
+  await verifica("[Operador] NÃO aprovar solicitação (papel não autorizado)", "DENY", () =>
+    updateDoc(doc(dbDe("Operador"), "solicitacoes_aprovacao", "sol-a"), {
+      status: "FINALIZADA",
+      resultado: "APROVADA",
+      utilizado: true,
+    })
+  );
+  await verifica("[Gestor] aprovar solicitação (AGUARDANDO → FINALIZADA)", "ALLOW", () =>
+    updateDoc(doc(dbDe("Gestor"), "solicitacoes_aprovacao", "sol-a"), {
+      status: "FINALIZADA",
+      resultado: "APROVADA",
+      utilizado: true,
+    })
+  );
+  await verifica("[Gestor] NÃO cancelar solicitação (papel não autorizado)", "DENY", () =>
+    updateDoc(doc(dbDe("Gestor"), "solicitacoes_aprovacao", "sol-b"), {
+      status: "FINALIZADA",
+      resultado: "CANCELADA",
+      utilizado: true,
+    })
+  );
+  await verifica("[Operador] cancelar a própria solicitação", "ALLOW", () =>
+    updateDoc(doc(dbDe("Operador"), "solicitacoes_aprovacao", "sol-b"), {
+      status: "FINALIZADA",
+      resultado: "CANCELADA",
+      utilizado: true,
+    })
+  );
+  await verifica("[Operador] NÃO alterar secaoId da solicitação", "DENY", () =>
+    updateDoc(doc(dbDe("Operador"), "solicitacoes_aprovacao", "sol-c"), {
+      secaoId: secaoA2,
+    })
+  );
+  await verifica("[Operador] NÃO update solicitação alheia livremente (sem transição válida)", "DENY", () =>
+    updateDoc(doc(dbDe("Operador"), "solicitacoes_aprovacao", "sol-d"), {
+      versao: 5,
+    })
+  );
+
+  console.log("\n=== Gaps de segurança adicionais (logs e presença) ===");
+  await verifica("[Administrador] NÃO criar log sem divisaoId", "DENY", () =>
+    setDoc(doc(dbDe("Administrador"), "logs", "LOG-ADMIN-SEM-DIVISAO"), {
+      timestamp: serverTimestamp(),
+      tipo: "X",
+    })
+  );
+  await verifica("[Gerente] criar log sem divisaoId", "ALLOW", () =>
+    setDoc(doc(dbDe("Gerente"), "logs", "LOG-GERENTE-SEM-DIVISAO"), {
+      timestamp: serverTimestamp(),
+      tipo: "X",
+    })
+  );
+  await verifica("[Administrador] NÃO ler presença sem divisaoId (outro tenant)", "DENY", () =>
+    getDoc(doc(dbDe("Administrador"), "presenca_online", "presenca-sem-divisao"))
+  );
+  await verifica("[Gerente] ler presença sem divisaoId", "ALLOW", () =>
+    getDoc(doc(dbDe("Gerente"), "presenca_online", "presenca-sem-divisao"))
+  );
+  await verifica("[Operador] NÃO registrar presença própria sem divisaoId", "DENY", () =>
+    setDoc(doc(dbDe("Operador"), "presenca_online", "presenca-op-sem-divisao"), {
+      re: PERFIS.Operador.re,
       lastSeen: serverTimestamp(),
     })
   );

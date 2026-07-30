@@ -157,15 +157,16 @@ export function prepareFirestoreWrite<T extends Record<string, unknown>>(
   label: string,
   data: T
 ): T {
-  console.log(`Escala antes do Firestore (${label}):`, data);
-
-  const undefinedPaths = findUndefinedPaths(data);
-  if (undefinedPaths.length > 0) {
-    console.warn(
-      `[Firestore] Campos undefined detectados em "${label}" (serão removidos):`,
-      undefinedPaths
-    );
-    undefinedPaths.forEach((p) => console.warn(`  → ${p} = undefined`));
+  const isDev = Boolean(
+    (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV
+  );
+  if (isDev) {
+    const undefinedPaths = findUndefinedPaths(data);
+    if (undefinedPaths.length > 0) {
+      console.warn(
+        `[Firestore] Campos undefined em "${label}" (serão removidos): ${undefinedPaths.join(", ")}`
+      );
+    }
   }
 
   const cleaned = sanitizeFirestoreData(data);

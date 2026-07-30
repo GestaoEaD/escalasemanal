@@ -45,6 +45,7 @@ import { applyWeekendDefault } from "../utils/escalaPayload";
 import { canApproveScales, confirmGestorRe } from "../utils/permissions";
 import { normalizeRe } from "../utils/reUtils";
 import { canAccessSecao } from "../utils/secaoContext";
+import { canEnterDivisao } from "../utils/divisaoContext";
 import {
   approveFrequencia,
   requestFrequenciaRevision,
@@ -455,10 +456,15 @@ export default function AprovacaoPage({
           return;
         }
 
-        if (!canAccessSecao(usuario, sol.secaoId, sol.divisaoId)) {
+        const solSecao = String(sol.secaoId || "").trim();
+        const solDiv = String(sol.divisaoId || "").trim();
+        const solOk = solSecao
+          ? canAccessSecao(usuario, solSecao, solDiv)
+          : canEnterDivisao(usuario, solDiv);
+        if (!solOk) {
           setSolicitacao(sol);
           setEscala(null);
-          setGateError("Você não possui acesso a esta seção.");
+          setGateError("Você não possui acesso a esta Divisão/Seção.");
           return;
         }
 
@@ -496,9 +502,14 @@ export default function AprovacaoPage({
         setEscala(null);
         setError(`${getEscalaDocumentoLabel(resolvedTipo)} não encontrada.`);
       } else {
-        if (!canAccessSecao(usuario, docData.secaoId, docData.divisaoId)) {
+        const docSecao = String(docData.secaoId || "").trim();
+        const docDiv = String(docData.divisaoId || "").trim();
+        const docOk = docSecao
+          ? canAccessSecao(usuario, docSecao, docDiv)
+          : canEnterDivisao(usuario, docDiv);
+        if (!docOk) {
           setEscala(null);
-          setGateError("Você não possui acesso a esta seção.");
+          setGateError("Você não possui acesso a esta Divisão/Seção.");
           return;
         }
         setEscala(docData);

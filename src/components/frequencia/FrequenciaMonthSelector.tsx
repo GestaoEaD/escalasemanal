@@ -1,17 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { EscalaStatus, MESES_NOMES, Usuario } from "../../types";
-import { loadFrequenciaMonthStatuses, loadSecoes } from "../../utils/frequenciaService";
+import { loadFrequenciaMonthStatuses } from "../../utils/frequenciaService";
 import {
   cardBorderStyle,
   resolveMonthCardTone,
 } from "../../utils/cardBorderTone";
-import { ArrowLeft, Building2, CalendarDays } from "lucide-react";
+import { ArrowLeft, CalendarDays } from "lucide-react";
 import StatusBadge from "../StatusBadge";
 
 interface Props {
   usuario: Usuario;
   year: number;
-  secaoId: string;
+  /** Quando informado, mostra status só daquela seção; senão, agrega a Divisão. */
+  secaoId?: string;
   secao?: string;
   onBack: () => void;
   onSelectMonth: (mes: number) => void;
@@ -39,15 +40,13 @@ function monthCardStatus(
 export default function FrequenciaMonthSelector({
   usuario,
   year,
-  secaoId,
-  secao = "",
+  secaoId = "",
   onBack,
   onSelectMonth,
 }: Props) {
   const [byMonth, setByMonth] = useState<
     Record<number, { count: number; statuses: EscalaStatus[] }>
   >({});
-  const [secaoNome, setSecaoNome] = useState(secao);
   const [loading, setLoading] = useState(true);
   const now = new Date();
 
@@ -58,13 +57,8 @@ export default function FrequenciaMonthSelector({
       try {
         const { resolveActiveDivisaoId } = await import("../../utils/divisaoContext");
         const divisaoId = resolveActiveDivisaoId(usuario);
-        const [map, secoes] = await Promise.all([
-          loadFrequenciaMonthStatuses(year, secaoId, divisaoId),
-          loadSecoes(divisaoId, usuario),
-        ]);
-        const secaoDoc = secoes.find((s) => s.id === secaoId);
+        const map = await loadFrequenciaMonthStatuses(year, secaoId || undefined, divisaoId);
         if (!cancelled) setByMonth(map);
-        if (!cancelled) setSecaoNome(secaoDoc?.nome || secao || secaoId);
       } catch (e) {
         console.error(e);
       } finally {
@@ -74,7 +68,7 @@ export default function FrequenciaMonthSelector({
     return () => {
       cancelled = true;
     };
-  }, [year, secao, secaoId, usuario]);
+  }, [year, secaoId, usuario]);
 
   return (
     <div className="flex-1 bg-gray-50 pb-12 w-full max-w-full min-w-0">
@@ -86,17 +80,14 @@ export default function FrequenciaMonthSelector({
             className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer"
           >
             <ArrowLeft size={16} />
-            Seções
+            Voltar
           </button>
           <div className="h-5 w-px bg-gray-200" />
           <div className="flex items-center gap-2 min-w-0">
-            <Building2 size={16} className="text-blue-600 shrink-0" />
+            <CalendarDays size={16} className="text-blue-600 shrink-0" />
             <h1 className="text-sm font-bold text-gray-900 truncate">
-              {secaoNome || secaoId}
+              Controle de Frequência · {year}
             </h1>
-            <span className="text-gray-300">·</span>
-            <CalendarDays size={16} className="text-gray-500 shrink-0" />
-            <span className="text-sm font-semibold text-gray-600">{year}</span>
           </div>
         </div>
       </header>
@@ -104,8 +95,7 @@ export default function FrequenciaMonthSelector({
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 w-full min-w-0">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione o mês</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Controle de Frequência de{" "}
-          <span className="font-semibold text-gray-700">{secaoNome || secaoId}</span> · {year}
+          Em seguida você escolherá a Seção do controle.
         </p>
 
         {loading ? (
@@ -121,48 +111,25 @@ export default function FrequenciaMonthSelector({
                 month: mes,
                 now,
               });
-              const isCurrent =
-                year === now.getFullYear() && mes === now.getMonth() + 1;
-
               return (
                 <button
                   key={mes}
                   type="button"
                   onClick={() => onSelectMonth(mes)}
+                  className="text-left bg-white rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-blue-400"
                   style={cardBorderStyle(tone)}
-                  className="text-left rounded-xl p-4 cursor-pointer transition-all shadow-sm hover:shadow-md"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div
-                      className={`text-base font-bold ${
-                        tone === "aprovada"
-                          ? "text-emerald-900"
-                          : tone === "aguardando"
-                            ? "text-amber-950"
-                            : tone === "atual"
-                              ? "text-blue-900"
-                              : tone === "futuro"
-                                ? "text-gray-700"
-                                : "text-gray-500"
-                      }`}
-                    >
-                      {nome}
-                    </div>
-                    {isCurrent && (
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white uppercase tracking-tight shrink-0">
-                        Atual
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <span className="text-sm font-bold text-gray-900">{nome}</span>
                     {info.status ? (
-                      <StatusBadge status={info.status} size="sm" />
+                      <StatusBadge status={info.status} />
                     ) : (
-                      <span className="text-[10px] font-bold uppercase text-gray-400">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase">
                         {info.label}
                       </span>
                     )}
                   </div>
+                  <p className="text-[11px] text-gray-500">{info.label}</p>
                 </button>
               );
             })}

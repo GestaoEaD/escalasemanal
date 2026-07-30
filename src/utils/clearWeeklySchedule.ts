@@ -28,6 +28,7 @@ export function buildInitialWeeklyScheduleRow(identity: {
   postoGrad: string;
   nome: string;
   secao: string;
+  secaoId?: string;
   observacao?: string;
 }): ScheduleRow {
   return cleanScheduleRow({
@@ -35,6 +36,7 @@ export function buildInitialWeeklyScheduleRow(identity: {
     postoGrad: identity.postoGrad,
     nome: identity.nome,
     secao: identity.secao,
+    ...(identity.secaoId ? { secaoId: identity.secaoId } : {}),
     ...getInitialWeeklyEditableFields(),
     observacao: identity.observacao?.trim()
       ? identity.observacao
@@ -54,6 +56,7 @@ export function resetWeeklyRowsToInitialState(rows: ScheduleRow[]): ScheduleRow[
       postoGrad: row.postoGrad,
       nome: row.nome,
       secao: row.secao,
+      ...(row.secaoId ? { secaoId: row.secaoId } : {}),
       ...initial,
     })
   );

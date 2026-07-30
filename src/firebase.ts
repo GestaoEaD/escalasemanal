@@ -30,23 +30,30 @@ function envOrDefault(value: string | undefined, fallback: string): string {
   return normalized || fallback;
 }
 
+const viteEnv: Record<string, string | undefined> =
+  (typeof import.meta !== "undefined" &&
+    ((import.meta as ImportMeta & { env?: Record<string, string | undefined> })
+      .env ||
+      {})) ||
+  {};
+
 const firebaseConfig = {
   projectId: envOrDefault(
-    import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    viteEnv["VITE_FIREBASE_PROJECT_ID"],
     FIREBASE_PUBLIC_CONFIG.projectId
   ),
-  appId: envOrDefault(import.meta.env.VITE_FIREBASE_APP_ID, FIREBASE_PUBLIC_CONFIG.appId),
-  apiKey: envOrDefault(import.meta.env.VITE_FIREBASE_API_KEY, FIREBASE_PUBLIC_CONFIG.apiKey),
+  appId: envOrDefault(viteEnv["VITE_FIREBASE_APP_ID"], FIREBASE_PUBLIC_CONFIG.appId),
+  apiKey: envOrDefault(viteEnv["VITE_FIREBASE_API_KEY"], FIREBASE_PUBLIC_CONFIG.apiKey),
   authDomain: envOrDefault(
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    viteEnv["VITE_FIREBASE_AUTH_DOMAIN"],
     FIREBASE_PUBLIC_CONFIG.authDomain
   ),
   storageBucket: envOrDefault(
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    viteEnv["VITE_FIREBASE_STORAGE_BUCKET"],
     FIREBASE_PUBLIC_CONFIG.storageBucket
   ),
   messagingSenderId: envOrDefault(
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    viteEnv["VITE_FIREBASE_MESSAGING_SENDER_ID"],
     FIREBASE_PUBLIC_CONFIG.messagingSenderId
   ),
 };

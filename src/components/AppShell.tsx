@@ -3,7 +3,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Usuario } from "../types";
-import { canAccessConfig, canApproveScales } from "../utils/permissions";
+import { canAccessConfig, canApproveScales, isGerente } from "../utils/permissions";
 import { loadPendingApprovalsForGestor } from "../utils/pendingApprovalsService";
 import {
   startPresence,
@@ -112,13 +112,17 @@ export default function AppShell({
 
   useEffect(() => {
     startPresence(usuario);
-    const unsub = subscribeOnlineCount(setOnlineCount);
+    // Gerente ouve todas as Divisões (sem filtro); demais perfis, só a própria.
+    const divisaoId = isGerente(usuario)
+      ? undefined
+      : String(usuario.activeDivisaoId || usuario.divisaoId || "").trim();
+    const unsub = subscribeOnlineCount(setOnlineCount, divisaoId);
     return () => {
       unsub();
       void stopPresence(usuario.re);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuario.re]);
+  }, [usuario.re, usuario.activeDivisaoId, usuario.divisaoId, usuario.perfil]);
 
   useEffect(() => {
     const el = headerRef.current;

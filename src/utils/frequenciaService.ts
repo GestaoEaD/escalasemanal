@@ -1,7 +1,9 @@
 /**
  * Persistência e fluxo de aprovação do Controle de Frequência.
  */
-import { db, doc, getDoc, getDocs, collection, setDoc, query, where, Timestamp } from "../firebase";
+import { db, doc, getDoc, getDocs, collection, query, where, Timestamp } from "../firebase";
+import { save as saveFrequenciaDoc } from "../repositories/frequenciaRepository";
+import { assertOperadorSecaoPropria } from "../validators/frequenciaValidator";
 import {
   CONTROLE_FREQUENCIA_COLLECTION,
   ControleFrequenciaDocument,
@@ -14,7 +16,6 @@ import {
   Legenda,
   Usuario,
 } from "../types";
-import { prepareFirestoreWrite } from "./firestoreSanitize";
 import { normalizeEscalaStatus, buildHistoricoEvento } from "./approvalService";
 import { cleanAprovacao, cleanHistorico } from "./escalaPayload";
 import {
@@ -33,7 +34,6 @@ import {
 } from "./permissionGuards";
 import {
   buildControleFrequenciaId,
-  controleFrequenciaDocPath,
   formatNowParts,
 } from "./frequenciaIds";
 import { recalcAllRows } from "./frequenciaCalculo";
@@ -50,7 +50,7 @@ import { normalizeAtivoFlag } from "./ativoFlag";
 import { resolveActiveDivisaoId } from "./divisaoContext";
 import { buildEscalaDocId } from "./divisaoIds";
 import { normalizeSecaoId as normalizeFrequenciaSecaoId, parseControleFrequenciaId } from "./frequenciaIds";
-import { accessibleSecaoIds, normalizeSecaoId } from "./secaoContext";
+import { accessibleSecaoIdsFrequencia, normalizeSecaoId } from "./secaoContext";
 
 function toResponsavel(usuario: Usuario): FrequenciaResponsavel {
   const { data, hora } = formatNowParts();
@@ -77,10 +77,14 @@ export async function loadColaboradores(
   divisaoId: string = DIVISAO_EAD_ID,
   secaoId?: string
 ): Promise<Colaborador[]> {
-  // Preferir filtro por secaoId (índice simples) para respeitar rules sem composto.
+  // Preferir filtro composto divisaoId+secaoId (índice em firestore.indexes.json).
   const snap = secaoId
     ? await getDocs(
-        query(collection(db, "colaboradores"), where("secaoId", "==", secaoId))
+        query(
+          collection(db, "colaboradores"),
+          where("divisaoId", "==", divisaoId),
+          where("secaoId", "==", secaoId)
+        )
       )
     : await getDocs(
         query(collection(db, "colaboradores"), where("divisaoId", "==", divisaoId))
@@ -125,7 +129,7 @@ export async function loadSecoes(
   list.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   const active = list.filter((s) => s.ativo !== false);
   if (!usuario?.re) return active;
-  const allowed = accessibleSecaoIds(usuario, active.map((s) => s.id));
+  const allowed = accessibleSecaoIdsFrequencia(usuario, active.map((s) => s.id));
   if (allowed === "ALL") return active;
   return active.filter((s) => allowed.includes(normalizeSecaoId(s.id)));
 }
@@ -134,7 +138,7 @@ export async function loadScaleDocsForMonth(
   ano: number,
   mes: number,
   divisaoId: string = DIVISAO_EAD_ID,
-  secaoId: string = ""
+  _secaoId: string = ""
 ): Promise<ScaleDocsByWeek> {
   const weeks = getWeeksOverlappingMonth(ano, mes);
   const out: ScaleDocsByWeek = {};
@@ -144,7 +148,6 @@ export async function loadScaleDocsForMonth(
       const yearFromId = Number(parts[0]);
       const firestoreId = buildEscalaDocId(
         divisaoId,
-        secaoId,
         Number.isFinite(yearFromId) ? yearFromId : ano,
         w.numero
       );
@@ -222,6 +225,7 @@ export async function ensureAndSyncControleFrequencia(options: {
 }): Promise<{ doc: ControleFrequenciaDocument; created: boolean; synced: boolean }> {
   const divisaoId = resolveActiveDivisaoId(options.usuario);
   const secaoId = String(options.secaoId || options.secao || "").trim();
+  assertOperadorSecaoPropria(options.usuario, secaoId);
   const id = buildControleFrequenciaId(
     options.ano,
     options.mes,
@@ -346,14 +350,10 @@ export async function saveControleFrequencia(
     responsavelEdicao: toResponsavel(usuario),
   };
 
-  const payload = prepareFirestoreWrite(
-    controleFrequenciaDocPath(next.id),
-    next as unknown as Record<string, unknown>
-  );
-  await setDoc(doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id), payload);
+  await saveFrequenciaDoc(next);
 
   await registerAuditOperation({
-    tipo: "SALVAR_CONTROLE_FREQUENCIA",
+    tipo: "EDITAR_FREQUENCIA",
     escala: "FREQUENCIA",
     usuario,
     ano: next.ano,
@@ -384,7 +384,7 @@ export async function auditSyncFrequencia(
   usuario: Usuario
 ): Promise<void> {
   await registerAuditOperation({
-    tipo: "SYNC_CONTROLE_FREQUENCIA",
+    tipo: "SINCRONIZAR_FREQUENCIA",
     escala: "FREQUENCIA",
     usuario,
     ano: docData.ano,
@@ -459,13 +459,7 @@ export async function submitFrequenciaForApproval(
     responsavelEdicao: toResponsavel(usuario),
   };
 
-  await setDoc(
-    doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id),
-    prepareFirestoreWrite(
-      controleFrequenciaDocPath(next.id),
-      next as unknown as Record<string, unknown>
-    )
-  );
+  await saveFrequenciaDoc(next);
 
   await registerAuditOperation({
     tipo: "ENVIAR_CONTROLE_FREQUENCIA",
@@ -510,13 +504,7 @@ export async function cancelFrequenciaApproval(
     status: "em_edicao",
     historico: cleanHistorico([...(docData.historico || []), evento]),
   };
-  await setDoc(
-    doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id),
-    prepareFirestoreWrite(
-      controleFrequenciaDocPath(next.id),
-      next as unknown as Record<string, unknown>
-    )
-  );
+  await saveFrequenciaDoc(next);
   await registerAuditOperation({
     tipo: "CANCELAR_SOLICITACAO_CONTROLE_FREQUENCIA",
     escala: "FREQUENCIA",
@@ -585,13 +573,7 @@ export async function approveFrequencia(
     historico: cleanHistorico([...(docData.historico || []), evento]),
     responsavelAprovacao: toResponsavel(usuario),
   };
-  await setDoc(
-    doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id),
-    prepareFirestoreWrite(
-      controleFrequenciaDocPath(next.id),
-      next as unknown as Record<string, unknown>
-    )
-  );
+  await saveFrequenciaDoc(next);
   await registerAuditOperation({
     tipo: "APROVAR_CONTROLE_FREQUENCIA",
     escala: "FREQUENCIA",
@@ -664,13 +646,7 @@ export async function requestFrequenciaRevision(
     }),
     historico: cleanHistorico([...(docData.historico || []), evento]),
   };
-  await setDoc(
-    doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id),
-    prepareFirestoreWrite(
-      controleFrequenciaDocPath(next.id),
-      next as unknown as Record<string, unknown>
-    )
-  );
+  await saveFrequenciaDoc(next);
   await registerAuditOperation({
     tipo: "SOLICITAR_REVISAO_CONTROLE_FREQUENCIA",
     escala: "FREQUENCIA",
@@ -710,13 +686,7 @@ export async function reopenFrequencia(
     responsavelAprovacao: null,
     historico: cleanHistorico([...(docData.historico || []), evento]),
   };
-  await setDoc(
-    doc(db, CONTROLE_FREQUENCIA_COLLECTION, next.id),
-    prepareFirestoreWrite(
-      controleFrequenciaDocPath(next.id),
-      next as unknown as Record<string, unknown>
-    )
-  );
+  await saveFrequenciaDoc(next);
   await registerAuditOperation({
     tipo: "REABRIR_CONTROLE_FREQUENCIA",
     escala: "FREQUENCIA",

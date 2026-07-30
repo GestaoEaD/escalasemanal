@@ -17,6 +17,7 @@ import {
 interface Props {
   usuario: Usuario;
   year: number;
+  month?: number;
   onBack: () => void;
   onSelectSecao: (secaoId: string) => void;
 }
@@ -43,6 +44,7 @@ function iconForSecao(nome: string, index: number): LucideIcon {
 export default function FrequenciaSecaoSelector({
   usuario,
   year,
+  month,
   onBack,
   onSelectSecao,
 }: Props) {
@@ -85,6 +87,7 @@ export default function FrequenciaSecaoSelector({
             <ClipboardList size={18} className="text-blue-600 shrink-0" />
             <h1 className="text-sm font-bold text-gray-900 truncate">
               Controle de Frequência · {year}
+              {month ? ` · mês ${String(month).padStart(2, "0")}` : ""}
             </h1>
           </div>
         </div>
@@ -93,7 +96,7 @@ export default function FrequenciaSecaoSelector({
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 w-full min-w-0">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione a seção</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Escolha a seção para abrir o controle mensal dos colaboradores vinculados.
+          Abra o controle apenas com os colaboradores da Seção escolhida.
         </p>
 
         {loading ? (

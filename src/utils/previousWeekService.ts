@@ -48,7 +48,6 @@ export function preparePreviousWeeklyRowsForEditor(rows: ScheduleRow[]): Schedul
 export async function fetchPreviousWeeklyScale(
   currentYear: number,
   currentWeekNumber: number,
-  secaoId: string = "",
   divisaoId: string = DIVISAO_EAD_ID
 ): Promise<PreviousWeekLoadResult> {
   let ref: ReturnType<typeof getPreviousWeekRef>;
@@ -62,15 +61,7 @@ export async function fetchPreviousWeeklyScale(
   }
 
   try {
-    const targetSecaoId = String(secaoId || "").trim();
-    if (!targetSecaoId) {
-      return {
-        status: "error",
-        ref,
-        message: "Seção não informada para carregar a semana anterior.",
-      };
-    }
-    const firestoreId = buildEscalaDocId(divisaoId, targetSecaoId, ref.year, ref.weekNumber);
+    const firestoreId = buildEscalaDocId(divisaoId, ref.year, ref.weekNumber);
     const snap = await getDoc(doc(db, "escalas_semanais", firestoreId));
     if (!snap.exists()) {
       return { status: "empty", ref, rows: [] };

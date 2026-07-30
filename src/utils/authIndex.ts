@@ -2,10 +2,9 @@
  * Índice Firestore auth_index/{email} → perfil/re.
  * Usado pelas security rules para autorização sem Cloud Functions.
  */
-import { db, doc, setDoc, deleteDoc } from "../firebase";
 import { Usuario } from "../types";
 import { normalizeEmail } from "./usuarioHelpers";
-import { prepareFirestoreWrite } from "./firestoreSanitize";
+import { upsert as upsertAuthIndexDoc, remove as removeAuthIndexDoc } from "../repositories/authIndexRepository";
 
 export const AUTH_INDEX_COLLECTION = "auth_index";
 
@@ -30,17 +29,14 @@ export async function upsertAuthIndex(usuario: Usuario): Promise<void> {
     divisaoId: String(usuario.divisaoId || "").trim(),
     updatedAt: new Date().toISOString(),
   };
-  await setDoc(
-    doc(db, AUTH_INDEX_COLLECTION, email),
-    prepareFirestoreWrite(`${AUTH_INDEX_COLLECTION}/${email}`, payload)
-  );
+  await upsertAuthIndexDoc(email, payload);
 }
 
 export async function removeAuthIndex(email: string | null | undefined): Promise<void> {
   const id = authIndexDocId(email);
   if (!id) return;
   try {
-    await deleteDoc(doc(db, AUTH_INDEX_COLLECTION, id));
+    await removeAuthIndexDoc(id);
   } catch {
     /* ignore */
   }

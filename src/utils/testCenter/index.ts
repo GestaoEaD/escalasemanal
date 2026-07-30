@@ -362,11 +362,20 @@ export function buildAllTestCases(opts: {
       if (!canEnterDivisao(gerenteUser, outra)) {
         return fail("Gerente deveria entrar em qualquer Divisão");
       }
-      const id = buildEscalaDocId(DIVISAO_EAD_ID, "SECAO_TESTE", 2026, 1);
-      if (id !== `${DIVISAO_EAD_ID}__SECAO_TESTE__2026__01`) return fail("ID de escala inválido", id);
+      const id = buildEscalaDocId(DIVISAO_EAD_ID, 2026, 1);
+      if (id !== `${DIVISAO_EAD_ID}__2026__01`) return fail("ID de escala inválido", id);
       const parsed = parseEscalaDocId(id);
-      if (!parsed || parsed.ano !== 2026 || parsed.semana !== 1 || parsed.secaoId !== "SECAO_TESTE") {
+      if (!parsed || parsed.ano !== 2026 || parsed.semana !== 1 || parsed.secaoId !== null) {
         return fail("parseEscalaDocId falhou", JSON.stringify(parsed));
+      }
+      const legacyId = `${DIVISAO_EAD_ID}__SECAO_TESTE__2026__01`;
+      const legacyParsed = parseEscalaDocId(legacyId);
+      if (
+        !legacyParsed ||
+        legacyParsed.secaoId !== "SECAO_TESTE" ||
+        !legacyParsed.legacy
+      ) {
+        return fail("parseEscalaDocId legado falhou", JSON.stringify(legacyParsed));
       }
       if (resolveActiveDivisaoId(adminUser) !== DIVISAO_EAD_ID) {
         return fail("resolveActiveDivisaoId incorreto");

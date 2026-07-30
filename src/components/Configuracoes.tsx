@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo } from "react";
-import { db, collection, getDocs, getDoc, doc, setDoc, deleteDoc, writeBatch, Timestamp, query, where } from "../firebase";
+import { db, collection, getDocs, getDoc, doc, query, where } from "../firebase";
 import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, Divisao, DIVISAO_EAD_ID } from "../types";
 import {
   Users,
@@ -24,11 +24,19 @@ import {
   FileSpreadsheet,
   FlaskConical,
   Building2,
+  Network,
   type LucideIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
-import { auditConfiguracao, loadAuditOperations } from "../utils/auditService";
+import { loadAuditOperations } from "../utils/auditService";
+import {
+  saveConfiguracoesBatch,
+  normalizeColaborador,
+  reconcileColaboradoresUsuariosSecao,
+  type RemocaoCatalogo,
+  type TenantLegenda,
+} from "../services/configuracaoService";
 import {
   displayUserEmail,
   isValidEmailFormat,
@@ -38,9 +46,7 @@ import {
 } from "../utils/usuarioHelpers";
 import {
   createEmptyLegendaForm,
-  legendaDocId,
   normalizeLegenda,
-  prepareLegendaForFirestore,
   toLegendaFormState,
 } from "../utils/legendaModel";
 import { exportUsuariosToExcel } from "../utils/exportUtils";
@@ -48,13 +54,14 @@ import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
 import { normalizeSecaoNome, secoesIguais } from "../utils/secaoMatch";
 import { normalizeAtivoFlag } from "../utils/ativoFlag";
 import { toSessionUser, writeSession } from "../utils/sessionService";
-import { upsertAuthIndex, removeAuthIndex } from "../utils/authIndex";
-import { cascadeSecaoRename } from "../utils/secaoCascade";
 import {
   canAccessTestCenter,
   canEditConfigGerais,
   canManageDivisoes,
   canManageCadastrosDivisao,
+  canManageColaboradores,
+  canManageSecoes,
+  canManagePostos,
   canManageUsuarios,
   canManageLegendasGlobais,
   canManageUsuarioInDivisao,
@@ -69,8 +76,6 @@ import {
   sortDivisoes,
 } from "../utils/divisaoContext";
 import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
-import { tenantDocId, colaboradorDocId } from "../utils/tenantDocIds";
-import { ensureCatalogoBaseDivisao } from "../utils/seedCatalogoDivisao";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -104,85 +109,19 @@ interface ConfiguracoesProps {
   onUsuarioUpdate?: (usuario: Usuario) => void;
 }
 
-type MenuTab = "colaboradores" | "usuarios" | "postos" | "legendas" | "divisoes" | "gerais" | "registros" | "testes";
-/** Item de catálogo removido: a chave sozinha não identifica o documento. */
-type RemocaoCatalogo = { chave: string };
+type MenuTab =
+  | "colaboradores"
+  | "usuarios"
+  | "postos"
+  | "secoes"
+  | "legendas"
+  | "divisoes"
+  | "gerais"
+  | "registros"
+  | "testes";
 /** Seção editada dentro do modal de Divisão. */
 type SecaoDivisaoForm = { id: string; nome: string; codigo: string; ordem: number; ativo: boolean; divisaoId: string };
 type LegendaModalSection = "basicas" | "representacoes" | "regras";
-type TenantLegenda = Legenda & { divisaoId?: string };
-
-function normalizeColaborador(raw: Colaborador | Record<string, unknown>): Colaborador {
-  const src = raw as Colaborador;
-  return {
-    ...src,
-    re: String(src.re || "").trim(),
-    postoGrad: String(src.postoGrad || ""),
-    nome: String(src.nome || ""),
-    nomeCompleto: src.nomeCompleto,
-    secao: normalizeSecaoNome(src.secao),
-    divisaoId: String(src.divisaoId || DIVISAO_EAD_ID),
-    email: normalizeEmail(src.email),
-    observacao: src.observacao || "",
-    ativo: normalizeAtivoFlag(src.ativo),
-    ordem: typeof src.ordem === "number" ? src.ordem : Number(src.ordem) || 0,
-    createdAt: src.createdAt,
-    updatedAt: src.updatedAt,
-  };
-}
-
-/**
- * Alinha seção (e identidade) entre colaborador e usuário com o mesmo RE.
- * Preferência: alteração recente de seção; senão cadastro de colaborador.
- */
-function reconcileColaboradoresUsuariosSecao(
-  cols: Colaborador[],
-  users: Usuario[],
-  origCols: Colaborador[],
-  origUsers: Usuario[]
-): { colaboradores: Colaborador[]; usuarios: Usuario[] } {
-  const colsOut = cols.map((c) => normalizeColaborador(c));
-  const usersOut = users.map((u) => ({
-    ...u,
-    re: String(u.re || "").trim(),
-    secao: normalizeSecaoNome(u.secao),
-  }));
-
-  for (let i = 0; i < colsOut.length; i++) {
-    const col = colsOut[i];
-    const ui = usersOut.findIndex((u) => u.re === col.re);
-    if (ui < 0) continue;
-
-    const usr = usersOut[ui];
-    const origCol = origCols.find((c) => c.re === col.re);
-    const origUsr = origUsers.find((u) => u.re === usr.re);
-
-    const colSecaoChanged =
-      Boolean(origCol) && !secoesIguais(col.secao, origCol!.secao);
-    const usrSecaoChanged =
-      Boolean(origUsr) && !secoesIguais(usr.secao, origUsr!.secao);
-
-    let secao = col.secao;
-    if (usrSecaoChanged && !colSecaoChanged) {
-      secao = normalizeSecaoNome(usr.secao);
-    } else if (colSecaoChanged) {
-      secao = normalizeSecaoNome(col.secao);
-    } else if (!secoesIguais(col.secao, usr.secao)) {
-      secao = normalizeSecaoNome(col.secao || usr.secao);
-    }
-
-    colsOut[i] = { ...col, secao };
-    usersOut[ui] = {
-      ...usr,
-      secao,
-      nome: col.nome || usr.nome,
-      postoGrad: col.postoGrad || usr.postoGrad,
-      nomeCompleto: col.nomeCompleto || usr.nomeCompleto,
-    };
-  }
-
-  return { colaboradores: colsOut, usuarios: usersOut };
-}
 
 /** Select tri-estado para campos booleanos opcionais (não configurado / sim / não). */
 function OptionalBoolSelect({
@@ -254,6 +193,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const activeDivisaoId = resolveActiveDivisaoId(usuario);
   const canDivisoes = canManageDivisoes(usuario);
   const canCadastrosDivisao = canManageCadastrosDivisao(usuario);
+  const canColaboradores = canManageColaboradores(usuario);
+  const canSecoes = canManageSecoes(usuario);
+  const canPostos = canManagePostos(usuario);
   const canUsuarios = canManageUsuarios(usuario);
   const canLegendas = canManageLegendasGlobais(usuario);
   const canGerais = canEditConfigGerais(usuario);
@@ -286,12 +228,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   };
 
   // Ordem final do menu lateral, respeitando a matriz de permissões.
-  // Seções não têm aba própria: são cadastradas dentro de cada Divisão.
   const MENU_ITENS: { id: MenuTab; label: string; icone: LucideIcon; visivel: boolean }[] = [
     { id: "divisoes", label: "Divisões", icone: Building2, visivel: canDivisoes },
-    { id: "colaboradores", label: "Colaboradores", icone: Users, visivel: canCadastrosDivisao },
+    { id: "secoes", label: "Seções", icone: Network, visivel: canSecoes },
+    { id: "colaboradores", label: "Colaboradores", icone: Users, visivel: canColaboradores },
     { id: "usuarios", label: "Permissão", icone: Shield, visivel: canUsuarios },
-    { id: "postos", label: "Postos", icone: Briefcase, visivel: canCadastrosDivisao },
+    { id: "postos", label: "Postos", icone: Briefcase, visivel: canPostos },
     { id: "legendas", label: "Legendas", icone: Activity, visivel: canLegendas },
     { id: "registros", label: "Logs", icone: FileText, visivel: canLogs },
     { id: "testes", label: "Central de Testes", icone: FlaskConical, visivel: canTestes },
@@ -300,7 +242,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
   // Active module tab
   const [activeTab, setActiveTab] = useState<MenuTab>(() =>
-    isGerente(usuario) ? "divisoes" : "colaboradores"
+    isGerente(usuario) ? "divisoes" : "secoes"
   );
   const visibleMenuItems = MENU_ITENS.filter((item) => item.visivel);
 
@@ -380,6 +322,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const [currentPosto, setCurrentPosto] = useState<any | null>(null);
   // Sigla original do posto em edição (null = inclusão de novo posto)
   const [postoOriginalSigla, setPostoOriginalSigla] = useState<string | null>(null);
+
+  const [secaoModalOpen, setSecaoModalOpen] = useState(false);
+  const [currentSecao, setCurrentSecao] = useState<Secao | null>(null);
+  const [secaoOriginalId, setSecaoOriginalId] = useState<string | null>(null);
 
   const [secaoRenames, setSecaoRenames] = useState<{ id: string; from: string; to: string; divisaoId: string }[]>([]);
 
@@ -745,6 +691,42 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
         return updateOrderFields(filtered);
       });
       setRemovedPostos((prev) => [...prev, { chave: id, divisaoId }]);
+    } else if (type === "secoes") {
+      const target = secoes.find((s) => s.id === id);
+      if (!target) {
+        setConfirmDeleteOpen(null);
+        return;
+      }
+      const ativasNaDivisao = secoes.filter(
+        (s) =>
+          s.id !== id &&
+          s.ativo !== false &&
+          normalizeDivisaoId(s.divisaoId) === normalizeDivisaoId(target.divisaoId)
+      );
+      if (ativasNaDivisao.length === 0 && target.ativo !== false) {
+        alert("Cada Divisão precisa de pelo menos uma Seção ativa.");
+        setConfirmDeleteOpen(null);
+        return;
+      }
+      const referenced =
+        colaboradores.some((c) => c.secaoId === target.id || secoesIguais(c.secao, target.nome)) ||
+        usuarios.some((u) => u.secaoId === target.id || secoesIguais(u.secao, target.nome));
+      if (referenced) {
+        setSecoes((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, ativo: false } : s))
+        );
+        alert(
+          "Esta seção está em uso por colaboradores ou permissões e foi inativada em vez de excluída."
+        );
+        setConfirmDeleteOpen(null);
+        return;
+      }
+      setSecoes((prev) => updateOrderFields(prev.filter((s) => s.id !== id)));
+      setRemovedSecoes((prev) =>
+        prev.some((r) => r.chave === id)
+          ? prev
+          : [...prev, { chave: id, divisaoId: target.divisaoId }]
+      );
     } else if (type === "legendas") {
       if (!canLegendas) {
         setConfirmDeleteOpen(null);
@@ -771,577 +753,61 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setSaveSuccess(false);
 
     try {
-      const batch = writeBatch(db);
-      const alteracoes: AuditAlteracao[] = [];
-      const now = new Date();
-      const timestamp = Timestamp.now();
-
-      const createAuditLog = (
-        modulo: string,
-        operacao: string,
-        registro: string,
-        campo: string,
-        ant: string,
-        nvo: string
-      ) => {
-        alteracoes.push({
-          campo: `${operacao} — ${campo}`,
-          antes: ant,
-          depois: nvo,
-          colaborador: `${modulo}: ${registro}`,
-        });
-      };
-
-      // Alinha seção entre colaboradores e usuários (mesmo RE) antes de gravar.
-      const reconciled = reconcileColaboradoresUsuariosSecao(
-        colaboradores,
-        usuarios,
-        origColaboradores,
-        origUsuarios
-      );
-
-      const resolveSecaoNomeById = (secaoId: string): string => {
-        const match = secoes.find((s) => s.id === String(secaoId || "").trim());
-        return String(match?.nome || "");
-      };
-
-      const colsToSave = reconciled.colaboradores.map((c) => {
-        const secaoId = String(c.secaoId || "").trim();
-        const secaoNome = resolveSecaoNomeById(secaoId) || normalizeSecaoNome(c.secao);
-        return {
-          ...c,
-          secaoId,
-          secao: secaoNome,
-          divisaoId: String(c.divisaoId || activeDivisaoId),
-        };
-      });
-      const usersToSave = reconciled.usuarios.map((u) => {
-        const secaoId = String(u.secaoId || "").trim();
-        const secaoNome = resolveSecaoNomeById(secaoId) || normalizeSecaoNome(u.secao);
-        return {
-          ...u,
-          secaoId,
-          secao: secaoNome,
-          divisaoId: String(u.divisaoId || activeDivisaoId),
-        };
-      });
-      setColaboradores(colsToSave);
-      setUsuarios(usersToSave);
-
-      if (canCadastrosDivisao) {
-        // --- 1. AUDIT & SAVE: COLABORADORES ---
-        // A. Handle deletes
-        for (const reDel of removedColaboradores) {
-          const original = origColaboradores.find((c) => c.re === reDel);
-          const colLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
-          const docId = colaboradorDocId(String(original?.divisaoId || activeDivisaoId), reDel);
-          batch.delete(doc(db, "colaboradores", docId));
-          createAuditLog("Colaboradores", "Exclusão", colLabel, "Todos", `${colLabel} (R.E. ${reDel})`, "");
-        }
-        // B. Handle creations and edits
-        for (const col of colsToSave) {
-          const original = origColaboradores.find((c) => c.re === col.re);
-          const newDivisaoId = String(col.divisaoId || activeDivisaoId);
-          const docId = colaboradorDocId(newDivisaoId, col.re);
-          const docRef = doc(db, "colaboradores", docId);
-          const normalized = normalizeColaborador(col);
-          // Troca de Divisão muda o ID do documento — remove o antigo.
-          if (original) {
-            const oldDivisaoId = String(original.divisaoId || activeDivisaoId);
-            if (normalizeDivisaoId(oldDivisaoId) !== normalizeDivisaoId(newDivisaoId)) {
-              batch.delete(
-                doc(db, "colaboradores", colaboradorDocId(oldDivisaoId, original.re))
-              );
-            }
-          }
-          batch.set(docRef, prepareFirestoreWrite(`colaboradores/${docId}`, {
-            ...normalized,
-            divisaoId: newDivisaoId,
-            ativo: normalized.ativo, // boolean explícito (false deve persistir)
-            updatedAt: timestamp,
-            createdAt: col.createdAt || timestamp
-          }));
-
-          const colLabel = `${normalized.postoGrad} ${normalized.nome}`;
-
-          if (!original) {
-            // Inclusion
-            createAuditLog(
-              "Colaboradores",
-              "Inclusão",
-              colLabel,
-              "Todos",
-              "",
-              `RE: ${normalized.re}, Posto: ${normalized.postoGrad}, Nome Completo: ${normalized.nomeCompleto || ""}, Guerra: ${normalized.nome}, E-mail Google: ${normalizeEmail(normalized.email) || "—"}, Divisão: ${normalized.divisaoId}, Seção: ${normalized.secao}, Ordem: ${normalized.ordem}, Ativo: ${normalized.ativo ? "Sim" : "Não"}`
-            );
-          } else {
-            // Edits
-            if (normalized.postoGrad !== original.postoGrad) {
-              createAuditLog("Colaboradores", "Edição", colLabel, "Posto/Graduação", original.postoGrad, normalized.postoGrad);
-            }
-            if (normalized.nome !== original.nome) {
-              createAuditLog("Colaboradores", "Edição", colLabel, "Nome de Guerra", original.nome, normalized.nome);
-            }
-            if (normalized.nomeCompleto !== original.nomeCompleto) {
-              createAuditLog("Colaboradores", "Edição", colLabel, "Nome Completo", original.nomeCompleto || "", normalized.nomeCompleto || "");
-            }
-            if (normalizeEmail(normalized.email) !== normalizeEmail(original.email)) {
-              createAuditLog(
-                "Colaboradores",
-                "Edição",
-                colLabel,
-                "E-mail Google",
-                normalizeEmail(original.email) || "",
-                normalizeEmail(normalized.email) || ""
-              );
-            }
-            if (
-              normalizeDivisaoId(normalized.divisaoId) !==
-              normalizeDivisaoId(original.divisaoId)
-            ) {
-              createAuditLog(
-                "Colaboradores",
-                "Edição",
-                colLabel,
-                "Divisão",
-                String(original.divisaoId || ""),
-                String(normalized.divisaoId || "")
-              );
-            }
-            if (
-              String(normalized.secaoId || "") !== String(original.secaoId || "") ||
-              !secoesIguais(normalized.secao, original.secao)
-            ) {
-              createAuditLog(
-                "Colaboradores",
-                "Edição",
-                colLabel,
-                "Seção",
-                `${original.secao || "—"} (${original.secaoId || "—"})`,
-                `${normalized.secao || "—"} (${normalized.secaoId || "—"})`
-              );
-            }
-            if (normalizeAtivoFlag(normalized.ativo) !== normalizeAtivoFlag(original.ativo)) {
-              createAuditLog(
-                "Colaboradores",
-                "Edição",
-                colLabel,
-                "Situação (Ativo)",
-                normalizeAtivoFlag(original.ativo) ? "Ativo" : "Inativo",
-                normalizeAtivoFlag(normalized.ativo) ? "Ativo" : "Inativo"
-              );
-            }
-            if (normalized.ordem !== original.ordem) {
-              createAuditLog("Colaboradores", "Ordenação", colLabel, "Ordem", String(original.ordem || 0), String(normalized.ordem || 0));
-            }
-            if (normalized.observacao !== original.observacao) {
-              createAuditLog("Colaboradores", "Edição", colLabel, "Observação", original.observacao || "", normalized.observacao || "");
-            }
-          }
-        }
-
-        // --- 2. AUDIT & SAVE: USUARIOS ---
-        if (canUsuarios) {
-        // A. Deletes
-        for (const reDel of removedUsuarios) {
-          const original = origUsuarios.find((u) => u.re === reDel);
-          const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
-          batch.delete(doc(db, "usuarios", reDel));
-          createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
-        }
-        // B. Creations and edits
-        for (const usr of usersToSave) {
-          const prepared = prepareUsuarioDocument({
-            ...usr,
-            divisaoId: String(usr.divisaoId || activeDivisaoId),
-            secoesResponsaveisIds: [],
-          });
-          const original = origUsuarios.find((u) => u.re === prepared.re);
-          const emailCheck = validateUsuarioEmail({
-            email: prepared.email,
-            re: prepared.re,
-            isNew: !original,
-            existingUsers: usuarios,
-          });
-          if (emailCheck.ok === false) {
-            throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
-          }
-
-          const docRef = doc(db, "usuarios", prepared.re);
-          const { uid: _uid, ...toPersist } = prepared;
-          batch.set(
-            docRef,
-            prepareFirestoreWrite(`usuarios/${prepared.re}`, toPersist as unknown as Record<string, unknown>)
-          );
-
-          const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
-          const emailAntes = normalizeEmail(original?.email);
-          const emailDepois = normalizeEmail(prepared.email);
-
-          if (!original) {
-            createAuditLog(
-              "Permissão",
-              "Inclusão",
-              userLabel,
-              "Todos",
-              "",
-              `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
-            );
-            if (emailDepois) {
-              createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
-            }
-          } else {
-            if (prepared.postoGrad !== original.postoGrad) {
-              createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
-            }
-            if (prepared.nome !== original.nome) {
-              createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
-            }
-            if (prepared.nomeCompleto !== original.nomeCompleto) {
-              createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
-            }
-            if (emailAntes !== emailDepois) {
-              createAuditLog(
-                "Permissão",
-                emailAntes ? "Edição" : "Inclusão",
-                userLabel,
-                "E-mail Google",
-                emailAntes,
-                emailDepois
-              );
-            }
-            if (
-              normalizeDivisaoId(prepared.divisaoId) !==
-              normalizeDivisaoId(original.divisaoId)
-            ) {
-              createAuditLog(
-                "Permissão",
-                "Edição",
-                userLabel,
-                "Divisão",
-                String(original.divisaoId || ""),
-                String(prepared.divisaoId || "")
-              );
-            }
-            if (
-              String(prepared.secaoId || "") !== String(original.secaoId || "") ||
-              !secoesIguais(prepared.secao, original.secao)
-            ) {
-              createAuditLog(
-                "Permissão",
-                "Edição",
-                userLabel,
-                "Seção",
-                `${original.secao || "—"} (${original.secaoId || "—"})`,
-                `${prepared.secao || "—"} (${prepared.secaoId || "—"})`
-              );
-            }
-            if (prepared.perfil !== original.perfil) {
-              createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
-            }
-            if (prepared.ativo !== original.ativo) {
-              createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
-            }
-          }
-        }
-        } // canUsuarios
-
-        // --- 3. AUDIT & SAVE: POSTOS ---
-        // A. Deletes
-        for (const rem of removedPostos) {
-          batch.delete(doc(db, "postos", tenantDocId(rem.divisaoId, rem.chave)));
-          createAuditLog("Postos", "Exclusão", rem.chave, "Todos", rem.chave, "");
-        }
-        // B. Creations and edits
-        for (const p of postos) {
-          const original = origPostos.find((op) => op.sigla === p.sigla);
-          const docId = tenantDocId(String(p.divisaoId || activeDivisaoId), p.sigla);
-          const docRef = doc(db, "postos", docId);
-          batch.set(
-            docRef,
-            prepareFirestoreWrite(`postos/${docId}`, {
-              ...p,
-              divisaoId: String(p.divisaoId || activeDivisaoId),
-            } as Record<string, unknown>)
-          );
-
-          if (!original) {
-            createAuditLog("Postos", "Inclusão", p.sigla, "Todos", "", `Sigla: ${p.sigla}, Descricao: ${p.descricao}, Ordem: ${p.ordem}`);
-          } else {
-            if (p.descricao !== original.descricao) {
-              createAuditLog("Postos", "Edição", p.sigla, "Descrição", original.descricao, p.descricao);
-            }
-            if (p.ordem !== original.ordem) {
-              createAuditLog("Postos", "Ordenação", p.sigla, "Ordem", String(original.ordem || 0), String(p.ordem || 0));
-            }
-          }
-        }
-      }
-
-      // --- 4. AUDIT & SAVE: SECOES ---
-      const secaoRenamesLocal = canDivisoes
-        ? secoes
-        .map((s) => ({
-          current: s,
-          original: origSecoes.find((os) => os.id === s.id),
-        }))
-        .filter((entry) => Boolean(entry.original) && entry.original!.nome !== entry.current.nome)
-        .map((entry) => ({
-          id: entry.current.id,
-          from: entry.original!.nome,
-          to: entry.current.nome,
-          divisaoId: String(entry.current.divisaoId || activeDivisaoId),
-        }))
-        : [];
-
-      if (canCadastrosDivisao) {
-        // A. Deletes
-        for (const rem of removedSecoes) {
-          batch.delete(doc(db, "secoes", rem.chave));
-          createAuditLog("Seções", "Exclusão", rem.chave, "Todos", rem.chave, "");
-        }
-        // B. Creations and edits
-        for (const s of secoes) {
-          const original = origSecoes.find((os) => os.id === s.id);
-          const docId = String(s.id || "").trim();
-          const docRef = doc(db, "secoes", docId);
-          const payload = {
-            ...s,
-            id: docId,
-            codigo: normalizeSecaoCodigo(s.codigo) || KNOWN_SECAO_CODIGOS[s.nome] || "",
-            divisaoId: String(s.divisaoId || activeDivisaoId),
-          };
-          batch.set(docRef, prepareFirestoreWrite(`secoes/${docId}`, payload as unknown as Record<string, unknown>));
-
-          if (!original) {
-            createAuditLog(
-              "Seções",
-              "Inclusão",
-              s.nome,
-              "Todos",
-              "",
-              `Nome: ${payload.nome}, Código: ${payload.codigo || "—"}, Ordem: ${payload.ordem}, Ativo: ${payload.ativo ? "Sim" : "Não"}`
-            );
-          } else {
-            if (!secoesIguais(original.nome, s.nome)) {
-              createAuditLog("Seções", "Edição", s.nome, "Nome", original.nome, s.nome);
-            }
-            if (s.ordem !== original.ordem) {
-              createAuditLog("Seções", "Ordenação", s.nome, "Ordem", String(original.ordem || 0), String(s.ordem || 0));
-            }
-            if (s.ativo !== original.ativo) {
-              createAuditLog("Seções", "Edição", s.nome, "Ativo", original.ativo ? "Sim" : "Não", s.ativo ? "Sim" : "Não");
-            }
-            if (String(payload.codigo || "") !== String(original.codigo || "")) {
-              createAuditLog(
-                "Seções",
-                "Edição",
-                s.nome,
-                "Código da OPM",
-                String(original.codigo || ""),
-                String(payload.codigo || "")
-              );
-            }
-          }
-        }
-      }
-
-      // --- 5. AUDIT & SAVE: LEGENDAS ---
-      if (canLegendas) {
-        // A. Deletes
-        for (const rem of removedLegendas) {
-          batch.delete(doc(db, "legendas", legendaDocId(rem.chave)));
-          createAuditLog("Legendas", "Exclusão", rem.chave, "Todos", rem.chave, "");
-        }
-        // B. Creations and edits
-        for (const l of legendas) {
-          const original = origLegendas.find((ol) => ol.sigla === l.sigla);
-          const docId = legendaDocId(l.sigla);
-          const docRef = doc(db, "legendas", docId);
-          batch.set(
-            docRef,
-            prepareFirestoreWrite(`legendas/${docId}`, {
-              ...prepareLegendaForFirestore(l),
-            })
-          );
-
-          if (!original) {
-            createAuditLog(
-              "Legendas",
-              "Inclusão",
-              l.sigla,
-              "Todos",
-              "",
-              `Sigla: ${l.sigla}, Nome: ${l.nome || "—"}, Descrição: ${l.descricao}, Cor: ${l.cor}, Ordem: ${l.ordem}, Ativo: ${l.ativo ? "Sim" : "Não"}`
-            );
-          } else {
-            if ((l.nome || "") !== (original.nome || "")) {
-              createAuditLog("Legendas", "Edição", l.sigla, "Nome", original.nome || "", l.nome || "");
-            }
-            if (l.descricao !== original.descricao) {
-              createAuditLog("Legendas", "Edição", l.sigla, "Descrição", original.descricao, l.descricao);
-            }
-            if (l.cor !== original.cor) {
-              createAuditLog("Legendas", "Edição", l.sigla, "Cor", original.cor, l.cor);
-            }
-            if (l.ordem !== original.ordem) {
-              createAuditLog("Legendas", "Ordenação", l.sigla, "Ordem", String(original.ordem || 0), String(l.ordem || 0));
-            }
-            if (l.ativo !== original.ativo) {
-              createAuditLog("Legendas", "Edição", l.sigla, "Ativo", original.ativo ? "Sim" : "Não", l.ativo ? "Sim" : "Não");
-            }
-            if (JSON.stringify(l.representacoes || null) !== JSON.stringify(original.representacoes || null)) {
-              createAuditLog(
-                "Legendas",
-                "Edição",
-                l.sigla,
-                "Representações",
-                JSON.stringify(original.representacoes || {}),
-                JSON.stringify(l.representacoes || {})
-              );
-            }
-            if (JSON.stringify(l.regras || null) !== JSON.stringify(original.regras || null)) {
-              createAuditLog(
-                "Legendas",
-                "Edição",
-                l.sigla,
-                "Regras",
-                JSON.stringify(original.regras || {}),
-                JSON.stringify(l.regras || {})
-              );
-            }
-          }
-        }
-      }
-
-      // --- 6. AUDIT & SAVE: DIVISÕES (somente Gerente) ---
-      if (canDivisoes) {
-        for (const codigoDel of removedDivisoes) {
-          batch.delete(doc(db, "divisoes", divisaoDocId(codigoDel)));
-          createAuditLog("Divisões", "Exclusão", codigoDel, "Todos", codigoDel, "");
-        }
-        for (const divisao of divisoesList) {
-          const codigo = divisaoDocId(divisao.codigo);
-          const original = origDivisoes.find((d) => d.codigo === divisao.codigo);
-          batch.set(
-            doc(db, "divisoes", codigo),
-            prepareFirestoreWrite(`divisoes/${codigo}`, {
-              ...divisao,
-              codigo,
-              ativo: divisao.ativo !== false,
-              updatedAt: now.toISOString(),
-              createdAt: original?.createdAt || divisao.createdAt || now.toISOString(),
-            })
-          );
-          if (!original) {
-            createAuditLog("Divisões", "Inclusão", codigo, "Todos", "", divisao.nome);
-          }
-        }
-      }
-
-      // --- 7. AUDIT & SAVE: CONFIGS GERAIS ---
-      if (canGerais && JSON.stringify(gerais) !== JSON.stringify(origGerais)) {
-        batch.set(
-          doc(db, "configuracoes", "gerais"),
-          prepareFirestoreWrite("configuracoes/gerais", {
-            ...gerais,
-            updatedAt: timestamp
-          })
-        );
-
-        if (gerais.nomeOrganizacao !== origGerais.nomeOrganizacao) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Nome da Organização", origGerais.nomeOrganizacao, gerais.nomeOrganizacao);
-        }
-        if (gerais.unidade !== origGerais.unidade) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Unidade", origGerais.unidade, gerais.unidade);
-        }
-        if (gerais.pdfExportHeader !== origGerais.pdfExportHeader) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho PDF", origGerais.pdfExportHeader, gerais.pdfExportHeader);
-        }
-        if (gerais.excelExportHeader !== origGerais.excelExportHeader) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Cabeçalho Excel", origGerais.excelExportHeader, gerais.excelExportHeader);
-        }
-        if (gerais.tema !== origGerais.tema) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Tema", origGerais.tema, gerais.tema);
-        }
-        if (gerais.idioma !== origGerais.idioma) {
-          createAuditLog("Configurações Gerais", "Edição", "Gerais", "Idioma", origGerais.idioma, gerais.idioma);
-        }
-      }
-
-      // Commit the database batch
-      await batch.commit();
-
-      if (canDivisoes) {
-        // Divisões novas precisam do catálogo base de postos (legendas são globais).
-        const divisoesNovas = divisoesList
-          .map((d) => divisaoDocId(d.codigo))
-          .filter((codigo) => !origDivisoes.some((o) => o.codigo === codigo));
-        for (const codigo of divisoesNovas) {
-          try {
-            await ensureCatalogoBaseDivisao(codigo);
-          } catch (err) {
-            console.warn(`Falha ao semear catálogo da Divisão ${codigo}:`, err);
-          }
-        }
-      }
-
-      // Propaga rename de seção em escalas e CF
-      for (const rename of secaoRenamesLocal) {
-        try {
-          const cascade = await cascadeSecaoRename(
-            rename.from,
-            rename.to,
-            rename.divisaoId,
-            rename.id
-          );
-          if (cascade.semanais + cascade.alteracao + cascade.frequencia > 0) {
-            createAuditLog(
-              "Seções",
-              "Edição",
-              rename.to,
-              "Propagação rename",
-              rename.from,
-              `semanais=${cascade.semanais}; alteracao=${cascade.alteracao}; frequencia=${cascade.frequencia}`
-            );
-          }
-        } catch (cascadeErr) {
-          console.warn("Falha ao propagar rename de seção:", cascadeErr);
-        }
-      }
-
-      if (canCadastrosDivisao) {
-        // Mantém auth_index alinhado aos usuários
-        for (const u of usersToSave) {
-          if (u.email) {
-            await upsertAuthIndex(u).catch((e) => console.warn("auth_index upsert:", e));
-          }
-        }
-        for (const reDel of removedUsuarios) {
-          const original = origUsuarios.find((u) => u.re === reDel);
-          if (original?.email) {
-            await removeAuthIndex(original.email).catch(() => undefined);
-          }
-        }
-      }
-
-      // Uma operação de auditoria com todas as alterações internas.
-      // Pós-commit: falhar aqui não pode reportar como erro um salvamento já concluído.
-      await auditConfiguracao({
+      const result = await saveConfiguracoesBatch({
         usuario,
-        alteracoes,
-        detalhes: "Salvamento de configurações administrativas",
-      }).catch((e) => console.warn("Falha ao registrar auditoria do salvamento:", e));
+        activeDivisaoId,
+        colaboradores: {
+          current: colaboradores,
+          original: origColaboradores,
+          removed: removedColaboradores,
+        },
+        usuarios: {
+          current: usuarios,
+          original: origUsuarios,
+          removed: removedUsuarios,
+        },
+        postos: {
+          current: postos,
+          original: origPostos,
+          removed: removedPostos,
+        },
+        secoes: {
+          current: secoes,
+          original: origSecoes,
+          removed: removedSecoes,
+        },
+        legendas: {
+          current: legendas,
+          original: origLegendas,
+          removed: removedLegendas,
+        },
+        divisoes: {
+          current: divisoesList,
+          original: origDivisoes,
+          removed: removedDivisoes,
+        },
+        gerais: {
+          current: gerais,
+          original: origGerais,
+        },
+      });
+
+      setColaboradores(result.colaboradores);
+      setUsuarios(result.usuarios);
 
       // Set original states only for what was actually saved.
-      if (canCadastrosDivisao) {
-        setOrigColaboradores(JSON.parse(JSON.stringify(colsToSave)));
-        setOrigUsuarios(JSON.parse(JSON.stringify(usersToSave)));
-        setOrigPostos(JSON.parse(JSON.stringify(postos)));
-        setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
+      if (canColaboradores || canUsuarios) {
+        setOrigColaboradores(JSON.parse(JSON.stringify(result.colaboradores)));
+        setOrigUsuarios(JSON.parse(JSON.stringify(result.usuarios)));
         setRemovedColaboradores([]);
         setRemovedUsuarios([]);
+      }
+      if (canPostos) {
+        setOrigPostos(JSON.parse(JSON.stringify(postos)));
         setRemovedPostos([]);
+      }
+      if (canSecoes) {
+        setOrigSecoes(JSON.parse(JSON.stringify(secoes)));
         setRemovedSecoes([]);
       }
       if (canLegendas) {
@@ -1358,7 +824,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       }
 
       // Atualiza seção na sessão se o usuário logado foi afetado por rename
-      const renameSessao = secaoRenamesLocal.find(
+      const renameSessao = result.secaoRenames.find(
         (r) => String(r.id || "").trim() === String(usuario.secaoId || "").trim() || secoesIguais(r.from, usuario.secao)
       );
       if (renameSessao) {
@@ -1607,6 +1073,112 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     setPostoOriginalSigla(null);
   };
 
+  const handleSecaoSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentSecao || !canSecoes) return;
+
+    const nome = normalizeSecaoNome(currentSecao.nome);
+    const codigo = normalizeSecaoCodigo(currentSecao.codigo);
+    const divisaoId = String(
+      isGerente(usuario)
+        ? currentSecao.divisaoId || activeDivisaoId
+        : activeDivisaoId
+    ).trim();
+
+    if (!nome) {
+      alert("Informe o nome da Seção.");
+      return;
+    }
+    if (!codigo) {
+      alert("Informe o Código da OPM (somente números) da seção.");
+      return;
+    }
+    if (!divisaoId) {
+      alert("Informe a Divisão da Seção.");
+      return;
+    }
+    if (!canManageUsuarioInDivisao(usuario, divisaoId) && !isGerente(usuario)) {
+      alert("Você só pode cadastrar Seções da sua Divisão.");
+      return;
+    }
+
+    const editId = secaoOriginalId;
+    if (
+      secoes.some(
+        (s) =>
+          secoesIguais(s.nome, nome) &&
+          normalizeDivisaoId(s.divisaoId) === normalizeDivisaoId(divisaoId) &&
+          s.id !== editId
+      )
+    ) {
+      alert("Esta Divisão já possui uma seção com este nome.");
+      return;
+    }
+    if (
+      secoes.some(
+        (s) => normalizeSecaoCodigo(s.codigo) === codigo && s.id !== editId
+      )
+    ) {
+      alert(`O código ${codigo} já está em uso por outra seção.`);
+      return;
+    }
+
+    if (editId) {
+      const original = secoes.find((s) => s.id === editId);
+      if (original && !secoesIguais(original.nome, nome)) {
+        setSecaoRenames((prev) => [
+          ...prev.filter((r) => r.id !== editId),
+          { id: editId, from: original.nome, to: nome, divisaoId },
+        ]);
+        setColaboradores((prev) =>
+          prev.map((c) =>
+            String(c.secaoId || "").trim() === editId || secoesIguais(c.secao, original.nome)
+              ? { ...c, secao: nome, secaoId: editId, divisaoId }
+              : c
+          )
+        );
+        setUsuarios((prev) =>
+          prev.map((u) =>
+            String(u.secaoId || "").trim() === editId || secoesIguais(u.secao, original.nome)
+              ? { ...u, secao: nome, secaoId: editId, divisaoId }
+              : u
+          )
+        );
+      }
+      setSecoes((prev) =>
+        updateOrderFields(
+          prev.map((s) =>
+            s.id === editId
+              ? { ...s, nome, codigo, divisaoId, ativo: currentSecao.ativo !== false }
+              : s
+          )
+        )
+      );
+    } else {
+      const maxOrdem = secoes
+        .filter((s) => normalizeDivisaoId(s.divisaoId) === normalizeDivisaoId(divisaoId))
+        .reduce((max, s) => (s.ordem && s.ordem > max ? s.ordem : max), 0);
+      const id = doc(collection(db, "secoes")).id;
+      setSecoes((prev) =>
+        updateOrderFields([
+          ...prev,
+          {
+            id,
+            nome,
+            codigo,
+            divisaoId,
+            ordem: maxOrdem + 1,
+            ativo: currentSecao.ativo !== false,
+          },
+        ])
+      );
+    }
+
+    setSecaoModalOpen(false);
+    setCurrentSecao(null);
+    setSecaoOriginalId(null);
+  };
+
   /**
    * Abre o modal de Divisão com as seções dela. Preferência: estado local
    * (já carregado / editado na sessão); senão busca no Firestore.
@@ -1737,6 +1309,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   const removerSecaoDivisao = (id: string) => {
     const target = divisaoSecoes.find((s) => s.id === id) || secoes.find((s) => s.id === id);
     if (!target) return;
+    const ativasRestantes = divisaoSecoes.filter(
+      (s) => s.id !== id && s.ativo !== false
+    );
+    if (ativasRestantes.length === 0 && target.ativo !== false) {
+      alert("Cada Divisão precisa de pelo menos uma Seção ativa.");
+      return;
+    }
     const referenced =
       colaboradores.some((c) => c.secaoId === target.id || secoesIguais(c.secao, target.nome)) ||
       usuarios.some((u) => u.secaoId === target.id || secoesIguais(u.secao, target.nome));
@@ -1771,6 +1350,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       )
     ) {
       alert("Já existe uma Divisão com este código.");
+      return;
+    }
+
+    const ativas = divisaoSecoes.filter((s) => s.ativo !== false);
+    if (ativas.length === 0) {
+      alert("Cadastre pelo menos uma Seção ativa antes de salvar a Divisão.");
       return;
     }
 
@@ -2541,8 +2126,101 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
               </div>
             )}
 
+            {/* 2b. MODULE: SEÇÕES */}
+            {activeTab === "secoes" && canSecoes && (
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Seções</h2>
+                    <p className="text-xs text-gray-500">
+                      Cada Seção pertence a uma Divisão. Colaboradores e permissões são lotados na Seção.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentSecao({
+                        id: "",
+                        nome: "",
+                        codigo: "",
+                        divisaoId: activeDivisaoId,
+                        ativo: true,
+                        ordem: 0,
+                      });
+                      setSecaoOriginalId(null);
+                      setSecaoModalOpen(true);
+                    }}
+                    className="mt-3 sm:mt-0 inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                  >
+                    <Plus size={14} />
+                    <span>Nova Seção</span>
+                  </button>
+                </div>
+                <div className="table-scroll border border-gray-200 rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-200 text-left text-xs text-gray-500">
+                    <thead className="bg-gray-50 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                      <tr>
+                        <th className="px-4 py-3">Divisão</th>
+                        <th className="px-4 py-3">Código</th>
+                        <th className="px-4 py-3">Nome</th>
+                        <th className="px-4 py-3 text-center">Situação</th>
+                        <th className="px-4 py-3 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
+                      {secoes.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center text-gray-400 font-semibold">
+                            Nenhuma Seção cadastrada.
+                          </td>
+                        </tr>
+                      ) : (
+                        secoes
+                          .slice()
+                          .sort((a, b) => {
+                            const da = nomeDivisao(a.divisaoId).localeCompare(nomeDivisao(b.divisaoId));
+                            if (da !== 0) return da;
+                            return (a.ordem || 0) - (b.ordem || 0);
+                          })
+                          .map((s) => (
+                            <tr key={s.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">{nomeDivisao(s.divisaoId)}</td>
+                              <td className="px-4 py-3 font-mono font-bold">{s.codigo || "—"}</td>
+                              <td className="px-4 py-3">{s.nome}</td>
+                              <td className="px-4 py-3 text-center">{s.ativo !== false ? "ATIVA" : "INATIVA"}</td>
+                              <td className="px-4 py-3 text-right space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCurrentSecao({ ...s });
+                                    setSecaoOriginalId(s.id);
+                                    setSecaoModalOpen(true);
+                                  }}
+                                  className="p-1.5 hover:bg-gray-150 text-gray-600 hover:text-gray-900 rounded cursor-pointer"
+                                  title="Editar"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => requestDelete("secoes", s.id, s.nome)}
+                                  className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded cursor-pointer"
+                                  title="Excluir"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* 3. MODULE: POSTOS E GRADUAÇÕES */}
-            {activeTab === "postos" && (
+            {activeTab === "postos" && canPostos && (
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-4 border-b border-gray-150">
                   <div>
@@ -3719,6 +3397,122 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <button
                     type="button"
                     onClick={() => setPostoModalOpen(false)}
+                    className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow-xs cursor-pointer"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* SEÇÃO ADD/EDIT MODAL */}
+        {secaoModalOpen && currentSecao && canSecoes && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-xl shadow-xl border border-gray-200 max-w-md w-full overflow-hidden"
+            >
+              <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center">
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  {secaoOriginalId ? "Editar Seção" : "Nova Seção"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSecaoModalOpen(false);
+                    setCurrentSecao(null);
+                    setSecaoOriginalId(null);
+                  }}
+                  className="text-gray-400 hover:text-white cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <form onSubmit={handleSecaoSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Divisão *
+                  </label>
+                  <select
+                    value={String(currentSecao.divisaoId || activeDivisaoId)}
+                    onChange={(e) =>
+                      setCurrentSecao({ ...currentSecao, divisaoId: e.target.value })
+                    }
+                    disabled={!isGerente(usuario)}
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white disabled:bg-gray-100"
+                    required
+                  >
+                    {opcoesDivisaoSelect().map((d) => (
+                      <option key={d.codigo} value={d.codigo}>
+                        {d.nome} ({d.codigo})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Nome *
+                  </label>
+                  <input
+                    type="text"
+                    value={currentSecao.nome}
+                    onChange={(e) =>
+                      setCurrentSecao({ ...currentSecao, nome: e.target.value })
+                    }
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Código da OPM *
+                  </label>
+                  <input
+                    type="text"
+                    value={currentSecao.codigo}
+                    onChange={(e) =>
+                      setCurrentSecao({ ...currentSecao, codigo: e.target.value })
+                    }
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-mono font-semibold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Situação
+                  </label>
+                  <select
+                    value={currentSecao.ativo === false ? "false" : "true"}
+                    onChange={(e) =>
+                      setCurrentSecao({
+                        ...currentSecao,
+                        ativo: e.target.value === "true",
+                      })
+                    }
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                  >
+                    <option value="true">Ativa</option>
+                    <option value="false">Inativa</option>
+                  </select>
+                </div>
+                <div className="flex justify-end space-x-2 pt-4 border-t border-gray-150">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSecaoModalOpen(false);
+                      setCurrentSecao(null);
+                      setSecaoOriginalId(null);
+                    }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     Cancelar

@@ -43,11 +43,13 @@ export function applyWeekendDefault<T extends Pick<ScheduleRow, "sab" | "dom">>(
 /** Monta uma linha da escala só com campos válidos (sem spread de props extras/undefined). */
 export function cleanScheduleRow(row: ScheduleRow | Record<string, unknown>): ScheduleRow {
   const r = row as ScheduleRow;
+  const secaoId = String(r.secaoId ?? "").trim();
   return normalizeScheduleRowAfastamento({
     re: String(r.re ?? ""),
     postoGrad: String(r.postoGrad ?? ""),
     nome: String(r.nome ?? ""),
     secao: String(r.secao ?? ""),
+    ...(secaoId ? { secaoId } : {}),
     seg: String(r.seg ?? ""),
     ter: String(r.ter ?? ""),
     qua: String(r.qua ?? ""),
