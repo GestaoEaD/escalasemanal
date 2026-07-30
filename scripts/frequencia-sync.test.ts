@@ -200,6 +200,64 @@ check("Manual preservado", () => {
   assert.equal(manual?.valor, "MANUAL");
 });
 
+check("dia útil sem escala salva usa marcação inicial EN → 1", () => {
+  const { rows } = syncFrequenciaRows({
+    ano: 2026,
+    mes: 1,
+    secao: "Secao X",
+    colaboradores: [colab],
+    legendas,
+    scaleDocs: {},
+    existingRows: [baseFreqRow("1")],
+  });
+  // 05/01/2026 é segunda; 03/01/2026 é sábado
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "1");
+  assert.equal(rows[0]?.dias?.["05"]?.origem, "padrao_semana");
+  assert.equal(rows[0]?.dias?.["03"]?.valor, "A");
+});
+
+check("legenda da escala sem consolidada não vira expediente padrão", () => {
+  // "LP" não está nas legendas de teste → sem consolidada, célula fica vazia
+  const sem = escala([row({ re: "1", seg: "LP" })]);
+  const { rows } = syncFrequenciaRows({
+    ano: 2026,
+    mes: 1,
+    secao: "Secao X",
+    colaboradores: [colab],
+    legendas,
+    scaleDocs: { "2026_01": { semanal: sem, alteracao: null } },
+    existingRows: [baseFreqRow("1")],
+  });
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "");
+  assert.equal(rows[0]?.dias?.["05"]?.origem, "vazio");
+});
+
+check("célula limpa manualmente não recebe o padrão EN", () => {
+  const existing: ControleFrequenciaRow[] = [
+    {
+      ...baseFreqRow("1"),
+      dias: {
+        "05": {
+          valor: "",
+          origem: "edicao_manual",
+          editadoManualmente: true,
+        } as any,
+      },
+    },
+  ];
+  const { rows } = syncFrequenciaRows({
+    ano: 2026,
+    mes: 1,
+    secao: "Secao X",
+    colaboradores: [colab],
+    legendas,
+    scaleDocs: {},
+    existingRows: existing,
+  });
+  assert.equal(rows[0]?.dias?.["05"]?.valor, "");
+  assert.equal(rows[0]?.dias?.["05"]?.editadoManualmente, true);
+});
+
 check("fim de semana usa consolidada da legenda A", () => {
   // 03/01/2026 é sábado → semana 2025_52 (29 Dez a 04 Jan)
   const sem = escala([row({ re: "1", sab: "", dom: "" })]);

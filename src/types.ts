@@ -568,6 +568,8 @@ export type FrequenciaCelulaOrigem =
   | "escala_alteracao"
   | "escala_semanal"
   | "edicao_manual"
+  /** Marcação inicial da Escala Semanal (dia útil em EN) para semana não salva. */
+  | "padrao_semana"
   | "padrao_fim_semana"
   | "vazio";
 

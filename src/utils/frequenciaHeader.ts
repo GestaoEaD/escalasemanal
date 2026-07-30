@@ -105,7 +105,7 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     grid-template-rows: minmax(56px, 1.5fr) minmax(26px, 0.48fr) minmax(36px, 0.72fr);
     width: 100%;
     min-height: 130px;
-    border: 1px solid var(--freq-border);
+    border: 1.5px solid var(--freq-border);
     background: var(--freq-white);
     color: var(--freq-text);
     font-family: Arial, Helvetica, sans-serif;
@@ -138,6 +138,7 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     height: 100%;
     padding: 8px 4px 8px 8px;
     min-width: 0;
+    border-right: 1px solid var(--freq-border);
   }
 
   .freq-inst-brasao {
@@ -320,7 +321,7 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   /* —— Legenda (logo abaixo, sem gap) —— */
   .freq-inst-legend {
     width: 100%;
-    border: 1px solid var(--freq-border);
+    border: 1.5px solid var(--freq-border);
     border-top: none;
     background: var(--freq-legend-bg);
     padding: 5px 8px;
@@ -334,29 +335,122 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     color: var(--freq-muted);
   }
 
+  /*
+   * Responsividade da visualização. Em telas intermediárias preserva o
+   * gabarito horizontal; no celular reorganiza os blocos sem esconder ou
+   * sobrepor dados. A impressão sempre restaura o A4 paisagem abaixo.
+   */
+  @media screen and (max-width: 900px) {
+    .freq-inst-main {
+      grid-template-columns: 36% 64%;
+      grid-template-rows: minmax(50px, 1.35fr) minmax(24px, 0.48fr) minmax(34px, 0.72fr);
+      min-height: 116px;
+    }
+    .freq-inst-left-grid { min-height: 116px; grid-template-columns: 30% 70%; }
+    .freq-inst-brasao-wrap { padding: 6px 3px 6px 6px; }
+    .freq-inst-brasao { max-width: 76px; max-height: 84px; }
+    .freq-inst-org { padding: 7px 7px 7px 4px; font-size: 10px; }
+    .freq-inst-title { font-size: clamp(15px, 2.8vw, 21px); padding: 7px 8px; }
+    .freq-inst-labels > div { font-size: 8px; }
+    .freq-inst-opm > span,
+    .freq-inst-mesano > span { font-size: 9px; }
+    .freq-inst-cod > span,
+    .freq-inst-pag { font-size: 10px; }
+  }
+
+  @media screen and (max-width: 640px) {
+    .freq-inst-main {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: 78px 42px 24px 34px;
+      min-height: 178px;
+    }
+    .freq-inst-left {
+      grid-column: 1;
+      grid-row: 1;
+      border-right: none;
+      border-bottom: 1px solid var(--freq-border);
+    }
+    .freq-inst-left-grid {
+      min-height: 78px;
+      grid-template-columns: 30% 70%;
+    }
+    .freq-inst-brasao { max-width: 58px; max-height: 62px; }
+    .freq-inst-org {
+      padding: 5px 8px;
+      font-size: 9px;
+      line-height: 1.15;
+    }
+    .freq-inst-title {
+      grid-column: 1;
+      grid-row: 2;
+      font-size: clamp(15px, 5vw, 19px);
+      white-space: normal;
+    }
+    .freq-inst-labels {
+      grid-column: 1;
+      grid-row: 3;
+      grid-template-columns: 30% 38% 18% 14%;
+    }
+    .freq-inst-values {
+      grid-column: 1;
+      grid-row: 4;
+      grid-template-columns: 30% 38% 18% 14%;
+    }
+    .freq-inst-labels > div {
+      padding: 3px 1px;
+      font-size: 7px;
+      letter-spacing: 0;
+    }
+    .freq-inst-values > div { min-height: 34px; }
+    .freq-inst-opm > span,
+    .freq-inst-mesano > span { padding: 2px 1px; font-size: 8px; }
+    .freq-inst-cod > span,
+    .freq-inst-pag { font-size: 9px; }
+    .freq-inst-legend {
+      padding: 4px;
+      font-size: 6px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+  }
+
   @media print {
     .freq-inst-main {
+      grid-template-columns: 32% 68% !important;
       min-height: 118px;
       grid-template-rows: minmax(48px, 1.5fr) minmax(22px, 0.48fr) minmax(32px, 0.72fr);
       border-color: #000 !important;
     }
-    .freq-inst-left-grid { min-height: 118px; }
+    .freq-inst-left-grid {
+      min-height: 118px;
+      grid-template-columns: 25% 75% !important;
+    }
     .freq-inst-left {
+      grid-column: 1 !important;
+      grid-row: 1 / 4 !important;
       background: #f8fafc !important;
       border-right-color: #000 !important;
+      border-right-width: 1px !important;
+      border-bottom: none !important;
     }
+    .freq-inst-brasao-wrap { border-right-color: #000 !important; }
     .freq-inst-brasao {
       max-width: 86px;
       max-height: 92px;
     }
     .freq-inst-org { font-size: 11px !important; color: #1e293b !important; }
     .freq-inst-title {
+      grid-column: 2 !important;
+      grid-row: 1 !important;
       font-size: 20px !important;
       padding: 8px 10px !important;
       border-bottom-color: #000 !important;
       color: #0f172a !important;
     }
     .freq-inst-labels {
+      grid-column: 2 !important;
+      grid-row: 2 !important;
+      grid-template-columns: 30% 38% 18% 14% !important;
       background: #e2e8f0 !important;
       border-bottom-color: #000 !important;
     }
@@ -370,6 +464,11 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     .freq-inst-cod > span,
     .freq-inst-mesano > span {
       border-right-color: #000 !important;
+    }
+    .freq-inst-values {
+      grid-column: 2 !important;
+      grid-row: 3 !important;
+      grid-template-columns: 30% 38% 18% 14% !important;
     }
     .freq-inst-opm > span,
     .freq-inst-mesano > span { font-size: 10px !important; }

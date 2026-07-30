@@ -11,6 +11,21 @@ export function normalizeHyphenToAfastamento(value: unknown): string {
 
 const DAY_FIELDS = ["seg", "ter", "qua", "qui", "sex", "sab", "dom"] as const;
 
+/**
+ * Marcação inicial de uma linha da Escala Semanal: dia útil em EN, fim de
+ * semana em A. Fonte única — o Controle de Frequência aplica o mesmo padrão
+ * nas semanas ainda não salvas, senão o mês apareceria vazio.
+ */
+export const WEEKLY_DEFAULT_DAY_VALUES: Record<(typeof DAY_FIELDS)[number], string> = {
+  seg: "EN",
+  ter: "EN",
+  qua: "EN",
+  qui: "EN",
+  sex: "EN",
+  sab: SIGLA_AFASTAMENTO,
+  dom: SIGLA_AFASTAMENTO,
+};
+
 /** Normaliza hífens em todos os dias da linha. */
 export function normalizeScheduleRowAfastamento<T extends Partial<ScheduleRow>>(row: T): T {
   const next = { ...row };

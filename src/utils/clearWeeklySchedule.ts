@@ -1,7 +1,7 @@
 import { EscalaStatus, ScheduleRow, Usuario } from "../types";
 import { WeekInfo } from "./dateUtils";
 import { canEditScale } from "./permissions";
-import { cleanScheduleRow } from "./escalaPayload";
+import { cleanScheduleRow, WEEKLY_DEFAULT_DAY_VALUES } from "./escalaPayload";
 import { findUndefinedPaths } from "./firestoreSanitize";
 import { registerAuditOperation } from "./auditService";
 
@@ -11,13 +11,7 @@ export function getInitialWeeklyEditableFields(): Pick<
   "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom" | "observacao"
 > {
   return {
-    seg: "EN",
-    ter: "EN",
-    qua: "EN",
-    qui: "EN",
-    sex: "EN",
-    sab: "A",
-    dom: "A",
+    ...WEEKLY_DEFAULT_DAY_VALUES,
     observacao: "",
   };
 }

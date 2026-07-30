@@ -83,7 +83,7 @@ const FREQUENCIA_PRINT_CSS = `
   }
 
   body {
-    padding: 14px 16px 18px;
+    padding: clamp(8px, 1.4vw, 18px);
     font-size: 9.5px;
     line-height: 1.35;
   }
@@ -117,6 +117,8 @@ const FREQUENCIA_PRINT_CSS = `
   .btn-secondary { background: #64748b; }
 
   .print-page {
+    width: min(100%, 297mm);
+    margin-inline: auto;
     page-break-after: always;
     break-after: page;
   }
@@ -372,6 +374,8 @@ const FREQUENCIA_PRINT_CSS = `
     .no-print { display: none !important; }
 
     .print-page {
+      width: 100% !important;
+      margin: 0 !important;
       page-break-after: always !important;
       break-after: page !important;
     }

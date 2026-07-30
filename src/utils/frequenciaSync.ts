@@ -22,6 +22,7 @@ import {
   remapFrequenciaValorComLegendas,
   recalcRowTotais,
 } from "./frequenciaCalculo";
+import { WEEKLY_DEFAULT_DAY_VALUES } from "./escalaPayload";
 import {
   dayKey,
   daysInMonth,
@@ -100,6 +101,7 @@ export type ScaleDocsByWeek = Record<
  *   (ex.: EN → 1 conforme Configurações)
  * - Prioridade: Escala Alteração > Escala Semanal
  * - Sáb/dom sem valor válido: afastamento = consolidada da legenda A
+ * - Dia útil de semana não salva: marcação inicial da escala (EN → consolidada)
  */
 export function syncFrequenciaRows(options: {
   ano: number;
@@ -247,6 +249,23 @@ export function syncFrequenciaRows(options: {
             : {}),
         };
         continue;
+      }
+
+      // Dia útil sem escala salva → marcação inicial da Escala Semanal (EN),
+      // convertida pela legenda (EN → 1). Só quando a escala não trouxe nada:
+      // legenda sem consolidada (ex.: LP) não pode virar expediente normal.
+      if (!valor && !valorEscalaOriginal) {
+        const padraoEscala = WEEKLY_DEFAULT_DAY_VALUES[field];
+        const padraoConvertido = convertEscalaValorToFrequencia(padraoEscala, lookup);
+        if (padraoConvertido) {
+          dias[key] = {
+            valor: padraoConvertido,
+            origem: "padrao_semana",
+            editadoManualmente: false,
+            valorEscalaOriginal: padraoEscala,
+          };
+          continue;
+        }
       }
 
       if (!valor) {
