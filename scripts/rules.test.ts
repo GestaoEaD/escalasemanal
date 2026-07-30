@@ -152,6 +152,14 @@ async function semear() {
     await setDoc(doc(db, "colaboradores", "col-a1"), { re: "1", nome: "A1", divisaoId: DIV_A, secaoId: secaoA1 });
     await setDoc(doc(db, "colaboradores", "col-a2"), { re: "2", nome: "A2", divisaoId: DIV_A, secaoId: secaoA2 });
     await setDoc(doc(db, "colaboradores", "col-b1"), { re: "3", nome: "B1", divisaoId: DIV_B, secaoId: secaoB1 });
+    await setDoc(doc(db, "colaboradores", `${DIV_A}__555555-5`), {
+      re: "555555-5",
+      nome: "NovoOp",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "novo.op@x.com",
+      ativo: true,
+    });
 
     await setDoc(doc(db, "postos", "posto-a1"), { sigla: "CAP", divisaoId: DIV_A });
     await setDoc(doc(db, "legendas", "leg-a1"), { sigla: "F", descricao: "Falta" });
@@ -465,8 +473,42 @@ async function main() {
   );
   await verifica("[Administrador] criar colaborador na própria seção", "ALLOW", () =>
     setDoc(doc(dbDe("Administrador"), "colaboradores", "novo-admin"), {
-      re: "10",
+      re: "000010-0",
       nome: "Novo Admin",
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+    })
+  );
+  await verifica("[Administrador] criar colaborador com e-mail", "ALLOW", () =>
+    setDoc(doc(dbDe("Administrador"), "colaboradores", "novo-admin-email"), {
+      re: "000011-1",
+      nome: "Com Email",
+      email: "admin.pode@x.com",
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+    })
+  );
+  await verifica("[Gerente] criar colaborador com e-mail", "ALLOW", () =>
+    setDoc(doc(dbDe("Gerente"), "colaboradores", "novo-gerente-email"), {
+      re: "000012-2",
+      nome: "Com Email",
+      email: "gerente.pode@x.com",
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+    })
+  );
+  await verifica("[Gerente] criar colaborador com verificador em letra", "ALLOW", () =>
+    setDoc(doc(dbDe("Gerente"), "colaboradores", "novo-re-letra"), {
+      re: "000013-A",
+      nome: "RE com letra",
+      divisaoId: DIV_A,
+      secaoId: secaoA2,
+    })
+  );
+  await verifica("[Gerente] NÃO criar colaborador com RE inválido", "DENY", () =>
+    setDoc(doc(dbDe("Gerente"), "colaboradores", "novo-re-invalido"), {
+      re: "00013-AB",
+      nome: "RE inválido",
       divisaoId: DIV_A,
       secaoId: secaoA2,
     })
@@ -498,6 +540,28 @@ async function main() {
       divisaoId: DIV_B,
       secaoId: secaoB1,
       email: "novo@x.com",
+      ativo: true,
+    })
+  );
+  await verifica("[Gerente] criar usuário com verificador em letra", "ALLOW", () =>
+    setDoc(doc(dbDe("Gerente"), "usuarios", "333334-A"), {
+      re: "333334-A",
+      nome: "Verificador letra",
+      perfil: "Operador",
+      divisaoId: DIV_B,
+      secaoId: secaoB1,
+      email: "verificador.letra@x.com",
+      ativo: true,
+    })
+  );
+  await verifica("[Gerente] NÃO criar usuário com RE inválido", "DENY", () =>
+    setDoc(doc(dbDe("Gerente"), "usuarios", "33333-AB"), {
+      re: "33333-AB",
+      nome: "Inválido",
+      perfil: "Operador",
+      divisaoId: DIV_B,
+      secaoId: secaoB1,
+      email: "invalido@x.com",
       ativo: true,
     })
   );

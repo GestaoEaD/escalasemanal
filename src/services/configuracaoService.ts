@@ -38,6 +38,8 @@ import {
   canManageUsuarios,
   canEditConfigGerais,
   assignablePerfis,
+  isGerente,
+  isAdministrador,
 } from "../utils/permissions";
 import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
 import { colaboradorDocId, tenantDocId } from "../utils/tenantDocIds";
@@ -53,6 +55,7 @@ import { KNOWN_SECAO_CODIGOS } from "../utils/seedData";
 import { ensureCatalogoBaseDivisao } from "../utils/seedCatalogoDivisao";
 import { cascadeSecaoRename } from "../utils/secaoCascade";
 import { upsertAuthIndex, removeAuthIndex } from "../utils/authIndex";
+import { isValidRe, reIdentityKey } from "../utils/reUtils";
 
 /** Legenda com escopo de Divisão (campo opcional — legendas hoje são globais). */
 export type TenantLegenda = Legenda & { divisaoId?: string };
@@ -187,6 +190,10 @@ export function reconcileColaboradoresUsuarios(
     const col = colsOut[i];
     const ui = usersOut.findIndex((u) => u.re === col.re);
     if (ui < 0) {
+      // Sem conta Google não há identidade de login. O colaborador continua
+      // normalmente no cadastro/escalas e a permissão será criada quando o
+      // Gerente ou o Administrador informar o e-mail.
+      if (!col.email) continue;
       usersOut.push({
         re: col.re,
         postoGrad: col.postoGrad,
@@ -260,7 +267,7 @@ export function reconcileColaboradoresUsuarios(
       nomeCompleto: col.nomeCompleto || usr.nomeCompleto,
       // A situação do colaborador é a fonte única do acesso. Ao reativar,
       // preserva-se eventual perfil elevado (Gestor/Admin/Gerente).
-      ativo: normalizeAtivoFlag(col.ativo),
+      ativo: normalizeAtivoFlag(col.ativo) && Boolean(email),
     };
   }
 
@@ -303,6 +310,35 @@ export async function saveConfiguracoesBatch(
   });
 
   const { colaboradores: colBlock, usuarios: userBlock, postos: postoBlock, secoes: secaoBlock, legendas: legendaBlock, divisoes: divisaoBlock, gerais: geraisBlock } = options;
+
+  if (!isGerente(usuario) && !isAdministrador(usuario)) {
+    for (const col of colBlock.current) {
+      const original = colBlock.original.find((item) => item.re === col.re);
+      if (normalizeEmail(col.email) !== normalizeEmail(original?.email)) {
+        throw new Error(
+          "Somente Gerente ou Administrador pode registrar ou alterar e-mails de acesso."
+        );
+      }
+    }
+  }
+
+  // Cadastros legados inválidos podem ser lidos até serem corrigidos, mas toda
+  // inclusão ou troca de RE deve respeitar 000000-0 (verificador aceita letra) e
+  // não pode reutilizar a identidade (seis primeiros algarismos) de outro registro.
+  for (const col of colBlock.current) {
+    const original = colBlock.original.find((item) => item.re === col.re);
+    if (!original && !isValidRe(col.re)) {
+      throw new Error(
+        `${col.nome}: R.E. inválido; use o formato 000000-0 (o verificador pode ser letra).`
+      );
+    }
+    const conflitoCol = colBlock.current.find(
+      (item) => item !== col && reIdentityKey(item.re) === reIdentityKey(col.re)
+    );
+    if (conflitoCol) {
+      throw new Error(`R.E. duplicado entre ${col.nome} e ${conflitoCol.nome}.`);
+    }
+  }
 
   const batch = createWriteBatch();
   const alteracoes: AuditAlteracao[] = [];
@@ -368,6 +404,21 @@ export async function saveConfiguracoesBatch(
     for (const target of usersToSave) {
       const original = userBlock.original.find((u) => u.re === target.re);
       const perfil = target.perfil || "Operador";
+      if (!original && !isValidRe(target.re)) {
+        throw new Error(
+          `${target.nome}: R.E. inválido; use o formato 000000-0 (o verificador pode ser letra).`
+        );
+      }
+      if (!original) {
+        const conflito = usersToSave.find(
+          (u) => u !== target && reIdentityKey(u.re) === reIdentityKey(target.re)
+        );
+        if (conflito) {
+          throw new Error(
+            `Não é possível cadastrar ${target.nome}: o R.E. já pertence a ${conflito.nome}.`
+          );
+        }
+      }
       if ((!original || (original.perfil || "Operador") !== perfil) && !perfisPermitidos.includes(perfil)) {
         throw new Error(`Seu perfil não pode atribuir o acesso ${perfil}.`);
       }
@@ -475,101 +526,102 @@ export async function saveConfiguracoesBatch(
         }
       }
     }
+  }
 
-    // --- 2. AUDIT & SAVE: USUARIOS ---
-    if (canUsuarios) {
-      for (const reDel of userBlock.removed) {
-        const original = userBlock.original.find((u) => u.re === reDel);
-        const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
-        batchDelete(batch, "usuarios", reDel);
-        createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
+  // Permissões acompanham o cadastro: ao salvar colaboradores ativos, o
+  // Operador (ou perfil elevado definido no modal) é gravado aqui.
+  if (canColaboradores || canUsuarios) {
+    for (const reDel of userBlock.removed) {
+      const original = userBlock.original.find((u) => u.re === reDel);
+      const userLabel = original ? `${original.postoGrad} ${original.nome}` : reDel;
+      batchDelete(batch, "usuarios", reDel);
+      createAuditLog("Permissão", "Exclusão", userLabel, "Todos", `${userLabel} (R.E. ${reDel})`, "");
+    }
+    for (const usr of usersToSave) {
+      const prepared = prepareUsuarioDocument({
+        ...usr,
+        divisaoId: String(usr.divisaoId || activeDivisaoId),
+        secoesResponsaveisIds: [],
+      });
+      const original = userBlock.original.find((u) => u.re === prepared.re);
+      const emailCheck = validateUsuarioEmail({
+        email: prepared.email,
+        re: prepared.re,
+        isNew: !original,
+        // Inclui Operadores gerados automaticamente nesta mesma gravação.
+        existingUsers: usersToSave.filter((u) => u.re !== prepared.re),
+      });
+      if (emailCheck.ok === false) {
+        throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
       }
-      for (const usr of usersToSave) {
-        const prepared = prepareUsuarioDocument({
-          ...usr,
-          divisaoId: String(usr.divisaoId || activeDivisaoId),
-          secoesResponsaveisIds: [],
-        });
-        const original = userBlock.original.find((u) => u.re === prepared.re);
-        const emailCheck = validateUsuarioEmail({
-          email: prepared.email,
-          re: prepared.re,
-          isNew: !original,
-          // Inclui Operadores gerados automaticamente nesta mesma gravação.
-          existingUsers: usersToSave.filter((u) => u.re !== prepared.re),
-        });
-        if (emailCheck.ok === false) {
-          throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
+
+      const { uid: _uid, ...toPersist } = prepared;
+      batchSet(batch, "usuarios", prepared.re, toPersist as unknown as Record<string, unknown>);
+
+      const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
+      const emailAntes = normalizeEmail(original?.email);
+      const emailDepois = normalizeEmail(prepared.email);
+
+      if (!original) {
+        createAuditLog(
+          "Permissão",
+          "Inclusão",
+          userLabel,
+          "Todos",
+          "",
+          `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
+        );
+        if (emailDepois) {
+          createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
         }
-
-        const { uid: _uid, ...toPersist } = prepared;
-        batchSet(batch, "usuarios", prepared.re, toPersist as unknown as Record<string, unknown>);
-
-        const userLabel = `${prepared.postoGrad} ${prepared.nome}`;
-        const emailAntes = normalizeEmail(original?.email);
-        const emailDepois = normalizeEmail(prepared.email);
-
-        if (!original) {
+      } else {
+        if (prepared.postoGrad !== original.postoGrad) {
+          createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
+        }
+        if (prepared.nome !== original.nome) {
+          createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
+        }
+        if (prepared.nomeCompleto !== original.nomeCompleto) {
+          createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
+        }
+        if (emailAntes !== emailDepois) {
           createAuditLog(
             "Permissão",
-            "Inclusão",
+            emailAntes ? "Edição" : "Inclusão",
             userLabel,
-            "Todos",
-            "",
-            `RE: ${prepared.re}, Posto: ${prepared.postoGrad}, Nome Completo: ${prepared.nomeCompleto || ""}, Guerra: ${prepared.nome}, E-mail Google: ${emailDepois || "—"}, Seção: ${prepared.secao}, Perfil: ${prepared.perfil || "Operador"}, Ativo: ${prepared.ativo ? "Sim" : "Não"}`
+            "E-mail Google",
+            emailAntes,
+            emailDepois
           );
-          if (emailDepois) {
-            createAuditLog("Permissão", "Inclusão", userLabel, "E-mail Google", "", emailDepois);
-          }
-        } else {
-          if (prepared.postoGrad !== original.postoGrad) {
-            createAuditLog("Permissão", "Edição", userLabel, "Posto/Graduação", original.postoGrad, prepared.postoGrad);
-          }
-          if (prepared.nome !== original.nome) {
-            createAuditLog("Permissão", "Edição", userLabel, "Nome de Guerra", original.nome, prepared.nome);
-          }
-          if (prepared.nomeCompleto !== original.nomeCompleto) {
-            createAuditLog("Permissão", "Edição", userLabel, "Nome Completo", original.nomeCompleto || "", prepared.nomeCompleto || "");
-          }
-          if (emailAntes !== emailDepois) {
-            createAuditLog(
-              "Permissão",
-              emailAntes ? "Edição" : "Inclusão",
-              userLabel,
-              "E-mail Google",
-              emailAntes,
-              emailDepois
-            );
-          }
-          if (normalizeDivisaoId(prepared.divisaoId) !== normalizeDivisaoId(original.divisaoId)) {
-            createAuditLog(
-              "Permissão",
-              "Edição",
-              userLabel,
-              "Divisão",
-              String(original.divisaoId || ""),
-              String(prepared.divisaoId || "")
-            );
-          }
-          if (
-            String(prepared.secaoId || "") !== String(original.secaoId || "") ||
-            !mesmaSecaoTexto(prepared.secao, original.secao)
-          ) {
-            createAuditLog(
-              "Permissão",
-              "Edição",
-              userLabel,
-              "Seção",
-              `${original.secao || "—"} (${original.secaoId || "—"})`,
-              `${prepared.secao || "—"} (${prepared.secaoId || "—"})`
-            );
-          }
-          if (prepared.perfil !== original.perfil) {
-            createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
-          }
-          if (prepared.ativo !== original.ativo) {
-            createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
-          }
+        }
+        if (normalizeDivisaoId(prepared.divisaoId) !== normalizeDivisaoId(original.divisaoId)) {
+          createAuditLog(
+            "Permissão",
+            "Edição",
+            userLabel,
+            "Divisão",
+            String(original.divisaoId || ""),
+            String(prepared.divisaoId || "")
+          );
+        }
+        if (
+          String(prepared.secaoId || "") !== String(original.secaoId || "") ||
+          !mesmaSecaoTexto(prepared.secao, original.secao)
+        ) {
+          createAuditLog(
+            "Permissão",
+            "Edição",
+            userLabel,
+            "Seção",
+            `${original.secao || "—"} (${original.secaoId || "—"})`,
+            `${prepared.secao || "—"} (${prepared.secaoId || "—"})`
+          );
+        }
+        if (prepared.perfil !== original.perfil) {
+          createAuditLog("Permissão", "Edição", userLabel, "Perfil", original.perfil || "Operador", prepared.perfil || "Operador");
+        }
+        if (prepared.ativo !== original.ativo) {
+          createAuditLog("Permissão", "Edição", userLabel, "Situação (Ativo)", original.ativo ? "Ativo" : "Inativo", prepared.ativo ? "Ativo" : "Inativo");
         }
       }
     }
@@ -849,7 +901,7 @@ export async function saveConfiguracoesBatch(
     }
   }
 
-  if (canUsuarios) {
+  if (canColaboradores || canUsuarios) {
     // Mantém auth_index alinhado aos usuários. Inativo continua em `usuarios`,
     // mas perde o índice que autoriza leituras pelas security rules.
     for (const u of usersToSave) {

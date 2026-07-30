@@ -10,6 +10,7 @@ import {
   validateUsuarioEmail,
 } from "../src/utils/usuarioHelpers";
 import type { Colaborador, Usuario } from "../src/types";
+import { formatReInput, isValidRe, reIdentityKey } from "../src/utils/reUtils";
 
 function colaborador(email: string, secao = "Seção A", secaoId = "SEC_A"): Colaborador {
   return {
@@ -121,6 +122,17 @@ check("colaborador ativo sem permissão vira Operador automaticamente", () => {
   assert.equal(result.usuarios[0]?.email, "sem.permissao@gmail.com");
 });
 
+check("colaborador sem e-mail permanece sem usuário de login", () => {
+  const result = reconcileColaboradoresUsuarios(
+    [colaborador("")],
+    [],
+    [colaborador("")],
+    []
+  );
+  assert.equal(result.colaboradores.length, 1);
+  assert.equal(result.usuarios.length, 0);
+});
+
 check("colaborador inativo permanece cadastrado e perde acesso", () => {
   const inativo = { ...colaborador("inativo@gmail.com"), ativo: false };
   const gestor = { ...permissao("inativo@gmail.com"), perfil: "Gestor" as const };
@@ -167,6 +179,26 @@ check("Gmail com ponto e +alias é a mesma conta", () => {
   assert.equal(contaEmailKey("jdsc.historia@gmail.com"), "jdschistoria@gmail.com");
   assert.equal(contaEmailKey("jdschistoria+escala@gmail.com"), "jdschistoria@gmail.com");
   assert.notEqual(contaEmailKey("jdsc.historia@outro.com"), contaEmailKey("jdschistoria@outro.com"));
+});
+
+check("RE exige seis algarismos, hífen e verificador alfanumérico", () => {
+  assert.equal(isValidRe("000000-0"), true);
+  assert.equal(isValidRe("151287-A"), true);
+  assert.equal(isValidRe("151287-x"), true);
+  assert.equal(isValidRe("151287"), false);
+  assert.equal(isValidRe("151287-AB"), false);
+  assert.equal(isValidRe("15128-7"), false);
+  assert.equal(formatReInput("1512874"), "151287-4");
+  assert.equal(formatReInput("151287a"), "151287-A");
+  assert.equal(formatReInput("151287-X"), "151287-X");
+  assert.equal(formatReInput("151287"), "151287");
+  assert.equal(formatReInput("151287-XY"), "151287-X");
+});
+
+check("unicidade de RE detecta registros legados equivalentes", () => {
+  assert.equal(reIdentityKey("967185"), reIdentityKey("967185-4"));
+  assert.equal(reIdentityKey("967185-A"), reIdentityKey("967185-4"));
+  assert.notEqual(reIdentityKey("967185-4"), reIdentityKey("967186-4"));
 });
 
 check("duplicidade aponta o RE em conflito", () => {

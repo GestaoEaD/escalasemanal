@@ -28,6 +28,31 @@ service cloud.firestore {
       return emailKeyDe(authEmail());
     }
 
+    function reFormatoValido(re) {
+      return re is string && re.matches('[0-9]{6}-[0-9A-Z]');
+    }
+
+    function usuarioReOk(re) {
+      return request.resource.data.get('re', '') == re
+        && (
+          reFormatoValido(re)
+          || (
+            resource != null
+            && resource.data.get('re', '') == re
+            && request.resource.data.get('re', '') == resource.data.get('re', '')
+          )
+        );
+    }
+
+    function colaboradorReOk() {
+      let novoRe = request.resource.data.get('re', '');
+      return reFormatoValido(novoRe)
+        || (
+          resource != null
+          && resource.data.get('re', '') == novoRe
+        );
+    }
+
     // Em consultas (`list`) só os campos filtrados são legíveis: tocar em outro
     // campo é erro de avaliação. Os dois termos existem por isso — a consulta do
     // login filtra `emailKey`, o termo literal cobre leitura por documento e
@@ -106,6 +131,20 @@ service cloud.firestore {
           resource == null
           || !resource.data.keys().hasAny(['perfil'])
           || resource.data.perfil != 'Gerente'
+        );
+    }
+
+    // Administrador só grava em `usuarios` o mesmo e-mail do colaborador
+    // (cadastrado por Gerente ou Admin); não inventa outra conta de acesso.
+    function adminUsuarioEmailDoColaborador() {
+      let colId = request.resource.data.get('divisaoId', '')
+        + '__'
+        + request.resource.data.get('re', '');
+      return !isAdmin()
+        || (
+          existsAfter(/databases/$(database)/documents/colaboradores/$(colId))
+          && getAfter(/databases/$(database)/documents/colaboradores/$(colId))
+            .data.get('email', '') == request.resource.data.get('email', '')
         );
     }
 
@@ -437,12 +476,20 @@ service cloud.firestore {
           && !docInexistente()
           && ehDonoDoCadastro(resource.data)
         );
-      allow create: if (isGerente() && sectionCreateOk())
-        || (isAdmin() && sectionCreateOk() && adminUsuarioPerfilOk());
-      allow update: if isGerente()
+      allow create: if usuarioReOk(re)
+        && (
+          (isGerente() && sectionCreateOk())
+          || (isAdmin()
+            && sectionCreateOk()
+            && adminUsuarioPerfilOk()
+            && adminUsuarioEmailDoColaborador())
+        );
+      allow update: if usuarioReOk(re)
+        && (isGerente()
         || (isAdmin()
           && sectionUpdateOk()
           && adminUsuarioPerfilOk()
+          && adminUsuarioEmailDoColaborador()
           && !ehDonoDoCadastro(resource.data))
         || (
           signedIn()
@@ -452,7 +499,7 @@ service cloud.firestore {
           && request.resource.data.divisaoId == resource.data.divisaoId
           && request.resource.data.secaoId == resource.data.secaoId
           && request.resource.data.re == resource.data.re
-        );
+        ));
       allow delete: if isRegistered()
         && (
           callerPerfil() == 'Gerente'
@@ -470,8 +517,12 @@ service cloud.firestore {
 
     match /colaboradores/{id} {
       allow read: if sectionRead();
-      allow create: if canEditCadastro() && sectionCreateOk();
-      allow update: if canEditCadastro() && sectionUpdateOk();
+      allow create: if canEditCadastro()
+        && sectionCreateOk()
+        && colaboradorReOk();
+      allow update: if canEditCadastro()
+        && sectionUpdateOk()
+        && colaboradorReOk();
       allow delete: if canEditCadastro() && tenantDeleteOk();
     }
 

@@ -5,6 +5,7 @@
  */
 import { Usuario } from "../types";
 import { prepareUsuarioDocument, validateUsuarioEmail } from "../utils/usuarioHelpers";
+import { isValidRe } from "../utils/reUtils";
 
 export { validateUsuarioEmail, prepareUsuarioDocument };
 
@@ -14,6 +15,11 @@ export function assertUsuarioCadastro(
 ): asserts usuario is Usuario {
   const re = String(usuario?.re ?? "").trim();
   if (!re) throw new Error("Usuário inválido: R.E. é obrigatório.");
+  if (!isValidRe(re)) {
+    throw new Error(
+      "Usuário inválido: R.E. deve seguir o formato 000000-0 (verificador pode ser letra)."
+    );
+  }
 
   const nome = String(usuario?.nome ?? "").trim();
   if (!nome) throw new Error("Usuário inválido: nome é obrigatório.");

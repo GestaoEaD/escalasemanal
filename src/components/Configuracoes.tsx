@@ -1,6 +1,16 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { db, collection, getDocs, getDoc, doc, query, where } from "../firebase";
-import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, Divisao, DIVISAO_EAD_ID } from "../types";
+import {
+  Usuario,
+  Colaborador,
+  AuditAlteracao,
+  AuditOperation,
+  Legenda,
+  Secao,
+  Divisao,
+  DIVISAO_EAD_ID,
+  PerfilUsuario,
+} from "../types";
 import {
   Users,
   Shield,
@@ -28,6 +38,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { prepareFirestoreWrite } from "../utils/firestoreSanitize";
 import { loadAuditOperations } from "../utils/auditService";
+import { formatReInput, isValidRe, reIdentityKey } from "../utils/reUtils";
 import {
   saveConfiguracoesBatch,
   normalizeColaborador,
@@ -321,6 +332,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   // Modals visibility
   const [colModalOpen, setColModalOpen] = useState(false);
   const [currentCol, setCurrentCol] = useState<Colaborador | null>(null);
+  /** Perfil definido no modal do colaborador; gravado em `usuarios` no salvamento. */
+  const [colPerfilDraft, setColPerfilDraft] = useState<PerfilUsuario>("Operador");
   /** RE original na edição de colaborador (null = inclusão). Permite alterar o RE. */
   const [colOriginalRe, setColOriginalRe] = useState<string | null>(null);
 
@@ -909,7 +922,23 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     const novaRe = String(currentCol.re || "").trim();
+    if (!isValidRe(novaRe)) {
+      alert(
+        "O R.E. deve conter seis algarismos, hífen e o dígito verificador (algarismo ou letra). Ex.: 000000-0 ou 000000-A."
+      );
+      return;
+    }
     const email = normalizeEmail(currentCol.email);
+    const colOriginal = colOriginalRe
+      ? colaboradores.find((c) => c.re === colOriginalRe)
+      : undefined;
+    if (
+      !(isGerente(usuario) || isAdministrador(usuario)) &&
+      email !== normalizeEmail(colOriginal?.email)
+    ) {
+      alert("Somente Gerente ou Administrador pode registrar ou alterar o e-mail Google.");
+      return;
+    }
     if (email && !isValidEmailFormat(email)) {
       alert("Informe um e-mail Google válido (ex.: joao.silva@exemplo.com).");
       return;
@@ -945,11 +974,16 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       divisaoId: targetDivisaoId,
     });
 
-    const duplicada = colaboradores.some(
-      (c) => c.re === novaRe && c.re !== colOriginalRe
-    );
+    const chaveRe = reIdentityKey(novaRe);
+    const duplicada =
+      colaboradores.some(
+        (c) => c.re !== colOriginalRe && reIdentityKey(c.re) === chaveRe
+      ) ||
+      usuarios.some(
+        (u) => u.re !== colOriginalRe && reIdentityKey(u.re) === chaveRe
+      );
     if (duplicada) {
-      alert("Já existe um colaborador com este R.E.");
+      alert("Já existe um usuário ou colaborador cadastrado com este R.E.");
       return;
     }
 
@@ -978,10 +1012,72 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       });
     }
 
+    // Perfil de acesso fica no cadastro do colaborador e só é persistido no
+    // salvamento principal (junto com colaboradores / auth_index).
+    const perfilEscolhido: PerfilUsuario = canUsuarios
+      ? colPerfilDraft
+      : "Operador";
+    if (canUsuarios && !perfilOptions.includes(perfilEscolhido)) {
+      alert("Perfil não permitido para o seu nível de acesso.");
+      return;
+    }
+
+    const reBusca = colOriginalRe || novaRe;
+    const existente = usuarios.find((u) => u.re === reBusca || u.re === novaRe);
+    const emailCheck = validateUsuarioEmail({
+      email,
+      re: novaRe,
+      isNew: !existente,
+      existingUsers: usuarios.filter((u) => u.re !== reBusca && u.re !== novaRe),
+    });
+    if (emailCheck.ok === false) {
+      alert(emailCheck.message);
+      return;
+    }
+
+    // Sem e-mail, o colaborador permanece apenas no cadastro. Uma permissão
+    // nova só nasce quando Gerente ou Administrador registrar a conta Google.
+    if (emailCheck.email || existente) {
+      const preparedUser = prepareUsuarioDocument({
+        ...existente,
+        re: novaRe,
+        postoGrad: normalized.postoGrad,
+        nomeCompleto: normalized.nomeCompleto || "",
+        nome: normalized.nome,
+        email: emailCheck.email,
+        secao: normalized.secao,
+        secaoId: normalized.secaoId,
+        divisaoId: normalized.divisaoId,
+        perfil: perfilEscolhido,
+        ativo: normalizeAtivoFlag(normalized.ativo) && Boolean(emailCheck.email),
+        secoesResponsaveisIds: [],
+        authProvider: existente?.authProvider || (emailCheck.email ? "google" : "local"),
+        ultimoLogin: existente?.ultimoLogin ?? null,
+        emailVerificado: existente?.emailVerificado === true,
+      });
+
+      setUsuarios((prev) => {
+        const list = [...prev];
+        const idx = list.findIndex((u) => u.re === reBusca || u.re === novaRe);
+        if (idx >= 0) {
+          list[idx] = preparedUser;
+        } else {
+          list.push(preparedUser);
+        }
+        return list;
+      });
+    }
+    if (colOriginalRe && colOriginalRe !== novaRe) {
+      setRemovedUsuarios((prev) =>
+        prev.includes(colOriginalRe) ? prev : [...prev, colOriginalRe]
+      );
+    }
+
     setColaboradores(updatedList);
     setColModalOpen(false);
     setCurrentCol(null);
     setColOriginalRe(null);
+    setColPerfilDraft("Operador");
     setColPage(1);
   };
 
@@ -995,6 +1091,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     }
 
     const novaRe = String(currentUser.re || "").trim();
+    if (!isValidRe(novaRe)) {
+      alert("O R.E. deve seguir o formato 000000-0 (o dígito verificador aceita letra).");
+      return;
+    }
     const isNew = userOriginalRe === null;
     const colaboradorVinculado = colaboradores.find((c) => c.re === novaRe);
     if (!colaboradorVinculado) {
@@ -1021,7 +1121,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       return;
     }
 
-    const duplicada = usuarios.some((u) => u.re === novaRe && u.re !== userOriginalRe);
+    const chaveRe = reIdentityKey(novaRe);
+    const duplicada =
+      usuarios.some(
+        (u) => u.re !== userOriginalRe && reIdentityKey(u.re) === chaveRe
+      ) ||
+      colaboradores.some(
+        (c) => c.re !== userOriginalRe && reIdentityKey(c.re) === chaveRe
+      );
     if (duplicada) {
       alert("Já existe uma permissão cadastrada para este R.E.");
       return;
@@ -1619,52 +1726,19 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       }
       if (!permissao) {
         return {
-          status: email ? ("operador-ao-salvar" as const) : ("sem-email" as const),
+          status: email ? ("pendente-salvar" as const) : ("sem-email" as const),
           permissao,
         };
       }
       const emailPermissao = normalizeEmail(permissao.email);
       if (!emailPermissao) return { status: "permissao-sem-email" as const, permissao };
-      if (email && emailPermissao !== email) {
+      if (email && contaEmailKey(emailPermissao) !== contaEmailKey(email)) {
         return { status: "email-divergente" as const, permissao };
       }
-      if (permissao.ativo === false) return { status: "operador-ao-salvar" as const, permissao };
+      if (permissao.ativo === false) return { status: "pendente-salvar" as const, permissao };
       return { status: "liberado" as const, permissao };
     },
     [usuarios]
-  );
-
-  /** Abre o perfil já existente ou prepara uma elevação para o colaborador. */
-  const concederAcesso = useCallback(
-    (col: Colaborador) => {
-      const existente = usuarios.find((u) => u.re === col.re);
-      const divisaoCol = String(col.divisaoId || activeDivisaoId);
-      const secaoCol =
-        col.secaoId ||
-        listSecoesDaDivisao(divisaoCol).find((s) => secoesIguais(s.nome, col.secao))?.id ||
-        "";
-      setCurrentUser({
-        ...existente,
-        re: col.re,
-        postoGrad: col.postoGrad,
-        nomeCompleto: col.nomeCompleto || "",
-        nome: col.nome,
-        email: normalizeEmail(col.email),
-        secao: col.secao,
-        secaoId: secaoCol,
-        divisaoId: divisaoCol,
-        perfil: existente?.perfil || (perfilOptions.includes("Gestor") ? "Gestor" : perfilOptions[0]),
-        ativo: normalizeAtivoFlag(col.ativo),
-        secoesResponsaveisIds: [],
-        authProvider: existente?.authProvider || "google",
-        ultimoLogin: existente?.ultimoLogin ?? null,
-        emailVerificado: existente?.emailVerificado === true,
-      });
-      setUserOriginalRe(existente?.re || null);
-      setActiveTab("usuarios");
-      setUserModalOpen(true);
-    },
-    [activeDivisaoId, listSecoesDaDivisao, perfilOptions, usuarios]
   );
 
   const filteredUsuarios = useMemo(() => {
@@ -1839,10 +1913,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Colaboradores</h2>
                     <p className="text-xs text-gray-500">
-                      Efetivo policial lotado por Divisão e Seção. A lotação determina em quais
-                      escalas o militar entra. Inativar remove das escalas, sem retirar eventual
-                      permissão no módulo Permissão. Informar o e-mail aqui não libera o login:
-                      confira a coluna <b>Acesso ao sistema</b> e conceda a permissão.
+                      Efetivo policial lotado por Divisão e Seção. Edite o colaborador para
+                      informar o e-mail Google e o perfil de acesso; o registro só vale após
+                      o salvamento principal. Ativo libera o acesso; inativo permanece
+                      cadastrado, fora das escalas e sem login.
                     </p>
                   </div>
                   <button
@@ -1864,6 +1938,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         observacao: "",
                         ativo: true
                       });
+                      setColPerfilDraft("Operador");
                       setColOriginalRe(null);
                       setColModalOpen(true);
                     }}
@@ -2015,9 +2090,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                     <AlertCircle size={11} /> PERMISSÃO SEM E-MAIL
                                   </span>
                                 )}
-                                {acesso.status === "operador-ao-salvar" && (
+                                {acesso.status === "pendente-salvar" && (
                                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                                    OPERADOR AO SALVAR
+                                    PENDENTE SALVAR
                                   </span>
                                 )}
                                 {acesso.status === "sem-email" && (
@@ -2041,15 +2116,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right space-x-1">
-                                {canUsuarios && normalizeAtivoFlag(col.ativo) && (
-                                  <button
-                                    onClick={() => concederAcesso(col)}
-                                    className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold cursor-pointer inline-flex items-center gap-1"
-                                    title="Definir perfil elevado ou restaurar Operador"
-                                  >
-                                    <Shield size={11} /> Definir perfil
-                                  </button>
-                                )}
                                 <button
                                   onClick={() => {
                                     setCurrentCol({
@@ -2061,6 +2127,10 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                         )?.id ||
                                         "",
                                     });
+                                    setColPerfilDraft(
+                                      (usuarios.find((u) => u.re === col.re)?.perfil as PerfilUsuario) ||
+                                        "Operador"
+                                    );
                                     setColOriginalRe(col.re);
                                     setColModalOpen(true);
                                   }}
@@ -2115,9 +2185,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Permissão</h2>
                     <p className="text-xs text-gray-500">
-                      Colaboradores ativos recebem Operador automaticamente; inativos permanecem
-                      cadastrados sem acesso. Use este módulo somente para elevar o perfil a
-                      Gestor, Administrador ou, quando configurado por Gerente, Gerente.
+                      Visão das permissões geradas a partir dos colaboradores. O perfil
+                      (Operador, Gestor, Administrador ou Gerente) é definido ao editar o
+                      colaborador e só é registrado após o salvamento principal.
                     </p>
                   </div>
                   <div className="mt-3 sm:mt-0 flex flex-wrap items-center gap-2">
@@ -2819,6 +2889,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   onClick={() => {
                     setColModalOpen(false);
                     setColOriginalRe(null);
+                    setColPerfilDraft("Operador");
                   }}
                   className="text-gray-400 hover:text-white cursor-pointer"
                 >
@@ -2833,8 +2904,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <input
                       type="text"
                       value={currentCol.re}
-                      onChange={(e) => setCurrentCol({ ...currentCol, re: e.target.value })}
-                      placeholder="Ex: 999888-0"
+                      onChange={(e) =>
+                        setCurrentCol({ ...currentCol, re: formatReInput(e.target.value) })
+                      }
+                      placeholder="000000-0"
+                      maxLength={8}
+                      inputMode="text"
+                      autoCapitalize="characters"
+                      pattern="\d{6}-[0-9A-Z]"
+                      title="Informe seis algarismos, hífen e o dígito verificador, que pode ser algarismo ou letra (ex.: 000000-0, 000000-A)"
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       required
                     />
@@ -2900,14 +2978,39 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     }}
                     placeholder="joao.silva@exemplo.com"
                     autoComplete="email"
-                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
+                    disabled={!(isGerente(usuario) || isAdministrador(usuario))}
+                    className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase disabled:bg-gray-100 disabled:text-gray-500"
                   />
                   <p className="mt-1 text-[10px] text-gray-400">
-                    Conta Google do militar, armazenada em minúsculas. Por si só não libera o
-                    acesso: o login depende da permissão no módulo Permissão, que passa a usar
-                    este e-mail. Se já existir permissão, alterar aqui também altera o login.
+                    {isGerente(usuario) || isAdministrador(usuario)
+                      ? "Conta Google usada no login. Sem e-mail, o colaborador permanece cadastrado sem afetar o ambiente."
+                      : "Somente Gerente ou Administrador pode registrar ou alterar a conta Google."}
                   </p>
                 </div>
+
+                {canUsuarios && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                      Perfil de Acesso *
+                    </label>
+                    <select
+                      value={colPerfilDraft}
+                      onChange={(e) => setColPerfilDraft(e.target.value as PerfilUsuario)}
+                      className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold bg-white"
+                      required
+                    >
+                      {perfilOptions.map((perfil) => (
+                        <option key={perfil} value={perfil}>
+                          {perfil === "Operador" ? "Operador (padrão)" : perfil}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[10px] text-gray-400">
+                      Colaborador ativo com e-mail recebe este perfil no salvamento.
+                      Inativo permanece cadastrado, sem acesso.
+                    </p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -3007,8 +3110,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Colaborador Ativo</span>
                   </label>
                   <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                    Ativo = Operador automático e presença nas escalas. Inativo = cadastro
-                    preservado, fora das escalas e sem acesso ao sistema.
+                    Ativo = acesso conforme o perfil acima e presença nas escalas.
+                    Inativo = cadastro preservado, fora das escalas e sem acesso.
                   </p>
                 </div>
 
@@ -3029,6 +3132,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     onClick={() => {
                       setColModalOpen(false);
                       setColOriginalRe(null);
+                      setColPerfilDraft("Operador");
                     }}
                     className="px-4 py-2 text-xs font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
@@ -3146,8 +3250,14 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <input
                       type="text"
                       value={currentUser.re}
-                      onChange={(e) => setCurrentUser({ ...currentUser, re: e.target.value })}
+                      onChange={(e) =>
+                        setCurrentUser({ ...currentUser, re: formatReInput(e.target.value) })
+                      }
                       placeholder="Ex: 999888-0"
+                      maxLength={8}
+                      autoCapitalize="characters"
+                      pattern="\d{6}-[0-9A-Z]"
+                      title="Informe seis algarismos, hífen e o dígito verificador, que pode ser algarismo ou letra (ex.: 000000-0, 000000-A)"
                       className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       required
                     />

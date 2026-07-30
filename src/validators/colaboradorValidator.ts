@@ -2,6 +2,7 @@
  * Validações de cadastro de Colaborador.
  */
 import { Colaborador } from "../types";
+import { isValidRe } from "../utils/reUtils";
 
 /** Garante campos mínimos de um Colaborador: RE, nome, divisaoId, secaoId. */
 export function assertColaborador(
@@ -9,6 +10,11 @@ export function assertColaborador(
 ): asserts col is Colaborador {
   const re = String(col?.re ?? "").trim();
   if (!re) throw new Error("Colaborador inválido: R.E. é obrigatório.");
+  if (!isValidRe(re)) {
+    throw new Error(
+      "Colaborador inválido: R.E. deve seguir o formato 000000-0 (verificador pode ser letra)."
+    );
+  }
 
   const nome = String(col?.nome ?? "").trim();
   if (!nome) throw new Error("Colaborador inválido: nome é obrigatório.");
