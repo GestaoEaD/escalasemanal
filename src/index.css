@@ -86,6 +86,19 @@ body {
   table-layout: fixed;
 }
 
+/*
+ * O grupo "Identificação" acompanha Posto/RE/Nome durante a rolagem
+ * horizontal. Fundo opaco e sombra impedem que os dias passem visualmente
+ * por baixo do título congelado.
+ */
+.frequencia-table .freq-identificacao-group {
+  position: sticky;
+  left: 0;
+  z-index: 30;
+  background: #1e293b;
+  box-shadow: 2px 0 0 #94a3b8;
+}
+
 .frequencia-table .freq-id-posto {
   width: 6rem;
   min-width: 6rem;
@@ -365,6 +378,12 @@ body {
   .frequencia-print-root .sticky {
     position: static !important;
     left: auto !important;
+  }
+
+  .frequencia-print-root .freq-identificacao-group {
+    position: static !important;
+    left: auto !important;
+    box-shadow: none !important;
   }
 
   .freq-inst-wrap {

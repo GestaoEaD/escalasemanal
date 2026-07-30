@@ -311,14 +311,6 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     font-variant-numeric: tabular-nums;
   }
 
-  /* Sobrepõe linhas vizinhas para evitar divisórias visualmente duplicadas. */
-  .freq-inst-values > div + div,
-  .freq-inst-opm > span + span,
-  .freq-inst-cod > span + span,
-  .freq-inst-mesano > span + span {
-    margin-left: -1px;
-  }
-
   /* —— Legenda (logo abaixo, sem gap) —— */
   .freq-inst-legend {
     width: 100%;

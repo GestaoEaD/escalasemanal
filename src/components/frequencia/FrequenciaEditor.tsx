@@ -744,7 +744,7 @@ export default function FrequenciaEditor({
                 <tr className="bg-slate-800 text-white">
                   <th
                     colSpan={3}
-                    className={`px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${sepId}`}
+                    className={`freq-identificacao-group px-2 py-1 text-center text-[9px] font-bold uppercase tracking-wider ${sepId}`}
                   >
                     Identificação
                   </th>
