@@ -508,9 +508,9 @@ export default function FrequenciaEditor({
   const stickyPosto = "sticky left-0 z-[1] print:static";
   const stickyRe = "sticky left-[4.25rem] sm:left-[6rem] z-[1] print:static";
   const stickyNome = "sticky left-[8rem] sm:left-[11rem] z-[1] print:static";
-  const stickyPostoHead = "sticky left-0 z-20 bg-slate-100 print:static";
-  const stickyReHead = "sticky left-[4.25rem] sm:left-[6rem] z-20 bg-slate-100 print:static";
-  const stickyNomeHead = "sticky left-[8rem] sm:left-[11rem] z-20 bg-slate-100 print:static";
+  const stickyPostoHead = "sticky left-0 z-20 bg-slate-200 print:static";
+  const stickyReHead = "sticky left-[4.25rem] sm:left-[6rem] z-20 bg-slate-200 print:static";
+  const stickyNomeHead = "sticky left-[8rem] sm:left-[11rem] z-20 bg-slate-200 print:static";
 
   const dayCellTone = (weekend: boolean) =>
     weekend
@@ -761,7 +761,7 @@ export default function FrequenciaEditor({
                     Totais
                   </th>
                 </tr>
-                <tr className="bg-slate-100 text-slate-900">
+                <tr className="bg-slate-200 text-slate-900">
                   <th
                     className={`freq-id-posto border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${stickyPostoHead}`}
                   >
@@ -782,8 +782,8 @@ export default function FrequenciaEditor({
                       key={k}
                       className={`freq-day border border-slate-300 px-0 py-1 text-center text-[10px] font-bold tabular-nums align-middle ${
                         weekendByKey[k]
-                          ? "bg-slate-200/90 text-slate-800"
-                          : "bg-slate-100"
+                          ? "freq-weekend-head bg-slate-300 text-slate-900"
+                          : "bg-slate-200"
                       }`}
                     >
                       {Number(k)}
@@ -924,7 +924,7 @@ export default function FrequenciaEditor({
                 <col className="freq-obs-text" />
                 {editable && <col className="freq-obs-acoes" />}
               </colgroup>
-              <thead className="bg-slate-100">
+              <thead className="bg-slate-200">
                 <tr>
                   <th
                     className={`freq-id-posto border border-slate-300 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide whitespace-nowrap`}

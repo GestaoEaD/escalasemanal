@@ -315,6 +315,8 @@ body {
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
     table-layout: fixed !important;
     font-size: 6.5px !important;
     line-height: 1.15 !important;
@@ -359,9 +361,21 @@ body {
 
   .frequencia-print-root .frequencia-table th,
   .frequencia-print-root .frequencia-table td {
+    border: 1px solid #64748b !important;
     padding: 1px 1px !important;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Cabeçalhos menores: contraste discreto contra as células de dados. */
+  .frequencia-print-root .frequencia-table thead tr:nth-child(2) th,
+  .frequencia-print-root .frequencia-obs-table thead th {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+  }
+
+  .frequencia-print-root .frequencia-table thead tr:nth-child(2) th.freq-weekend-head {
+    background: #cbd5e1 !important;
   }
 
   .frequencia-print-root .frequencia-table .freq-day-input,

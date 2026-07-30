@@ -143,7 +143,7 @@ const FREQUENCIA_PRINT_CSS = `
   }
 
   .freq-table thead th {
-    background: #f2f4f7;
+    background: #e2e8f0;
     color: #344054;
     font-weight: 700;
     text-transform: uppercase;
@@ -224,6 +224,10 @@ const FREQUENCIA_PRINT_CSS = `
     background: #f2f4f7 !important;
   }
 
+  .freq-table thead th.weekend {
+    background: #cbd5e1 !important;
+  }
+
   .freq-table .id-cell {
     text-align: left;
     padding-left: 5px;
@@ -266,7 +270,7 @@ const FREQUENCIA_PRINT_CSS = `
     vertical-align: top;
   }
   .obs-table th {
-    background: #f2f4f7;
+    background: #e2e8f0;
     color: #344054;
     font-size: 8px;
     font-weight: 700;
@@ -400,7 +404,7 @@ const FREQUENCIA_PRINT_CSS = `
     }
 
     .freq-table thead tr:not(.group-head) th {
-      background: #f2f4f7 !important;
+      background: #e2e8f0 !important;
       color: #344054 !important;
       border: 1px solid #d0d5dd !important;
       padding: 4px 2px !important;
@@ -425,6 +429,10 @@ const FREQUENCIA_PRINT_CSS = `
 
     .freq-table .weekend {
       background: #f2f4f7 !important;
+    }
+
+    .freq-table thead th.weekend {
+      background: #cbd5e1 !important;
     }
 
     .freq-table .col-day {
@@ -471,7 +479,7 @@ const FREQUENCIA_PRINT_CSS = `
       font-size: 9px !important;
     }
     .obs-table th {
-      background: #f2f4f7 !important;
+      background: #e2e8f0 !important;
       color: #344054 !important;
       border: 1px solid #d0d5dd !important;
     }
