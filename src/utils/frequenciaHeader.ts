@@ -232,13 +232,21 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   }
 
   .freq-inst-values > div {
-    border-right: 1px solid var(--freq-border);
+    border: none;
     min-width: 0;
     min-height: 36px;
   }
 
-  .freq-inst-values > div:last-child {
-    border-right: none;
+  /*
+   * Cada dado é uma célula fechada. Não dependemos somente das divisórias do
+   * grid: assim DEC, seção, cada dígito, mês, ano e página mantêm o contorno
+   * completo também no PDF.
+   */
+  .freq-inst-opm > span,
+  .freq-inst-cod > span,
+  .freq-inst-mesano > span,
+  .freq-inst-pag {
+    border: 1px solid var(--freq-border);
   }
 
   .freq-inst-opm {
@@ -250,7 +258,6 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-opm > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid var(--freq-border);
     padding: 4px 3px;
     text-align: center;
     font-size: clamp(10px, 1.05vw, 13px);
@@ -262,10 +269,6 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     text-overflow: ellipsis;
   }
 
-  .freq-inst-opm > span:last-child {
-    border-right: none;
-  }
-
   .freq-inst-cod {
     display: grid;
     grid-template-columns: repeat(9, 1fr);
@@ -275,16 +278,11 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-cod > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid var(--freq-border);
     font-size: clamp(11px, 1.15vw, 14px);
     font-weight: 700;
     color: var(--freq-text);
     font-variant-numeric: tabular-nums;
     line-height: 1;
-  }
-
-  .freq-inst-cod > span:last-child {
-    border-right: none;
   }
 
   .freq-inst-mesano {
@@ -296,16 +294,11 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
   .freq-inst-mesano > span {
     display: grid;
     place-items: center;
-    border-right: 1px solid var(--freq-border);
     font-size: clamp(10px, 1.05vw, 13px);
     font-weight: 700;
     color: var(--freq-text);
     font-variant-numeric: tabular-nums;
     text-transform: uppercase;
-  }
-
-  .freq-inst-mesano > span:last-child {
-    border-right: none;
   }
 
   .freq-inst-pag {
@@ -316,6 +309,14 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
     font-weight: 700;
     color: var(--freq-text);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Sobrepõe linhas vizinhas para evitar divisórias visualmente duplicadas. */
+  .freq-inst-values > div + div,
+  .freq-inst-opm > span + span,
+  .freq-inst-cod > span + span,
+  .freq-inst-mesano > span + span {
+    margin-left: -1px;
   }
 
   /* —— Legenda (logo abaixo, sem gap) —— */
@@ -459,11 +460,13 @@ export const FREQUENCIA_HEADER_PRINT_CSS = `
       border-right-color: #000 !important;
       color: #1e293b !important;
     }
-    .freq-inst-values > div,
     .freq-inst-opm > span,
     .freq-inst-cod > span,
-    .freq-inst-mesano > span {
-      border-right-color: #000 !important;
+    .freq-inst-mesano > span,
+    .freq-inst-pag {
+      border-color: #000 !important;
+      border-style: solid !important;
+      border-width: 1px !important;
     }
     .freq-inst-values {
       grid-column: 2 !important;
