@@ -1,50 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { Secao, Usuario } from "../../types";
 import { loadSecoes } from "../../utils/frequenciaService";
+import { SectionIcon } from "../../utils/categoryIcons";
 import {
   ArrowLeft,
-  Building2,
   ClipboardList,
-  GraduationCap,
-  Landmark,
-  Layers,
-  Shield,
-  Users,
-  Briefcase,
-  type LucideIcon,
 } from "lucide-react";
 
 interface Props {
   usuario: Usuario;
   year: number;
-  month?: number;
   onBack: () => void;
   onSelectSecao: (secaoId: string) => void;
-}
-
-const SECTION_ICONS: LucideIcon[] = [
-  Building2,
-  Users,
-  GraduationCap,
-  Landmark,
-  Shield,
-  Briefcase,
-  Layers,
-  ClipboardList,
-];
-
-function iconForSecao(nome: string, index: number): LucideIcon {
-  let hash = 0;
-  for (let i = 0; i < nome.length; i++) {
-    hash = (hash + nome.charCodeAt(i) * (i + 1)) % SECTION_ICONS.length;
-  }
-  return SECTION_ICONS[(hash + index) % SECTION_ICONS.length]!;
 }
 
 export default function FrequenciaSecaoSelector({
   usuario,
   year,
-  month,
   onBack,
   onSelectSecao,
 }: Props) {
@@ -87,7 +59,6 @@ export default function FrequenciaSecaoSelector({
             <ClipboardList size={18} className="text-blue-600 shrink-0" />
             <h1 className="text-sm font-bold text-gray-900 truncate">
               Controle de Frequência · {year}
-              {month ? ` · mês ${String(month).padStart(2, "0")}` : ""}
             </h1>
           </div>
         </div>
@@ -96,7 +67,7 @@ export default function FrequenciaSecaoSelector({
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 w-full min-w-0">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Selecione a seção</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Abra o controle apenas com os colaboradores da Seção escolhida.
+          Escolha a Seção disponível para em seguida abrir os meses do controle.
         </p>
 
         {loading ? (
@@ -107,8 +78,7 @@ export default function FrequenciaSecaoSelector({
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {secoes.map((s, idx) => {
-              const Icon = iconForSecao(s.nome, idx);
+            {secoes.map((s) => {
               return (
                 <button
                   key={s.id}
@@ -118,7 +88,7 @@ export default function FrequenciaSecaoSelector({
                 >
                   <div className="flex items-start gap-4">
                     <div className="shrink-0 w-12 h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-colors">
-                      <Icon size={22} strokeWidth={2} />
+                      <SectionIcon size={22} strokeWidth={2} />
                     </div>
                     <div className="min-w-0 flex-1 pt-0.5">
                       <div className="text-sm font-bold text-gray-900 leading-snug group-hover:text-blue-800 transition-colors">

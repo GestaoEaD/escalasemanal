@@ -283,23 +283,28 @@ assert(
     (edSecao as { weekId: string }).weekId === "2026_01",
   "rota editor por seção"
 );
-const fr = parseAppPath("/frequencia/2026/01/secao/SECAO_01");
+const fr = parseAppPath("/frequencia/2026/secao/SECAO_01/01");
 assert(
   fr.view === "frequencia" &&
     (fr as { month?: number }).month === 1 &&
     (fr as { secaoId?: string }).secaoId === "SECAO_01",
-  "rota frequencia completa (mês → secaoId)"
+  "rota frequencia completa (secao → mês)"
 );
 assert(
   buildAppPath({ view: "frequencia", year: 2026, secaoId: "SECAO_01", month: 3 }) ===
-    "/frequencia/2026/03/secao/SECAO_01",
-  "build frequencia mês/secaoId"
+    "/frequencia/2026/secao/SECAO_01/03",
+  "build frequencia secao/mês"
 );
 assert(
-  parseAppPath("/frequencia/2026/secao/SECAO_01/01").view === "frequencia" &&
-    (parseAppPath("/frequencia/2026/secao/SECAO_01/01") as { secaoId?: string }).secaoId ===
+  buildAppPath({ view: "frequencia", year: 2026, secaoId: "SECAO_01" }) ===
+    "/frequencia/2026/secao/SECAO_01",
+  "build frequencia secao"
+);
+assert(
+  parseAppPath("/frequencia/2026/01/secao/SECAO_01").view === "frequencia" &&
+    (parseAppPath("/frequencia/2026/01/secao/SECAO_01") as { secaoId?: string }).secaoId ===
       "SECAO_01",
-  "rota frequencia legado secao→mês"
+  "rota frequencia legado mês→secao"
 );
 assert(
   toSessionUser({

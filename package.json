@@ -15,6 +15,7 @@
     "security:secrets": "node scripts/check-secrets.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project escalaead-rules-test \"tsx scripts/rules.test.ts\"",
     "test:sync": "tsx scripts/frequencia-sync.test.ts",
+    "test:roster": "tsx scripts/roster-sync.test.ts",
     "deploy:rules": "node scripts/deploy-firestore-rules.mjs",
     "audit:divisao": "node scripts/audit-divisao-secao-colaborador.mjs",
     "audit:hierarquia": "node scripts/audit-hierarquia-secao.mjs",

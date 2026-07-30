@@ -55,17 +55,29 @@ export type RosterSyncResult = {
   changed: boolean;
 };
 
+export type RosterSyncOptions = {
+  /** Restringe o cadastro considerado a uma seção. */
+  secaoId?: string;
+  /**
+   * Inclui colaboradores ativos ausentes do roster. A Escala Semanal usa `true`
+   * (roster completo da Divisão); a Escala Alteração usa `false`, porque suas
+   * linhas são escolhidas manualmente (botão "Alterar").
+   */
+  addMissing?: boolean;
+};
+
 /**
  * Alinha a escala editável ao cadastro:
- * - inclui colaboradores ativos ausentes
+ * - inclui colaboradores ativos ausentes (quando `addMissing`)
  * - remove inativos (fora das escalas)
  * - atualiza identidade (posto/nome/seção)
  */
 export function syncScheduleRosterWithCadastro(
   existing: ScheduleRow[],
   pool: Colaborador[],
-  secaoId?: string
+  options: RosterSyncOptions = {}
 ): RosterSyncResult {
+  const { secaoId, addMissing = true } = options;
   const normalizedPool = pool.map(normalizeColaboradorCadastro);
   const activePool = normalizedPool
     .filter((c) => isColaboradorAtivo(c))
@@ -107,7 +119,7 @@ export function syncScheduleRosterWithCadastro(
   );
 
   const added: ScheduleRow[] = [];
-  for (const col of activePool) {
+  for (const col of addMissing ? activePool : []) {
     const key = reDocKey(col.re) || col.re;
     if (!key || presentKeys.has(key)) continue;
     if (kept.some((r) => reEquals(r.re, col.re))) continue;

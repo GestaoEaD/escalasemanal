@@ -23,8 +23,6 @@ import {
   FileText,
   FileSpreadsheet,
   FlaskConical,
-  Building2,
-  Network,
   type LucideIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -76,6 +74,7 @@ import {
   sortDivisoes,
 } from "../utils/divisaoContext";
 import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
+import { DivisionIcon, SectionIcon } from "../utils/categoryIcons";
 import LogsAuditPanel from "./LogsAuditPanel";
 import CentralTestes from "./CentralTestes";
 
@@ -229,8 +228,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
   // Ordem final do menu lateral, respeitando a matriz de permissões.
   const MENU_ITENS: { id: MenuTab; label: string; icone: LucideIcon; visivel: boolean }[] = [
-    { id: "divisoes", label: "Divisões", icone: Building2, visivel: canDivisoes },
-    { id: "secoes", label: "Seções", icone: Network, visivel: canSecoes },
+    { id: "divisoes", label: "Divisões", icone: DivisionIcon, visivel: canDivisoes },
+    { id: "secoes", label: "Seções", icone: SectionIcon, visivel: canSecoes },
     { id: "colaboradores", label: "Colaboradores", icone: Users, visivel: canColaboradores },
     { id: "usuarios", label: "Permissão", icone: Shield, visivel: canUsuarios },
     { id: "postos", label: "Postos", icone: Briefcase, visivel: canPostos },

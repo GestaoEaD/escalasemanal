@@ -253,6 +253,7 @@ export default function ScheduleEditor({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [highlightedRe, setHighlightedRe] = useState<string | null>(null);
+  const [alteracaoAviso, setAlteracaoAviso] = useState<string | null>(null);
 
   // Modal controls
   const [isColModalOpen, setIsColModalOpen] = useState(false);
@@ -292,6 +293,10 @@ export default function ScheduleEditor({
     () => canEditScale(usuario, week, altStatus),
     [usuario, week, altStatus]
   );
+
+  /** O painel de Alteração só é liberado após o primeiro salvamento da Semanal. */
+  const isAltPanelUnlocked = Boolean(dbWeeklySaved);
+  const canCopyToAlteration = isAltEditable && isAltPanelUnlocked;
 
   const showSubmitWeekly =
     canSubmitForApproval(usuario) &&
@@ -638,7 +643,9 @@ export default function ScheduleEditor({
             isScheduleRosterEditable(altStatusLoaded) &&
             canEditScale(usuario, week, altStatusLoaded)
           ) {
-            const synced = syncScheduleRosterWithCadastro(loadedAltRows, sortedCols);
+            const synced = syncScheduleRosterWithCadastro(loadedAltRows, sortedCols, {
+              addMissing: false,
+            });
             if (synced.changed) {
               loadedAltRows = synced.rows.map(applyWeekendDefault);
               const { secaoId: _legacySecaoAlt, ...altWithoutSecao } = data as EscalaDocument & {
@@ -1202,9 +1209,20 @@ export default function ScheduleEditor({
   // Copy a specific row from Escala Semanal to Escala de Alteração
   const handleCopyToAlteration = (row: ScheduleRow) => {
     if (!isAltEditable) return;
+    if (!isAltPanelUnlocked) {
+      setAlteracaoAviso(
+        "Salve a Escala Semanal antes de incluir militares na Escala de Alteração."
+      );
+      setTimeout(() => setAlteracaoAviso(null), 5000);
+      return;
+    }
     // Check if already exists in alteration rows
     const exists = localAlterationRows.some((r) => r.re === row.re);
     if (exists) {
+      setAlteracaoAviso(
+        `${row.postoGrad} ${row.nome} já está na Escala de Alteração.`
+      );
+      setTimeout(() => setAlteracaoAviso(null), 5000);
       setHighlightedRe(row.re);
       // Scroll to the alteration panel
       const section = document.getElementById("alteracao-panel-section");
@@ -1235,6 +1253,7 @@ export default function ScheduleEditor({
     };
 
     setLocalAlterationRows((prev) => [...prev, copiedRow]);
+    setAlteracaoAviso(null);
     setHighlightedRe(row.re);
 
     // Scroll to alteration section
@@ -1593,7 +1612,8 @@ export default function ScheduleEditor({
 
         const alterationSynced = syncScheduleRosterWithCadastro(
           localAlterationRows,
-          collaboratorsPool
+          collaboratorsPool,
+          { addMissing: false }
         );
         const alterationRowsToSave = applyCadastroToScheduleRows(
           alterationSynced.rows,
@@ -2517,10 +2537,16 @@ export default function ScheduleEditor({
                           {/* Actions Column */}
                           <td className="px-3 py-2 whitespace-nowrap text-center">
                             <button
-                              onClick={() => isAltEditable && handleCopyToAlteration(row)}
-                              disabled={!isAltEditable}
+                              onClick={() => handleCopyToAlteration(row)}
+                              disabled={!canCopyToAlteration}
                               className="inline-flex items-center space-x-1 px-2 sm:px-2.5 py-1 text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md border border-purple-200 transition-all cursor-pointer shadow-3xs disabled:opacity-40 disabled:cursor-not-allowed"
-                              title="Copiar militar para a Escala de Alteração"
+                              title={
+                                !isAltPanelUnlocked
+                                  ? "Salve a Escala Semanal para liberar a Escala de Alteração"
+                                  : !isAltEditable
+                                    ? "A Escala de Alteração não está editável neste status"
+                                    : "Copiar militar para a Escala de Alteração"
+                              }
                             >
                               <Copy size={12} />
                               <span className="hidden sm:inline">Alterar</span>
@@ -2552,6 +2578,11 @@ export default function ScheduleEditor({
                     <StatusBadge status={altStatus} />
                     <span className="text-[10px] text-gray-500 font-mono">v{altVersao}</span>
                   </div>
+                  {alteracaoAviso && (
+                    <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-900">
+                      {alteracaoAviso}
+                    </div>
+                  )}
                   {dbWeeklySaved && renderPanelHeaderMetadata(dbAlterationSaved, "purple")}
                   {dbWeeklySaved && renderStatusBanner(altStatus, altAprovacao, "Escala Alteração", showReopenAlt, () => openReopenModal("alteracao"))}
                   {dbWeeklySaved && renderPanelActionButtons("alteracao")}

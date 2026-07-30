@@ -10,7 +10,8 @@ import {
   usuarioDivisaoCadastro,
 } from "../utils/divisaoContext";
 import { canAccessAnyDivisao } from "../utils/permissions";
-import { Building2, Lock, ChevronRight } from "lucide-react";
+import { DivisionIcon } from "../utils/categoryIcons";
+import { Lock, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 
 interface DivisaoSelectorProps {
@@ -130,11 +131,7 @@ export default function DivisaoSelector({
                             : "bg-gray-400 text-white p-2.5 rounded-lg shrink-0"
                         }
                       >
-                        {allowed ? (
-                          <Building2 className="w-5 h-5" />
-                        ) : (
-                          <Lock className="w-5 h-5" />
-                        )}
+                        <DivisionIcon className="w-5 h-5" />
                       </div>
                       <div className="min-w-0">
                         <div className="text-base font-bold text-gray-900 truncate">
@@ -152,6 +149,9 @@ export default function DivisaoSelector({
                     </div>
                     {allowed && (
                       <ChevronRight className="w-5 h-5 text-blue-500 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    )}
+                    {!allowed && (
+                      <Lock className="w-4 h-4 text-gray-500 shrink-0" aria-label="Divisão bloqueada" />
                     )}
                   </div>
                 </motion.button>

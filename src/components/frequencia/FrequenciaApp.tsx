@@ -1,5 +1,5 @@
 /**
- * FrequenciaApp — fluxo Ano → Mês → Seção → Editor.
+ * FrequenciaApp — fluxo Ano → Seção → Mês → Editor.
  */
 import React from "react";
 import { TipoEscalaDocumento, Usuario } from "../../types";
@@ -65,8 +65,8 @@ export default function FrequenciaApp({
 
   const displaySecao = secaoNome || secao || secaoId || "";
 
-  // Editor: mês + seção
-  if (month && secaoId) {
+  // Editor: seção + mês
+  if (secaoId && month) {
     return (
       <FrequenciaEditor
         usuario={usuario}
@@ -74,34 +74,42 @@ export default function FrequenciaApp({
         month={month}
         secaoId={secaoId}
         secao={displaySecao}
-        onBack={() => onNavigateFrequencia({ year, month })}
+        onBack={() => onNavigateFrequencia({ year, secaoId, secao: displaySecao || undefined })}
         onOpenApproval={onOpenApproval}
       />
     );
   }
 
-  // Após escolher o mês: selecionar Seção
-  if (month) {
+  // Após escolher a seção: selecionar o mês
+  if (secaoId) {
     return (
-      <FrequenciaSecaoSelector
+      <FrequenciaMonthSelector
         usuario={usuario}
         year={year}
-        month={month}
+        secaoId={secaoId}
+        secao={displaySecao}
         onBack={() => onNavigateFrequencia({ year })}
-        onSelectSecao={(nextSecaoId) =>
-          onNavigateFrequencia({ year, month, secaoId: nextSecaoId })
+        onSelectMonth={(m) =>
+          onNavigateFrequencia({
+            year,
+            secaoId,
+            secao: displaySecao || undefined,
+            month: m,
+          })
         }
       />
     );
   }
 
-  // Primeiro passo: mês
+  // Primeiro passo: seções disponíveis
   return (
-    <FrequenciaMonthSelector
+    <FrequenciaSecaoSelector
       usuario={usuario}
       year={year}
       onBack={onBack}
-      onSelectMonth={(m) => onNavigateFrequencia({ year, month: m })}
+      onSelectSecao={(nextSecaoId) =>
+        onNavigateFrequencia({ year, secaoId: nextSecaoId })
+      }
     />
   );
 }

@@ -10,7 +10,8 @@ import {
   stopPresence,
   subscribeOnlineCount,
 } from "../utils/presenceService";
-import { Bell, Building2, Calendar, LogOut, Settings } from "lucide-react";
+import { DivisionIcon } from "../utils/categoryIcons";
+import { Bell, Calendar, LogOut, Settings } from "lucide-react";
 
 export interface AppShellProps {
   usuario: Usuario;
@@ -242,7 +243,7 @@ export default function AppShell({
                     className="relative inline-flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-md transition-colors cursor-pointer border border-slate-200"
                     title="Trocar Divisão"
                   >
-                    <Building2 size={14} />
+                    <DivisionIcon size={14} />
                     <span className="hidden sm:inline">Trocar Divisão</span>
                   </button>
                 )}

@@ -188,12 +188,115 @@ export async function loadControleFrequencia(
 }
 
 /** Status resumido dos documentos do ano (para cards de mês).
- *  Se `secao` for informada, filtra apenas documentos daquela seção. */
+ *  Se `secaoId` for informado, filtra apenas documentos daquela seção. */
+export type FrequenciaMonthCardInfo = {
+  count: number;
+  statuses: EscalaStatus[];
+  /** Ação recente de aprovação/revisão a destacar no card. */
+  notification: FrequenciaMonthNotification | null;
+};
+
+export type FrequenciaMonthNotification = {
+  kind: "aprovacao" | "revisao" | "aguardando";
+  label: string;
+  /** Data legível do evento (dd/mm/aaaa), quando disponível. */
+  data?: string;
+};
+
+const WORKFLOW_HIST_TIPOS = new Set([
+  "aprovacao",
+  "nova_aprovacao",
+  "solicitacao_revisao",
+  "rejeicao",
+  "envio_aprovacao",
+]);
+
+const NOTIFICATION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function historicoEventMs(ev: HistoricoEscalaEvento): number {
+  const ts = ev.timestamp as { toDate?: () => Date; seconds?: number } | Date | string | null | undefined;
+  if (ts && typeof ts === "object" && typeof (ts as { toDate?: () => Date }).toDate === "function") {
+    return (ts as { toDate: () => Date }).toDate().getTime();
+  }
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts === "object" && ts && typeof (ts as { seconds?: number }).seconds === "number") {
+    return (ts as { seconds: number }).seconds * 1000;
+  }
+  if (typeof ts === "string") {
+    const parsed = Date.parse(ts);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (ev.data) {
+    const parts = String(ev.data).split(/[/-]/);
+    if (parts.length === 3) {
+      const [d, m, y] = parts.map(Number);
+      if (d && m && y) return new Date(y, m - 1, d).getTime();
+    }
+  }
+  return 0;
+}
+
+function notificationFromDoc(
+  data: ControleFrequenciaDocument,
+  nowMs: number = Date.now()
+): FrequenciaMonthNotification | null {
+  const status = normalizeEscalaStatus(data.status);
+  const historico = Array.isArray(data.historico) ? data.historico : [];
+  const workflowEvents = historico
+    .filter((ev) => WORKFLOW_HIST_TIPOS.has(ev.tipo))
+    .slice()
+    .sort((a, b) => historicoEventMs(a) - historicoEventMs(b));
+  const latest = workflowEvents[workflowEvents.length - 1];
+  const latestMs = latest ? historicoEventMs(latest) : 0;
+  const isRecent = latestMs > 0 && nowMs - latestMs <= NOTIFICATION_WINDOW_MS;
+
+  if (status === "aguardando_aprovacao") {
+    return {
+      kind: "aguardando",
+      label: "Aguardando aprovação",
+      data: latest?.tipo === "envio_aprovacao" ? latest.data : undefined,
+    };
+  }
+  if (status === "revisao_solicitada" || status === "rejeitada") {
+    const motivo = data.aprovacao?.motivoRevisao || data.aprovacao?.motivoRejeicao;
+    return {
+      kind: "revisao",
+      label: motivo ? `Revisão solicitada: ${motivo}` : "Revisão solicitada",
+      data: latest?.data,
+    };
+  }
+  if (status === "aprovada") {
+    if (
+      !isRecent ||
+      !latest ||
+      (latest.tipo !== "aprovacao" && latest.tipo !== "nova_aprovacao")
+    ) {
+      return null;
+    }
+    return {
+      kind: "aprovacao",
+      label: "Aprovado recentemente",
+      data: latest.data,
+    };
+  }
+  return null;
+}
+
+function pickPreferredNotification(
+  current: FrequenciaMonthNotification | null,
+  next: FrequenciaMonthNotification | null
+): FrequenciaMonthNotification | null {
+  if (!next) return current;
+  if (!current) return next;
+  const rank = { revisao: 3, aguardando: 2, aprovacao: 1 } as const;
+  return rank[next.kind] >= rank[current.kind] ? next : current;
+}
+
 export async function loadFrequenciaMonthStatuses(
   ano: number,
   secaoId?: string,
   divisaoId: string = DIVISAO_EAD_ID
-): Promise<Record<number, { count: number; statuses: EscalaStatus[] }>> {
+): Promise<Record<number, FrequenciaMonthCardInfo>> {
   const snap = await getDocs(
     query(
       collection(db, CONTROLE_FREQUENCIA_COLLECTION),
@@ -201,14 +304,25 @@ export async function loadFrequenciaMonthStatuses(
       where("divisaoId", "==", divisaoId)
     )
   );
-  const map: Record<number, { count: number; statuses: EscalaStatus[] }> = {};
+  const map: Record<number, FrequenciaMonthCardInfo> = {};
+  const nowMs = Date.now();
   snap.forEach((d) => {
     const data = d.data() as ControleFrequenciaDocument;
-    if (secaoId && normalizeFrequenciaSecaoId(data.secaoId || data.secao) !== normalizeFrequenciaSecaoId(secaoId)) return;
+    if (
+      secaoId &&
+      normalizeFrequenciaSecaoId(data.secaoId || data.secao) !==
+        normalizeFrequenciaSecaoId(secaoId)
+    ) {
+      return;
+    }
     const mes = Number(data.mes);
-    if (!map[mes]) map[mes] = { count: 0, statuses: [] };
+    if (!map[mes]) map[mes] = { count: 0, statuses: [], notification: null };
     map[mes].count += 1;
     map[mes].statuses.push(normalizeEscalaStatus(data.status));
+    map[mes].notification = pickPreferredNotification(
+      map[mes].notification,
+      notificationFromDoc(data, nowMs)
+    );
   });
   return map;
 }
