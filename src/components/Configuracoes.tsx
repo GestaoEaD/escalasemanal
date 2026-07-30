@@ -619,12 +619,6 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
   }, [activeTab, canLogs]);
 
   useEffect(() => {
-    if (!loading && isGerente(usuario) && activeTab === "divisoes" && divisoesList.length === 0) {
-      setActiveTab("colaboradores");
-    }
-  }, [activeTab, divisoesList.length, loading, usuario]);
-
-  useEffect(() => {
     if (visibleMenuItems.length === 0) return;
     if (!visibleMenuItems.some((item) => item.id === activeTab)) {
       setActiveTab(isGerente(usuario) ? "divisoes" : visibleMenuItems[0].id);

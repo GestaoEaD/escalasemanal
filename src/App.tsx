@@ -436,12 +436,6 @@ export default function App() {
       <DivisaoSelector
         usuario={usuario}
         onSelectDivisao={handleSelectDivisao}
-        onLogout={handleLogout}
-        onOpenConfig={
-          canAccessConfig(usuario)
-            ? () => navigate({ view: "config" })
-            : undefined
-        }
       />
     );
   } else if (route.view === "selector" && needsSecaoSelection(usuario, route)) {
