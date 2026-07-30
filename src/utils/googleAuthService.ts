@@ -17,6 +17,7 @@ export type GoogleAuthErrorKind =
   | "network"
   | "temporary"
   | "not_registered"
+  | "inactive"
   | "auth_not_provisioned"
   | "provider_disabled"
   | "unauthorized_domain"
@@ -30,7 +31,17 @@ export interface FriendlyAuthMessage {
   actionLabel: "Tentar novamente" | "Tentar com outra conta Google";
 }
 
-export function getGoogleAuthErrorMessage(kind: GoogleAuthErrorKind): FriendlyAuthMessage {
+/**
+ * @param contaUsada e-mail autenticado no Google. Informado nas recusas por
+ * cadastro, porque o usuário costuma entrar com uma conta diferente da
+ * registrada — sem essa pista o administrador não consegue diagnosticar.
+ */
+export function getGoogleAuthErrorMessage(
+  kind: GoogleAuthErrorKind,
+  contaUsada?: string | null
+): FriendlyAuthMessage {
+  const conta = normalizeEmail(contaUsada);
+  const sufixoConta = conta ? ` Conta utilizada: ${conta}.` : "";
   switch (kind) {
     case "cancelled":
       return {
@@ -78,14 +89,21 @@ export function getGoogleAuthErrorMessage(kind: GoogleAuthErrorKind): FriendlyAu
       return {
         kind,
         title: "Acesso não autorizado",
-        body: "Sua conta Google foi autenticada, mas este e-mail ainda não está cadastrado na plataforma. Entre em contato com o administrador responsável para solicitar o cadastro ou a atualização do seu e-mail de acesso.",
+        body: `Sua conta Google foi autenticada, mas este e-mail não pertence a um colaborador ativo na plataforma.${sufixoConta} Confirme o cadastro com o administrador.`,
+        actionLabel: "Tentar com outra conta Google",
+      };
+    case "inactive":
+      return {
+        kind,
+        title: "Cadastro inativo",
+        body: `Seu cadastro foi localizado, mas está inativo e não possui acesso ao sistema.${sufixoConta} Procure o administrador responsável pela sua Divisão.`,
         actionLabel: "Tentar com outra conta Google",
       };
     default:
       return {
         kind: "unknown",
         title: "Conta Google não reconhecida",
-        body: "Você entrou com uma conta Google que não está vinculada a um usuário cadastrado na plataforma. Tente utilizar a conta Google registrada no seu cadastro.",
+        body: `Você entrou com uma conta Google que não está vinculada a uma permissão de acesso.${sufixoConta} Tente utilizar a conta Google registrada no seu cadastro.`,
         actionLabel: "Tentar com outra conta Google",
       };
   }

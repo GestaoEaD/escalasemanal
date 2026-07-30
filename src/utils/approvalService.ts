@@ -21,7 +21,7 @@ import {
   Usuario,
 } from "../types";
 import { normalizeRe } from "./reUtils";
-import { normalizeEmail } from "./usuarioHelpers";
+import { contaEmailKey, normalizeEmail } from "./usuarioHelpers";
 import { prepareFirestoreWrite } from "./firestoreSanitize";
 import { cleanAprovacao, cleanHistorico } from "./escalaPayload";
 import { auditWorkflowEscala, statusLabel } from "./auditService";
@@ -269,12 +269,17 @@ export async function findUsuarioByRe(inputRe: string): Promise<Usuario | null> 
 }
 
 /**
- * Localiza usuário pelo e-mail Google (fonte de autenticação).
+ * Localiza usuário pela conta Google autenticada.
  * Não filtra por ativo/inativo — a autenticação é independente do status.
+ *
+ * A busca é feita por `emailKey` (identidade da conta) porque o Google pode
+ * devolver o endereço em grafia diferente da cadastrada — em contas Gmail,
+ * pontos e "+alias" não distinguem a caixa.
  */
 export async function findUsuarioByEmail(inputEmail: string): Promise<Usuario | null> {
   const email = normalizeEmail(inputEmail);
   if (!email) return null;
+  const key = contaEmailKey(email);
 
   const mapDoc = (id: string, data: Usuario): Usuario => ({
     ...data,
@@ -285,20 +290,22 @@ export async function findUsuarioByEmail(inputEmail: string): Promise<Usuario | 
   });
 
   try {
-    const q = query(collection(db, "usuarios"), where("email", "==", email));
-    const snap = await getDocs(q);
+    // Filtro obrigatoriamente por `emailKey`: em consultas, as rules só
+    // conseguem ler o campo filtrado para autorizar o documento.
+    const snap = await getDocs(query(collection(db, "usuarios"), where("emailKey", "==", key)));
     if (!snap.empty) {
-      const d = snap.docs[0];
-      return mapDoc(d.id, d.data() as Usuario);
+      return mapDoc(snap.docs[0].id, snap.docs[0].data() as Usuario);
     }
   } catch (err) {
     console.warn("Consulta por e-mail falhou; tentando varredura:", err);
   }
 
+  // Varredura só funciona para quem já pode ler a coleção (Gerente/Admin);
+  // cobre cadastros legados sem `emailKey`.
   const all = await getDocs(collection(db, "usuarios"));
   for (const d of all.docs) {
     const data = d.data() as Usuario;
-    if (normalizeEmail(data.email) === email) {
+    if (contaEmailKey(data.email) === key) {
       return mapDoc(d.id, data);
     }
   }

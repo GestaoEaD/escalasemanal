@@ -11,7 +11,7 @@ import {
   waitForAuthUser,
 } from "./googleAuthService";
 import { clearPendenciasAvisoDismiss } from "./pendingApprovalsService";
-import { normalizeEmail } from "./usuarioHelpers";
+import { contaEmailKey, normalizeEmail } from "./usuarioHelpers";
 
 export const SESSION_STORAGE_KEY = "escala_sessao_usuario";
 
@@ -96,8 +96,8 @@ export function clearSession(): void {
 }
 
 /**
- * Revalida a sessão: exige usuário Firebase Auth + cadastro por e-mail no Firestore.
- * Inativos com e-mail cadastrado permanecem autenticados (status é independente do login).
+ * Revalida a sessão: exige usuário Firebase Auth + cadastro ativo por e-mail no Firestore.
+ * Colaborador inativo permanece cadastrado, mas sua sessão é encerrada.
  * Em falha de rede após Auth OK, mantém snapshot local se o e-mail bater.
  */
 export async function restoreSession(): Promise<{
@@ -121,7 +121,7 @@ export async function restoreSession(): Promise<{
 
   try {
     const fresh = await findUsuarioByEmail(authEmail);
-    if (!fresh) {
+    if (!fresh || fresh.ativo === false) {
       await signOutGoogle();
       clearSession();
       return { phase: "unauthenticated", usuario: null };
@@ -132,7 +132,7 @@ export async function restoreSession(): Promise<{
   } catch (err) {
     console.warn("Falha ao revalidar sessão; tentando snapshot local:", err);
     const provisional = readSession();
-    if (provisional?.re && normalizeEmail(provisional.email) === authEmail) {
+    if (provisional?.re && contaEmailKey(provisional.email) === contaEmailKey(authEmail)) {
       return {
         phase: "authenticated",
         usuario: toSessionUser({ ...provisional, photoURL: provisional.photoURL || photoURL }),

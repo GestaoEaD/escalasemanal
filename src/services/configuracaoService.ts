@@ -37,6 +37,7 @@ import {
   canManageSecoes,
   canManageUsuarios,
   canEditConfigGerais,
+  assignablePerfis,
 } from "../utils/permissions";
 import { normalizeDivisaoId, divisaoDocId } from "../utils/divisaoIds";
 import { colaboradorDocId, tenantDocId } from "../utils/tenantDocIds";
@@ -146,11 +147,28 @@ export function normalizeColaborador(raw: Colaborador | Record<string, unknown>)
   };
 }
 
+/** Dois nomes de seção vazios são iguais (`secoesIguais` recusa vazios). */
+function mesmaSecaoTexto(a: unknown, b: unknown): boolean {
+  if (!normalizeSecaoNome(a) && !normalizeSecaoNome(b)) return true;
+  return secoesIguais(a, b);
+}
+
 /**
- * Alinha seção (e identidade) entre colaborador e usuário com o mesmo RE.
- * Preferência: alteração recente de seção; senão cadastro de colaborador.
+ * Garante o acesso básico derivado do cadastro:
+ * - colaborador ativo sem usuário recebe perfil Operador automaticamente;
+ * - colaborador inativo permanece cadastrado, mas sua permissão fica inativa;
+ * - perfis elevados existentes são preservados enquanto o colaborador está ativo.
+ *
+ * Também alinha seção, identidade e e-mail Google entre colaborador e usuário
+ * com o mesmo RE. Preferência: o lado alterado nesta sessão; senão o cadastro
+ * de colaborador.
+ *
+ * O e-mail entra aqui porque é o vínculo de login: se o administrador o corrige
+ * apenas em Colaboradores, a permissão precisa acompanhar — do contrário o
+ * usuário entra com a conta Google nova e o cadastro continua apontando para a
+ * antiga.
  */
-export function reconcileColaboradoresUsuariosSecao(
+export function reconcileColaboradoresUsuarios(
   cols: Colaborador[],
   users: Usuario[],
   origCols: Colaborador[],
@@ -162,12 +180,31 @@ export function reconcileColaboradoresUsuariosSecao(
     re: String(u.re || "").trim(),
     secao: normalizeSecaoNome(u.secao),
     secaoId: String(u.secaoId || "").trim(),
+    email: normalizeEmail(u.email),
   }));
 
   for (let i = 0; i < colsOut.length; i++) {
     const col = colsOut[i];
     const ui = usersOut.findIndex((u) => u.re === col.re);
-    if (ui < 0) continue;
+    if (ui < 0) {
+      usersOut.push({
+        re: col.re,
+        postoGrad: col.postoGrad,
+        nomeCompleto: col.nomeCompleto || "",
+        nome: col.nome,
+        secao: col.secao,
+        secaoId: String(col.secaoId || "").trim(),
+        divisaoId: col.divisaoId,
+        email: col.email,
+        perfil: "Operador",
+        ativo: normalizeAtivoFlag(col.ativo),
+        secoesResponsaveisIds: [],
+        authProvider: col.email ? "google" : "local",
+        ultimoLogin: null,
+        emailVerificado: false,
+      });
+      continue;
+    }
 
     const usr = usersOut[ui];
     const origCol = origCols.find((c) => c.re === col.re);
@@ -177,11 +214,11 @@ export function reconcileColaboradoresUsuariosSecao(
 
     const colSecaoChanged =
       Boolean(origCol) &&
-      (!secoesIguais(col.secao, origCol!.secao) ||
+      (!mesmaSecaoTexto(col.secao, origCol!.secao) ||
         colSecaoId !== String(origCol!.secaoId || "").trim());
     const usrSecaoChanged =
       Boolean(origUsr) &&
-      (!secoesIguais(usr.secao, origUsr!.secao) ||
+      (!mesmaSecaoTexto(usr.secao, origUsr!.secao) ||
         usrSecaoId !== String(origUsr!.secaoId || "").trim());
 
     let secao = col.secao;
@@ -192,19 +229,38 @@ export function reconcileColaboradoresUsuariosSecao(
     } else if (colSecaoChanged) {
       secao = normalizeSecaoNome(col.secao);
       secaoId = colSecaoId;
-    } else if (!secoesIguais(col.secao, usr.secao) || colSecaoId !== usrSecaoId) {
+    } else if (!mesmaSecaoTexto(col.secao, usr.secao) || colSecaoId !== usrSecaoId) {
       secao = normalizeSecaoNome(col.secao || usr.secao);
       secaoId = colSecaoId || usrSecaoId;
     }
 
-    colsOut[i] = { ...col, secao, secaoId };
+    const colEmailChanged =
+      Boolean(origCol) && col.email !== normalizeEmail(origCol!.email);
+    const usrEmailChanged =
+      Boolean(origUsr) && usr.email !== normalizeEmail(origUsr!.email);
+
+    let email = usr.email;
+    if (usrEmailChanged && !colEmailChanged) {
+      email = usr.email;
+    } else if (colEmailChanged) {
+      email = col.email;
+    } else if (!usr.email) {
+      // Permissão legada sem e-mail herda o do cadastro para liberar o login.
+      email = col.email;
+    }
+
+    colsOut[i] = { ...col, secao, secaoId, email: email || col.email };
     usersOut[ui] = {
       ...usr,
       secao,
       secaoId,
+      email,
       nome: col.nome || usr.nome,
       postoGrad: col.postoGrad || usr.postoGrad,
       nomeCompleto: col.nomeCompleto || usr.nomeCompleto,
+      // A situação do colaborador é a fonte única do acesso. Ao reativar,
+      // preserva-se eventual perfil elevado (Gestor/Admin/Gerente).
+      ativo: normalizeAtivoFlag(col.ativo),
     };
   }
 
@@ -269,8 +325,8 @@ export async function saveConfiguracoesBatch(
     });
   };
 
-  // Alinha seção entre colaboradores e usuários (mesmo RE) antes de gravar.
-  const reconciled = reconcileColaboradoresUsuariosSecao(
+  // Alinha seção, identidade e e-mail entre colaboradores e usuários (mesmo RE).
+  const reconciled = reconcileColaboradoresUsuarios(
     colBlock.current,
     userBlock.current,
     colBlock.original,
@@ -306,6 +362,17 @@ export async function saveConfiguracoesBatch(
     const secaoNome = resolveSecaoNomeById(secaoId) || normalizeSecaoNome(u.secao);
     return { ...u, secaoId, secao: secaoNome, divisaoId };
   });
+
+  if (canUsuarios) {
+    const perfisPermitidos = assignablePerfis(usuario);
+    for (const target of usersToSave) {
+      const original = userBlock.original.find((u) => u.re === target.re);
+      const perfil = target.perfil || "Operador";
+      if ((!original || (original.perfil || "Operador") !== perfil) && !perfisPermitidos.includes(perfil)) {
+        throw new Error(`Seu perfil não pode atribuir o acesso ${perfil}.`);
+      }
+    }
+  }
 
   if (canColaboradores) {
     // --- 1. AUDIT & SAVE: COLABORADORES ---
@@ -379,7 +446,7 @@ export async function saveConfiguracoesBatch(
         }
         if (
           String(normalized.secaoId || "") !== String(original.secaoId || "") ||
-          !secoesIguais(normalized.secao, original.secao)
+          !mesmaSecaoTexto(normalized.secao, original.secao)
         ) {
           createAuditLog(
             "Colaboradores",
@@ -428,7 +495,8 @@ export async function saveConfiguracoesBatch(
           email: prepared.email,
           re: prepared.re,
           isNew: !original,
-          existingUsers: userBlock.current,
+          // Inclui Operadores gerados automaticamente nesta mesma gravação.
+          existingUsers: usersToSave.filter((u) => u.re !== prepared.re),
         });
         if (emailCheck.ok === false) {
           throw new Error(`${prepared.postoGrad} ${prepared.nome}: ${emailCheck.message}`);
@@ -485,7 +553,7 @@ export async function saveConfiguracoesBatch(
           }
           if (
             String(prepared.secaoId || "") !== String(original.secaoId || "") ||
-            !secoesIguais(prepared.secao, original.secao)
+            !mesmaSecaoTexto(prepared.secao, original.secao)
           ) {
             createAuditLog(
               "Permissão",
@@ -782,10 +850,20 @@ export async function saveConfiguracoesBatch(
   }
 
   if (canUsuarios) {
-    // Mantém auth_index alinhado aos usuários.
+    // Mantém auth_index alinhado aos usuários. Inativo continua em `usuarios`,
+    // mas perde o índice que autoriza leituras pelas security rules.
     for (const u of usersToSave) {
-      if (u.email) {
+      const original = userBlock.original.find((item) => item.re === u.re);
+      if (
+        original?.email &&
+        normalizeEmail(original.email) !== normalizeEmail(u.email)
+      ) {
+        await removeAuthIndex(original.email).catch(() => undefined);
+      }
+      if (u.email && u.ativo !== false) {
         await upsertAuthIndex(u).catch((e) => console.warn("auth_index upsert:", e));
+      } else if (u.email) {
+        await removeAuthIndex(u.email).catch(() => undefined);
       }
     }
     for (const reDel of userBlock.removed) {

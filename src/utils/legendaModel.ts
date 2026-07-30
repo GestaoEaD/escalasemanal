@@ -182,10 +182,31 @@ export function isDiaTrabalhado(legenda: Legenda): boolean {
 }
 
 /**
- * Futuro A.A.: preferir aa.contaDia se definido; senão diaTrabalhado.
- * Ausência = não conta.
+ * Regra oficial do Controle de Frequência derivada da representação consolidada:
+ * - A: afastamento, não entra em 1/2 Diária nem A.A.;
+ * - 0: não soma 1/2 Diária, mas representa um dia trabalhado em A.A.;
+ * - 1, 2 e 3: somam o próprio número em 1/2 Diária e uma ocorrência em A.A.
+ *
+ * Retorna undefined para representações diferentes, que continuam usando as
+ * regras explícitas da legenda (retrocompatibilidade com M, T etc.).
+ */
+export function getRegraConsolidadaNumerica(
+  legenda: Legenda
+): { meiaDiaria: number; contaAA: boolean } | undefined {
+  const consolidada = getRepresentacaoConsolidada(legenda)?.trim().toUpperCase();
+  if (!consolidada) return undefined;
+  if (consolidada === "A") return { meiaDiaria: 0, contaAA: false };
+  if (!/^[0-3]$/.test(consolidada)) return undefined;
+  return { meiaDiaria: Number(consolidada), contaAA: true };
+}
+
+/**
+ * A.A. conta ocorrências de dias trabalhados. A representação consolidada
+ * oficial tem precedência; demais códigos usam aa.contaDia/diaTrabalhado.
  */
 export function contaParaAA(legenda: Legenda): boolean {
+  const consolidada = getRegraConsolidadaNumerica(legenda);
+  if (consolidada) return consolidada.contaAA;
   if (legenda.regras?.aa?.contaDia !== undefined) {
     return legenda.regras.aa.contaDia === true;
   }
@@ -193,10 +214,12 @@ export function contaParaAA(legenda: Legenda): boolean {
 }
 
 /**
- * Futuro 1/2 Diária: só soma se participa === true e valor > 0.
- * Ausência = não participa.
+ * 1/2 Diária soma o valor consolidado 1, 2 ou 3. A e 0 somam zero.
+ * Demais códigos continuam usando meiaDiaria.participa/valor.
  */
 export function getValorMeiaDiaria(legenda: Legenda): number {
+  const consolidada = getRegraConsolidadaNumerica(legenda);
+  if (consolidada) return consolidada.meiaDiaria;
   const meia = legenda.regras?.meiaDiaria;
   if (!meia || meia.participa !== true) return 0;
   const valor = meia.valor;

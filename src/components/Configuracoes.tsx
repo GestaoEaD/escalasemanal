@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from "react";
+﻿import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { db, collection, getDocs, getDoc, doc, query, where } from "../firebase";
 import { Usuario, Colaborador, AuditAlteracao, AuditOperation, Legenda, Secao, Divisao, DIVISAO_EAD_ID } from "../types";
 import {
@@ -31,11 +31,11 @@ import { loadAuditOperations } from "../utils/auditService";
 import {
   saveConfiguracoesBatch,
   normalizeColaborador,
-  reconcileColaboradoresUsuariosSecao,
   type RemocaoCatalogo,
   type TenantLegenda,
 } from "../services/configuracaoService";
 import {
+  contaEmailKey,
   displayUserEmail,
   isValidEmailFormat,
   normalizeEmail,
@@ -915,11 +915,13 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       return;
     }
     if (email) {
-      const emailDuplicado = colaboradores.some(
-        (c) => c.re !== colOriginalRe && normalizeEmail(c.email) === email
+      const conflito = colaboradores.find(
+        (c) => c.re !== colOriginalRe && contaEmailKey(c.email) === contaEmailKey(email)
       );
-      if (emailDuplicado) {
-        alert("Este e-mail Google já está vinculado a outro colaborador.");
+      if (conflito) {
+        alert(
+          `Esta conta Google já está vinculada a ${conflito.postoGrad} ${conflito.nome} (R.E. ${conflito.re}), com o e-mail ${normalizeEmail(conflito.email)}.`
+        );
         return;
       }
     }
@@ -994,6 +996,11 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
 
     const novaRe = String(currentUser.re || "").trim();
     const isNew = userOriginalRe === null;
+    const colaboradorVinculado = colaboradores.find((c) => c.re === novaRe);
+    if (!colaboradorVinculado) {
+      alert("Perfis de acesso só podem ser configurados para colaboradores cadastrados.");
+      return;
+    }
     const targetDivisaoId = String(currentUser.divisaoId || activeDivisaoId);
     const targetSecaoId = String(currentUser.secaoId || "").trim();
     if (!canManageUsuarioInDivisao(usuario, targetDivisaoId)) {
@@ -1039,7 +1046,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
       secaoId: targetSecao.id,
       email: emailCheck.email,
       perfil: currentUser.perfil || "Operador",
-      ativo: currentUser.ativo !== undefined ? currentUser.ativo : true,
+      // Acesso básico deriva da situação do colaborador, nunca deste formulário.
+      ativo: normalizeAtivoFlag(colaboradorVinculado.ativo),
       authProvider: currentUser.authProvider || (emailCheck.email ? "google" : "local"),
       ultimoLogin: currentUser.ultimoLogin ?? null,
       emailVerificado: currentUser.emailVerificado === true,
@@ -1601,9 +1609,68 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
     return filteredColaboradores.slice(startIndex, startIndex + colPerPage);
   }, [filteredColaboradores, colPage, totalColPages]);
 
+  /** Situação do acesso derivado do cadastro do colaborador. */
+  const acessoDoColaborador = useCallback(
+    (col: Colaborador) => {
+      const email = normalizeEmail(col.email);
+      const permissao = usuarios.find((u) => u.re === col.re);
+      if (!normalizeAtivoFlag(col.ativo)) {
+        return { status: "inativo-sem-acesso" as const, permissao };
+      }
+      if (!permissao) {
+        return {
+          status: email ? ("operador-ao-salvar" as const) : ("sem-email" as const),
+          permissao,
+        };
+      }
+      const emailPermissao = normalizeEmail(permissao.email);
+      if (!emailPermissao) return { status: "permissao-sem-email" as const, permissao };
+      if (email && emailPermissao !== email) {
+        return { status: "email-divergente" as const, permissao };
+      }
+      if (permissao.ativo === false) return { status: "operador-ao-salvar" as const, permissao };
+      return { status: "liberado" as const, permissao };
+    },
+    [usuarios]
+  );
+
+  /** Abre o perfil já existente ou prepara uma elevação para o colaborador. */
+  const concederAcesso = useCallback(
+    (col: Colaborador) => {
+      const existente = usuarios.find((u) => u.re === col.re);
+      const divisaoCol = String(col.divisaoId || activeDivisaoId);
+      const secaoCol =
+        col.secaoId ||
+        listSecoesDaDivisao(divisaoCol).find((s) => secoesIguais(s.nome, col.secao))?.id ||
+        "";
+      setCurrentUser({
+        ...existente,
+        re: col.re,
+        postoGrad: col.postoGrad,
+        nomeCompleto: col.nomeCompleto || "",
+        nome: col.nome,
+        email: normalizeEmail(col.email),
+        secao: col.secao,
+        secaoId: secaoCol,
+        divisaoId: divisaoCol,
+        perfil: existente?.perfil || (perfilOptions.includes("Gestor") ? "Gestor" : perfilOptions[0]),
+        ativo: normalizeAtivoFlag(col.ativo),
+        secoesResponsaveisIds: [],
+        authProvider: existente?.authProvider || "google",
+        ultimoLogin: existente?.ultimoLogin ?? null,
+        emailVerificado: existente?.emailVerificado === true,
+      });
+      setUserOriginalRe(existente?.re || null);
+      setActiveTab("usuarios");
+      setUserModalOpen(true);
+    },
+    [activeDivisaoId, listSecoesDaDivisao, perfilOptions, usuarios]
+  );
+
   const filteredUsuarios = useMemo(() => {
-    // Login é por e-mail Google: a lista de permissão mostra só quem já tem e-mail.
-    let list = usuarios.filter((u) => Boolean(normalizeEmail(u.email)));
+    // Mostra também permissões sem e-mail: elas não conseguem entrar e precisam
+    // ficar visíveis para o administrador corrigir ou excluir.
+    let list = usuarios;
     if (userSearch.trim()) {
       const query = userSearch.toLowerCase();
       list = list.filter(
@@ -1774,7 +1841,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <p className="text-xs text-gray-500">
                       Efetivo policial lotado por Divisão e Seção. A lotação determina em quais
                       escalas o militar entra. Inativar remove das escalas, sem retirar eventual
-                      permissão no módulo Permissão.
+                      permissão no módulo Permissão. Informar o e-mail aqui não libera o login:
+                      confira a coluna <b>Acesso ao sistema</b> e conceda a permissão.
                     </p>
                   </div>
                   <button
@@ -1874,6 +1942,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         <th className="px-4 py-3">R.E.</th>
                         <th className="px-4 py-3">Nome de Guerra</th>
                         <th className="px-4 py-3">E-mail Google</th>
+                        <th className="px-4 py-3">Acesso ao sistema</th>
                         <th className="px-4 py-3">Nome Completo</th>
                         <th className="px-4 py-3">Seção</th>
                         <th className="px-4 py-3 text-center">Situação</th>
@@ -1883,11 +1952,12 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <tbody className="divide-y divide-gray-200 bg-white text-gray-900 font-medium">
                       {pagedColaboradores.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum colaborador correspondente encontrado.</td>
+                          <td colSpan={10} className="px-4 py-6 text-center text-gray-400 font-semibold">Nenhum colaborador correspondente encontrado.</td>
                         </tr>
                       ) : (
                         pagedColaboradores.map((col, index) => {
                           const actualIndex = colaboradores.findIndex((c) => c.re === col.re);
+                          const acesso = acessoDoColaborador(col);
                           return (
                             <tr key={col.re} className="hover:bg-gray-50">
                               <td className="px-4 py-3 text-center">
@@ -1921,6 +1991,41 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                   displayUserEmail(col.email)
                                 )}
                               </td>
+                              <td className="px-4 py-3">
+                                {acesso.status === "liberado" && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-green-150 px-2 py-0.5 text-[10px] font-bold text-green-800">
+                                    <Check size={11} /> {(acesso.permissao?.perfil || "Operador").toUpperCase()}
+                                  </span>
+                                )}
+                                {acesso.status === "inativo-sem-acesso" && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-red-150 px-2 py-0.5 text-[10px] font-bold text-red-800">
+                                    INATIVO — SEM ACESSO
+                                  </span>
+                                )}
+                                {acesso.status === "email-divergente" && (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+                                    title={`O login exige ${displayUserEmail(acesso.permissao?.email)}`}
+                                  >
+                                    <AlertCircle size={11} /> LOGIN USA OUTRO E-MAIL
+                                  </span>
+                                )}
+                                {acesso.status === "permissao-sem-email" && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                                    <AlertCircle size={11} /> PERMISSÃO SEM E-MAIL
+                                  </span>
+                                )}
+                                {acesso.status === "operador-ao-salvar" && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                                    OPERADOR AO SALVAR
+                                  </span>
+                                )}
+                                {acesso.status === "sem-email" && (
+                                  <span className="text-[10px] font-semibold text-gray-400">
+                                    Sem e-mail Google
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{col.nomeCompleto || "Não informado"}</td>
                               <td className="px-4 py-3 text-gray-600 font-medium">
                                 {col.secao}
@@ -1936,6 +2041,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 </span>
                               </td>
                               <td className="px-4 py-3 text-right space-x-1">
+                                {canUsuarios && normalizeAtivoFlag(col.ativo) && (
+                                  <button
+                                    onClick={() => concederAcesso(col)}
+                                    className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold cursor-pointer inline-flex items-center gap-1"
+                                    title="Definir perfil elevado ou restaurar Operador"
+                                  >
+                                    <Shield size={11} /> Definir perfil
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => {
                                     setCurrentCol({
@@ -2001,53 +2115,21 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   <div>
                     <h2 className="text-base font-bold text-gray-900">Módulo Permissão</h2>
                     <p className="text-xs text-gray-500">
-                      Conceda acesso ao sistema (Operador, Administrador ou Gestor). Exibe apenas
-                      cadastros com e-mail Google — vínculo do login. Em seguida, as permissões
-                      poderão ser criadas a partir dos colaboradores já cadastrados.
+                      Colaboradores ativos recebem Operador automaticamente; inativos permanecem
+                      cadastrados sem acesso. Use este módulo somente para elevar o perfil a
+                      Gestor, Administrador ou, quando configurado por Gerente, Gerente.
                     </p>
                   </div>
                   <div className="mt-3 sm:mt-0 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() =>
-                        exportUsuariosToExcel(
-                          usuarios.filter((u) => Boolean(normalizeEmail(u.email)))
-                        )
-                      }
+                      onClick={() => exportUsuariosToExcel(usuarios)}
                       className="inline-flex items-center space-x-1.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
                       title="Exportar permissões"
                     >
                       <FileSpreadsheet size={14} />
                       <span>Exportar</span>
                     </button>
-                    <button
-                    id="new-user-btn"
-                    onClick={() => {
-                      const secaoInicial = listSecoesDaDivisao(activeDivisaoId)[0];
-                      setCurrentUser({
-                        re: "",
-                        postoGrad: listPostosDaDivisao(activeDivisaoId)[0]?.sigla || "SD PM",
-                        nomeCompleto: "",
-                        nome: "",
-                        email: "",
-                        secao: secaoInicial?.nome || "",
-                        secaoId: secaoInicial?.id || "",
-                        divisaoId: activeDivisaoId,
-                        perfil: "Operador",
-                        ativo: true,
-                        secoesResponsaveisIds: [],
-                        authProvider: "google",
-                        ultimoLogin: null,
-                        emailVerificado: false,
-                      });
-                      setUserOriginalRe(null);
-                      setUserModalOpen(true);
-                    }}
-                    className="inline-flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-                  >
-                    <Plus size={14} />
-                    <span>Nova Permissão</span>
-                  </button>
                   </div>
                 </div>
 
@@ -2089,7 +2171,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                       {pagedUsuarios.length === 0 ? (
                         <tr>
                           <td colSpan={9} className="px-4 py-6 text-center text-gray-400 font-semibold">
-                            Nenhuma permissão com e-mail Google cadastrado.
+                            Nenhuma permissão cadastrada.
                           </td>
                         </tr>
                       ) : (
@@ -2099,10 +2181,15 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                               <td className="px-4 py-3 text-gray-500 font-mono text-[11px]">{usr.re}</td>
                               <td className="px-4 py-3 font-bold text-gray-800">{usr.nome}</td>
                               <td className="px-4 py-3 text-gray-500 text-[11px] lowercase">
-                                {displayUserEmail(usr.email) === "Não informado" ? (
-                                  <span className="text-gray-400 normal-case">Não informado</span>
-                                ) : (
+                                {normalizeEmail(usr.email) ? (
                                   displayUserEmail(usr.email)
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 normal-case"
+                                    title="Sem e-mail Google não há como entrar: informe o e-mail ou exclua a permissão."
+                                  >
+                                    <AlertCircle size={11} /> SEM E-MAIL — NÃO ACESSA
+                                  </span>
                                 )}
                               </td>
                               <td className="px-4 py-3 text-gray-500 text-[11px]">{usr.nomeCompleto || "Não informado"}</td>
@@ -2150,13 +2237,31 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                                 >
                                   <Edit2 size={13} />
                                 </button>
-                                <button
-                                  onClick={() => requestDelete("usuarios", usr.re, `${usr.postoGrad} ${usr.nome}`)}
-                                  className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center"
-                                  title="Excluir"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+                                {colaboradores.some((c) => c.re === usr.re) ? (
+                                  usr.perfil !== "Operador" && (
+                                    <button
+                                      onClick={() =>
+                                        setUsuarios((prev) =>
+                                          prev.map((u) =>
+                                            u.re === usr.re ? { ...u, perfil: "Operador" } : u
+                                          )
+                                        )
+                                      }
+                                      className="p-1.5 hover:bg-blue-50 text-blue-600 hover:text-blue-900 rounded transition-colors cursor-pointer inline-flex items-center"
+                                      title="Remover elevação e restaurar Operador automático"
+                                    >
+                                      <Shield size={13} />
+                                    </button>
+                                  )
+                                ) : (
+                                  <button
+                                    onClick={() => requestDelete("usuarios", usr.re, `${usr.postoGrad} ${usr.nome}`)}
+                                    className="p-1.5 hover:bg-red-50 text-red-600 hover:text-red-900 rounded transition-colors cursor-pointer inline-flex items-center"
+                                    title="Excluir permissão órfã"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
                               </td>
                           </tr>
                         ))
@@ -2798,8 +2903,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold lowercase"
                   />
                   <p className="mt-1 text-[10px] text-gray-400">
-                    Conta Google de acesso à plataforma. Ao conceder permissão, este e-mail é
-                    aproveitado. Armazenado em minúsculas.
+                    Conta Google do militar, armazenada em minúsculas. Por si só não libera o
+                    acesso: o login depende da permissão no módulo Permissão, que passa a usar
+                    este e-mail. Se já existir permissão, alterar aqui também altera o login.
                   </p>
                 </div>
 
@@ -2901,8 +3007,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Colaborador Ativo</span>
                   </label>
                   <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                    Inativo = fora das escalas. Não remove permissão no módulo Permissão. A lotação
-                    (Divisão + Seção) define em quais escalas o colaborador aparece.
+                    Ativo = Operador automático e presença nas escalas. Inativo = cadastro
+                    preservado, fora das escalas e sem acesso ao sistema.
                   </p>
                 </div>
 
@@ -3203,7 +3309,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                   >
                     {perfilOptions.map((perfil) => (
                       <option key={perfil} value={perfil}>
-                        {perfil}
+                        {perfil === "Operador" ? "Operador (automático)" : perfil}
                       </option>
                     ))}
                   </select>
@@ -3218,13 +3324,16 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                     <input
                       type="checkbox"
                       checked={currentUser.ativo !== false}
-                      onChange={(e) => setCurrentUser({ ...currentUser, ativo: e.target.checked })}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      disabled
+                      readOnly
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 disabled:opacity-60"
                     />
-                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">Permissão Ativa (Acesso Liberado)</span>
+                    <span className="ml-2 text-xs font-bold text-gray-700 uppercase">
+                      Acesso conforme cadastro do colaborador
+                    </span>
                   </label>
                   <p className="mt-1 text-[10px] text-gray-400 leading-snug">
-                    Independente de estar ativo como colaborador na escala.
+                    Ativo libera o acesso; inativo preserva o cadastro e bloqueia o login.
                   </p>
                 </div>
 
@@ -3801,7 +3910,8 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                         className="block w-full border border-gray-300 rounded-lg py-2 px-3 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-900 font-semibold"
                       />
                       <p className="mt-1 text-[10px] text-gray-400">
-                        Valor persistido e exibido/somado no Controle de Frequência após sincronizar com as escalas.
+                        Regra oficial: A não conta; 0 conta apenas um A.A.; 1, 2 e 3 somam
+                        o próprio valor na 1/2 Diária e um dia em A.A.
                       </p>
                     </div>
                   </>
@@ -3810,9 +3920,9 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                 {legendaModalSection === "regras" && (
                   <>
                     <p className="text-[11px] text-gray-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                      Regras futuras de cálculo. Todos os campos são opcionais. A.A. usará
-                      &quot;É dia trabalhado?&quot; quando configurado; 1/2 Diária soma apenas
-                      valores positivos com participação ativa.
+                      Regras adicionais para representações diferentes de A, 0, 1, 2 e 3.
+                      Nos cinco valores oficiais, prevalece automaticamente a regra definida
+                      na aba Representações.
                     </p>
                     <OptionalBoolSelect
                       label="É dia trabalhado?"
@@ -3823,7 +3933,7 @@ export default function Configuracoes({ usuario, onBack, onUsuarioUpdate }: Conf
                           regras: { ...currentLegenda.regras, diaTrabalhado: v },
                         })
                       }
-                      hint="Base futura do A.A. (dias trabalhados)."
+                      hint="Usado somente quando a representação consolidada não for A, 0, 1, 2 ou 3."
                     />
                     <OptionalBoolSelect
                       label="Participa da 1/2 Diária?"

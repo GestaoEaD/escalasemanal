@@ -20,9 +20,12 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   type Firestore,
 } from "firebase/firestore";
 
@@ -236,6 +239,46 @@ async function semear() {
       re: "999",
       nome: "SemDivisao",
       lastSeen: new Date("2026-01-01"),
+    });
+
+    // Cadastro com Gmail pontuado: o Google autentica a mesma caixa sem o ponto.
+    await setDoc(doc(db, "usuarios", "151287-A"), {
+      re: "151287-A",
+      nome: "JOSUE",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "jdsc.historia@gmail.com",
+      emailKey: "jdschistoria@gmail.com",
+      ativo: true,
+    });
+    // Cadastro legado equivalente, ainda sem o campo emailKey.
+    await setDoc(doc(db, "usuarios", "151288-B"), {
+      re: "151288-B",
+      nome: "LEGADO",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "maria.souza@gmail.com",
+      ativo: true,
+    });
+    await setDoc(doc(db, "usuarios", "151289-C"), {
+      re: "151289-C",
+      nome: "INATIVO",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "inativo@gmail.com",
+      emailKey: "inativo@gmail.com",
+      ativo: false,
+    });
+    await setDoc(doc(db, "auth_index", "inativo@gmail.com"), {
+      re: "151289-C",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "inativo@gmail.com",
+      ativo: false,
     });
 
     await setDoc(doc(db, "configuracoes", "gerais"), { nomeOrganizacao: "PMSP" });
@@ -737,6 +780,102 @@ async function main() {
       re: PERFIS.Operador.re,
       lastSeen: serverTimestamp(),
     })
+  );
+
+  console.log("\n=== Login: Gmail com grafia diferente é a mesma conta ===");
+  // Autenticado como jdschistoria@gmail.com; cadastro está com ponto.
+  const dbGmailSemPonto = env
+    .authenticatedContext("151287-A", {
+      email: "jdschistoria@gmail.com",
+      email_verified: true,
+    })
+    .firestore() as unknown as Firestore;
+
+  await verifica("[Gmail sem ponto] achar o próprio cadastro por emailKey", "ALLOW", () =>
+    getDocs(
+      query(
+        collection(dbGmailSemPonto, "usuarios"),
+        where("emailKey", "==", "jdschistoria@gmail.com")
+      )
+    )
+  );
+  await verifica("[Gmail sem ponto] ler o próprio cadastro pontuado", "ALLOW", () =>
+    getDoc(doc(dbGmailSemPonto, "usuarios", "151287-A"))
+  );
+  await verifica("[Gmail sem ponto] NÃO ler cadastro de terceiro", "DENY", () =>
+    getDoc(doc(dbGmailSemPonto, "usuarios", PERFIS.Operador.re))
+  );
+  await verifica("[Gmail sem ponto] criar o próprio auth_index", "ALLOW", () =>
+    setDoc(doc(dbGmailSemPonto, "auth_index", "jdschistoria@gmail.com"), {
+      re: "151287-A",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "jdschistoria@gmail.com",
+    })
+  );
+  await verifica("[Gmail sem ponto] ler seções após indexar", "ALLOW", () =>
+    getDoc(doc(dbGmailSemPonto, "secoes", secaoA1))
+  );
+  await verifica("[Gmail sem ponto] NÃO indexar RE de terceiro", "DENY", () =>
+    setDoc(doc(dbGmailSemPonto, "auth_index", "jdschistoria@gmail.com"), {
+      re: PERFIS.Gerente.re,
+      perfil: "Gerente",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "jdschistoria@gmail.com",
+    })
+  );
+
+  // Cadastro legado sem emailKey: o e-mail literal ainda resolve a identidade.
+  const dbLegado = env
+    .authenticatedContext("151288-B", {
+      email: "mariasouza@gmail.com",
+      email_verified: true,
+    })
+    .firestore() as unknown as Firestore;
+  await verifica("[Legado sem emailKey] ler o próprio cadastro", "ALLOW", () =>
+    getDoc(doc(dbLegado, "usuarios", "151288-B"))
+  );
+  await verifica("[Legado sem emailKey] criar o próprio auth_index", "ALLOW", () =>
+    setDoc(doc(dbLegado, "auth_index", "mariasouza@gmail.com"), {
+      re: "151288-B",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "mariasouza@gmail.com",
+    })
+  );
+
+  const dbInativo = env
+    .authenticatedContext("151289-C", {
+      email: "inativo@gmail.com",
+      email_verified: true,
+    })
+    .firestore() as unknown as Firestore;
+  await verifica("[Inativo] NÃO acessar dados da Divisão", "DENY", () =>
+    getDoc(doc(dbInativo, "secoes", secaoA1))
+  );
+  await verifica("[Inativo] NÃO reativar o próprio auth_index", "DENY", () =>
+    setDoc(doc(dbInativo, "auth_index", "inativo@gmail.com"), {
+      re: "151289-C",
+      perfil: "Operador",
+      divisaoId: DIV_A,
+      secaoId: secaoA1,
+      email: "inativo@gmail.com",
+      ativo: true,
+    })
+  );
+
+  // Fora do Gmail, ponto distingue endereços: não pode virar a mesma conta.
+  const dbOutroDominio = env
+    .authenticatedContext("999999-9", {
+      email: "opx@x.com",
+      email_verified: true,
+    })
+    .firestore() as unknown as Firestore;
+  await verifica("[Outro domínio] NÃO ler cadastro de e-mail parecido", "DENY", () =>
+    getDoc(doc(dbOutroDominio, "usuarios", PERFIS.Operador.re))
   );
 
   await env.cleanup();

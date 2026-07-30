@@ -144,29 +144,36 @@ export default function FrequenciaEditor({
         forceResync: true,
       });
       setLegendas(legs);
-      let next = result.doc;
+      const rowsRecalculadas = recalcAllRows(result.doc.rows, legs);
+      const totaisAlterados = rowsRecalculadas.some((row, index) => {
+        const anterior = result.doc.rows[index];
+        return (
+          !anterior ||
+          row.meiaDiaria !== anterior.meiaDiaria ||
+          row.aa !== anterior.aa
+        );
+      });
+      let next = { ...result.doc, rows: rowsRecalculadas };
       const st = normalizeEscalaStatus(next.status);
       const mayEdit = canEditFrequencia(usuario, year, month, st);
-      if (result.synced && mayEdit) {
-        next = {
-          ...next,
-          rows: recalcAllRows(next.rows, legs),
-        };
-        // Persiste sincronização do cadastro (novos/movidos/inativos) no relatório.
+      if ((result.synced || totaisAlterados) && mayEdit) {
+        // Persiste sincronização e também corrige totais de documentos antigos
+        // quando as regras consolidadas das legendas forem alteradas.
         next = await saveControleFrequencia(next, usuario);
-        await auditSyncFrequencia(next, usuario);
+        if (result.synced) {
+          await auditSyncFrequencia(next, usuario);
+        }
         setSuccess(
-          result.created
-            ? "Controle criado e sincronizado com as escalas e o cadastro."
-            : "Controle atualizado com colaboradores da seção e escalas."
+          result.synced
+            ? result.created
+              ? "Controle criado e sincronizado com as escalas e o cadastro."
+              : "Controle atualizado com colaboradores da seção e escalas."
+            : "Totais atualizados conforme as regras atuais das legendas."
         );
         setDocData(next);
         setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);
       } else {
-        if (result.synced && !mayEdit) {
-          next = { ...next, rows: recalcAllRows(next.rows, legs) };
-        }
         setDocData(next);
         setBaselineDoc(JSON.parse(JSON.stringify(next)));
         setDirty(false);

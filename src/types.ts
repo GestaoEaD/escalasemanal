@@ -76,6 +76,12 @@ export interface Usuario {
    * Usuários legados podem estar sem valor e não conseguem entrar.
    */
   email?: string;
+  /**
+   * Identidade da conta Google derivada do e-mail (`contaEmailKey`): no Gmail,
+   * pontos e "+alias" são ignorados. É por este campo que o login localiza o
+   * cadastro, porque o Google pode devolver o endereço em outra grafia.
+   */
+  emailKey?: string;
   /** Preferencialmente "google" após autenticação Firebase. */
   authProvider?: AuthProvider;
   /** Último login via Google (ISO). */

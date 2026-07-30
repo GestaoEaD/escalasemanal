@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import {
   buildLegendaLookup,
+  calcAAFromCelulas,
+  calcMeiaDiariaFromCelulas,
   convertEscalaValorToFrequencia,
 } from "../src/utils/frequenciaCalculo";
 import { syncFrequenciaRows } from "../src/utils/frequenciaSync";
@@ -121,6 +123,61 @@ check("converte EN da Semanal para consolidada 1", () => {
   assert.equal(rows[0]?.dias?.["05"]?.valor, "1");
   assert.equal(rows[0]?.dias?.["05"]?.origem, "escala_semanal");
   assert.equal(rows[0]?.dias?.["05"]?.valorEscalaOriginal, "EN");
+});
+
+check("totais seguem A, 0, 1, 2 e 3 configurados nas legendas", () => {
+  const regrasConsolidadas = [
+    legenda({
+      sigla: "AFAST",
+      representacoes: { escalaSemanal: "AFAST", escalaConsolidada: "A" },
+      // Regras conflitantes comprovam que a consolidada oficial prevalece.
+      regras: { diaTrabalhado: true, meiaDiaria: { participa: true, valor: 9 }, aa: { contaDia: true } },
+    }),
+    legenda({
+      sigla: "ZERO",
+      representacoes: { escalaSemanal: "ZERO", escalaConsolidada: "0" },
+      regras: { diaTrabalhado: false, meiaDiaria: { participa: true, valor: 9 }, aa: { contaDia: false } },
+    }),
+    ...[1, 2, 3].map((valor) =>
+      legenda({
+        sigla: `V${valor}`,
+        representacoes: {
+          escalaSemanal: `V${valor}`,
+          escalaConsolidada: String(valor),
+        },
+        regras: { diaTrabalhado: false, aa: { contaDia: false } },
+      })
+    ),
+  ];
+  const lookup = buildLegendaLookup(regrasConsolidadas);
+  const dias = {
+    "01": { valor: "A" },
+    "02": { valor: "0" },
+    "03": { valor: "1" },
+    "04": { valor: "2" },
+    "05": { valor: "3" },
+  } as any;
+
+  assert.equal(calcMeiaDiariaFromCelulas(dias, lookup), 6);
+  assert.equal(calcAAFromCelulas(dias, lookup), 4);
+});
+
+check("AA conta quantidade, não a soma dos valores numéricos", () => {
+  const numericas = [1, 2, 3].map((valor) =>
+    legenda({
+      sigla: `N${valor}`,
+      representacoes: { escalaSemanal: `N${valor}`, escalaConsolidada: String(valor) },
+    })
+  );
+  const lookup = buildLegendaLookup(numericas);
+  const dias = {
+    "01": { valor: "1" },
+    "02": { valor: "2" },
+    "03": { valor: "3" },
+  } as any;
+
+  assert.equal(calcMeiaDiariaFromCelulas(dias, lookup), 6);
+  assert.equal(calcAAFromCelulas(dias, lookup), 3);
 });
 
 check("remapeia célula antiga EN → 1 mesmo sem valor novo na escala", () => {

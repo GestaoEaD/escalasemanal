@@ -12,9 +12,36 @@ service cloud.firestore {
       return request.auth.token.email;
     }
 
+    // Identidade da conta Google: no Gmail, pontos e sufixo "+alias" não fazem
+    // parte do endereço, então "joao.silva@gmail.com" e "joaosilva@gmail.com"
+    // são a mesma caixa. O token pode chegar em qualquer variação, por isso a
+    // comparação com o cadastro é feita sempre por esta chave.
+    function emailKeyDe(e) {
+      return e.split('@').size() != 2
+        ? e
+        : (e.split('@')[1].matches('gmail\\.com|googlemail\\.com')
+            ? e.split('@')[0].split('\\+')[0].replace('\\.', '') + '@gmail.com'
+            : e);
+    }
+
+    function tokenEmailKey() {
+      return emailKeyDe(authEmail());
+    }
+
+    // Em consultas (`list`) só os campos filtrados são legíveis: tocar em outro
+    // campo é erro de avaliação. Os dois termos existem por isso — a consulta do
+    // login filtra `emailKey`, o termo literal cobre leitura por documento e
+    // cadastros legados sem `emailKey`. O erro de um termo é absorvido pelo `||`,
+    // então cada forma de consulta é autorizada pelo termo que lhe corresponde.
+    function ehDonoDoCadastro(data) {
+      return data.get('emailKey', '') == tokenEmailKey()
+        || emailKeyDe(data.get('email', '')) == tokenEmailKey();
+    }
+
     function isRegistered() {
       return signedIn()
-        && exists(/databases/$(database)/documents/auth_index/$(authEmail()));
+        && exists(/databases/$(database)/documents/auth_index/$(authEmail()))
+        && callerIndex().get('ativo', true) == true;
     }
 
     function callerIndex() {
@@ -313,7 +340,8 @@ service cloud.firestore {
       return request.resource.data.keys().hasAll(['re', 'perfil', 'divisaoId', 'email'])
         && request.resource.data.email == authEmail()
         && exists(/databases/$(database)/documents/usuarios/$(request.resource.data.re))
-        && usuarioDoc(request.resource.data.re).email == authEmail()
+        && ehDonoDoCadastro(usuarioDoc(request.resource.data.re))
+        && usuarioDoc(request.resource.data.re).get('ativo', true) == true
         && usuarioDoc(request.resource.data.re).perfil == request.resource.data.perfil
         && usuarioDoc(request.resource.data.re).divisaoId == request.resource.data.divisaoId
         && usuarioDoc(request.resource.data.re).get('secaoId', request.resource.data.get('secaoId', ''))
@@ -327,7 +355,8 @@ service cloud.firestore {
         && request.resource.data.divisaoId == callerDivisao()
         && request.resource.data.perfil != 'Gerente'
         && exists(/databases/$(database)/documents/usuarios/$(request.resource.data.re))
-        && usuarioDoc(request.resource.data.re).email == email
+        && emailKeyDe(usuarioDoc(request.resource.data.re).get('email', '')) == emailKeyDe(email)
+        && usuarioDoc(request.resource.data.re).get('ativo', true) == true
         && usuarioDoc(request.resource.data.re).divisaoId == callerDivisao()
         && usuarioDoc(request.resource.data.re).perfil == request.resource.data.perfil
         && (
@@ -406,8 +435,7 @@ service cloud.firestore {
         || (
           signedIn()
           && !docInexistente()
-          && resource.data.keys().hasAny(['email'])
-          && resource.data.email == authEmail()
+          && ehDonoDoCadastro(resource.data)
         );
       allow create: if (isGerente() && sectionCreateOk())
         || (isAdmin() && sectionCreateOk() && adminUsuarioPerfilOk());
@@ -415,12 +443,11 @@ service cloud.firestore {
         || (isAdmin()
           && sectionUpdateOk()
           && adminUsuarioPerfilOk()
-          && !(resource.data.keys().hasAny(['email']) && resource.data.email == authEmail()))
+          && !ehDonoDoCadastro(resource.data))
         || (
           signedIn()
-          && resource.data.keys().hasAny(['email'])
-          && resource.data.email == authEmail()
-          && request.resource.data.email == authEmail()
+          && ehDonoDoCadastro(resource.data)
+          && ehDonoDoCadastro(request.resource.data)
           && request.resource.data.perfil == resource.data.perfil
           && request.resource.data.divisaoId == resource.data.divisaoId
           && request.resource.data.secaoId == resource.data.secaoId

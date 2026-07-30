@@ -48,8 +48,10 @@ import { canAccessSecao } from "../utils/secaoContext";
 import { canEnterDivisao } from "../utils/divisaoContext";
 import {
   approveFrequencia,
+  loadLegendas,
   requestFrequenciaRevision,
 } from "../utils/frequenciaService";
+import { recalcAllRows } from "../utils/frequenciaCalculo";
 import { SolicitacaoAprovacao } from "../types";
 import StatusBadge from "./StatusBadge";
 import {
@@ -512,7 +514,17 @@ export default function AprovacaoPage({
           setGateError("Você não possui acesso a esta Divisão/Seção.");
           return;
         }
-        setEscala(docData);
+        const documentoExibido =
+          resolvedTipo === "frequencia"
+            ? ({
+                ...docData,
+                rows: recalcAllRows(
+                  (docData as unknown as ControleFrequenciaDocument).rows || [],
+                  await loadLegendas(docDiv)
+                ),
+              } as unknown as typeof docData)
+            : docData;
+        setEscala(documentoExibido);
         if (!isApprovalRequestOpen(docData)) {
           setConsultaOnly(true);
         }

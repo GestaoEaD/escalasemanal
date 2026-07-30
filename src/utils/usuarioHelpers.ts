@@ -15,6 +15,21 @@ export function isValidEmailFormat(email: string): boolean {
   return EMAIL_REGEX.test(normalized);
 }
 
+/**
+ * Chave de identidade da conta: no Gmail, pontos e sufixos "+alias" não fazem
+ * parte do endereço, então `joao.silva@gmail.com` e `joaosilva@gmail.com` são a
+ * mesma caixa. Serve para detectar duplicidade — nunca para gravar, porque o
+ * login compara o e-mail literal devolvido pelo Google.
+ */
+export function contaEmailKey(email: string | null | undefined): string {
+  const normalized = normalizeEmail(email);
+  const [local, domain] = normalized.split("@");
+  if (!local || !domain) return normalized;
+  if (domain !== "gmail.com" && domain !== "googlemail.com") return normalized;
+  const base = local.split("+")[0].replace(/\./g, "");
+  return `${base}@gmail.com`;
+}
+
 /** Exibe e-mail na UI; usuários antigos sem valor mostram placeholder. */
 export function displayUserEmail(email?: string | null): string {
   const n = normalizeEmail(email);
@@ -30,6 +45,7 @@ export function prepareUsuarioDocument(user: Usuario): Usuario {
   return {
     ...user,
     email,
+    emailKey: contaEmailKey(email),
     divisaoId: String(user.divisaoId || "").trim(),
     // secaoId permanece como lotação; ACL é por Divisão (campo legado não é mais fonte de autorização).
     secoesResponsaveisIds: [],
@@ -45,11 +61,14 @@ export function prepareUsuarioDocument(user: Usuario): Usuario {
 export async function markUsuarioGoogleLogin(user: Usuario): Promise<void> {
   const id = user.uid || user.re;
   if (!id) return;
+  const email = normalizeEmail(user.email);
   const payload = prepareFirestoreWrite(`usuarios/${id}`, {
     authProvider: "google",
     emailVerificado: true,
     ultimoLogin: new Date().toISOString(),
-    email: normalizeEmail(user.email),
+    email,
+    // Preenche o campo em cadastros legados, que só tinham `email`.
+    emailKey: contaEmailKey(email),
   });
   await updateDoc(doc(db, "usuarios", id), payload);
 }
@@ -76,11 +95,18 @@ export function validateUsuarioEmail(options: {
   }
 
   if (email) {
-    const duplicated = options.existingUsers.some(
-      (u) => u.re !== options.re && normalizeEmail(u.email) === email
+    const key = contaEmailKey(email);
+    const conflito = options.existingUsers.find(
+      (u) => u.re !== options.re && contaEmailKey(u.email) === key
     );
-    if (duplicated) {
-      return { ok: false, message: "Este e-mail já está vinculado a outro usuário." };
+    if (conflito) {
+      const mesmaEscrita = normalizeEmail(conflito.email) === email;
+      return {
+        ok: false,
+        message: mesmaEscrita
+          ? `Este e-mail já está vinculado à permissão de ${conflito.postoGrad} ${conflito.nome} (R.E. ${conflito.re}). Ajuste ou exclua aquela permissão antes.`
+          : `Esta é a mesma conta Google de ${conflito.postoGrad} ${conflito.nome} (R.E. ${conflito.re}), que usa ${normalizeEmail(conflito.email)} — no Gmail pontos e "+alias" não diferenciam a caixa.`,
+      };
     }
   }
 

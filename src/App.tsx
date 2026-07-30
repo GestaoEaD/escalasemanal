@@ -21,7 +21,7 @@ import {
   toSessionUser,
   writeSession,
 } from "./utils/sessionService";
-import { signOutGoogle } from "./utils/googleAuthService";
+import { getCurrentAuthEmail, signOutGoogle } from "./utils/googleAuthService";
 import { markUsuarioGoogleLogin } from "./utils/usuarioHelpers";
 import { resolveActiveDivisaoId } from "./utils/divisaoContext";
 import {
@@ -99,6 +99,14 @@ export default function App() {
     let cancelled = false;
     (async () => {
       const result = await restoreSession();
+      if (cancelled) return;
+      if (result.usuario && result.usuario.ativo !== false) {
+        // Reconstrói o índice se ele tiver sido perdido ou gravado com outra
+        // grafia da conta: sem ele as rules recusam qualquer leitura.
+        await upsertAuthIndex(result.usuario, getCurrentAuthEmail()).catch((err) =>
+          console.warn("Falha ao gravar auth_index:", err)
+        );
+      }
       if (cancelled) return;
       setUsuario(result.usuario);
       setAuthPhase(result.phase);
@@ -314,7 +322,7 @@ export default function App() {
     }
   };
 
-  const handleLoginSuccess = (user: Usuario) => {
+  const handleLoginSuccess = async (user: Usuario) => {
     const sessionUser = toSessionUser({
       ...user,
       authProvider: "google",
@@ -323,12 +331,14 @@ export default function App() {
       activeDivisaoId: "",
       activeSecaoId: "",
     });
+    // Antes de liberar a tela: as rules exigem auth_index/{conta} em toda
+    // leitura, então gravar depois deixaria a primeira carga sem dados.
+    await upsertAuthIndex(sessionUser, getCurrentAuthEmail()).catch((err) =>
+      console.warn("Falha ao gravar auth_index:", err)
+    );
     writeSession(sessionUser);
     setUsuario(sessionUser);
     setAuthPhase("authenticated");
-    void upsertAuthIndex(sessionUser).catch((err) =>
-      console.warn("Falha ao gravar auth_index:", err)
-    );
     void markUsuarioGoogleLogin(sessionUser).catch((err) =>
       console.warn("Falha ao atualizar metadados de login Google:", err)
     );

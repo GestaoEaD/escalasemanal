@@ -13,8 +13,16 @@ export function authIndexDocId(email: string | null | undefined): string | null 
   return e || null;
 }
 
-export async function upsertAuthIndex(usuario: Usuario): Promise<void> {
-  const email = authIndexDocId(usuario.email);
+/**
+ * @param contaAutenticada e-mail exatamente como o Google devolveu. As rules
+ * localizam o índice por `auth_index/{token.email}`, então o documento precisa
+ * usar essa grafia — que pode diferir da cadastrada em contas Gmail.
+ */
+export async function upsertAuthIndex(
+  usuario: Usuario,
+  contaAutenticada?: string | null
+): Promise<void> {
+  const email = authIndexDocId(contaAutenticada) || authIndexDocId(usuario.email);
   if (!email) return;
   const payload = {
     email,

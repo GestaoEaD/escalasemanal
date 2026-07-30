@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from "motion/react";
 import React, { useState } from "react";
 
 interface LoginProps {
-  onLoginSuccess: (user: Usuario) => void;
+  onLoginSuccess: (user: Usuario) => void | Promise<void>;
 }
 
 function GoogleIcon({ className }: { className?: string }) {
@@ -45,8 +45,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [message, setMessage] = useState<FriendlyAuthMessage | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
-  const showKind = (kind: GoogleAuthErrorKind) => {
-    setMessage(getGoogleAuthErrorMessage(kind));
+  const showKind = (kind: GoogleAuthErrorKind, contaUsada?: string | null) => {
+    setMessage(getGoogleAuthErrorMessage(kind, contaUsada));
   };
 
   const handleGoogleLogin = async () => {
@@ -61,13 +61,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       } catch (err) {
         console.warn("Falha ao consultar cadastro após login Google:", err);
         await signOutGoogle();
-        showKind("network");
+        showKind("network", email);
         return;
       }
 
       if (!userData) {
         await signOutGoogle();
-        showKind("not_registered");
+        showKind("not_registered", email);
         void auditAuth(
           "LOGIN_FALHA",
           {
@@ -86,11 +86,26 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         return;
       }
 
-      onLoginSuccess({
+      if (userData.ativo === false) {
+        await signOutGoogle();
+        showKind("inactive", email);
+        void auditAuth(
+          "LOGIN_FALHA",
+          userData,
+          "Colaborador inativo — acesso bloqueado"
+        ).catch(() => undefined);
+        return;
+      }
+
+      // Aguarda a entrada concluir (inclui o índice de acesso) para o botão não
+      // voltar ao estado normal antes de a sessão estar utilizável.
+      await onLoginSuccess({
         ...userData,
         uid: userData.uid || userData.re,
         perfil: userData.perfil || "Operador",
-        email,
+        // Mantém o e-mail como cadastrado: a conta autenticada pode chegar em
+        // outra grafia (Gmail ignora pontos) e o cadastro não deve ser reescrito.
+        email: userData.email || email,
         authProvider: "google",
         emailVerificado: true,
         photoURL,
